@@ -1,0 +1,680 @@
+/**
+ * APP DE GESTIÓN DE LOGÍSTICA
+ * Versión Definitiva: Sincronización + Acordeón + Modales y Mapa Restaurados
+ */
+
+import React, { useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { WebView } from 'react-native-webview';
+
+// ─────────────────────────────────────────────
+// TIPOS
+// ─────────────────────────────────────────────
+
+interface Chofer {
+  id: number;
+  nombre: string;
+  dni: string;
+  celular: string;
+  direccion: string;
+  fechaIngreso: string;
+  zona: string[];
+  vehiculo: string[];
+  condicion: string;
+}
+
+interface Recorrido {
+  localidad: string;
+  idChofer: number;
+  pqteDia: number;
+  porFuera: number;
+  entregados: number;
+}
+
+type PantallaActual = 'recorridos' | 'choferes' | 'mapa';
+type ZonaKey = 'OESTE' | 'SUR' | 'NORTE' | 'CABA';
+
+// ─────────────────────────────────────────────
+// CONSTANTES Y DATOS INICIALES
+// ─────────────────────────────────────────────
+
+const ZONAS: ZonaKey[] = ['OESTE', 'SUR', 'NORTE', 'CABA'];
+const VEHICULOS = ['SUV', 'UTILITARIO', 'AUTO'];
+const CONDICIONES = ['TITULAR', 'SUPLENTE', 'COLECTADOR'];
+
+const ZONA_COLORES: Record<ZonaKey, string> = {
+  OESTE: '#3b82f6', SUR: '#10b981', NORTE: '#f59e0b', CABA: '#8b5cf6',
+};
+
+const ZONA_ICONOS: Record<ZonaKey, string> = {
+  OESTE: '⬅️', SUR: '⬇️', NORTE: '⬆️', CABA: '🏙️',
+};
+
+const CHOFERES_INICIALES: Chofer[] = [
+  { id: 105, nombre: 'Cacho', dni: '20.123.456', celular: '11-2233-4455', direccion: 'Av. Rivadavia 12000', fechaIngreso: '10/01/2024', zona: ['OESTE'], vehiculo: ['UTILITARIO'], condicion: 'TITULAR' },
+  { id: 250, nombre: 'Juan', dni: '30.456.789', celular: '11-9988-7766', direccion: 'Calle Falsa 123', fechaIngreso: '15/02/2024', zona: ['CABA'], vehiculo: ['AUTO'], condicion: 'SUPLENTE' },
+];
+
+const RECORRIDOS_INICIALES: Record<ZonaKey, Recorrido[]> = {
+  OESTE: [
+    { localidad: 'San Justo',  idChofer: 105, pqteDia: 15, porFuera: 5, entregados: 20 },
+    { localidad: 'Morón',      idChofer: 250, pqteDia: 16, porFuera: 2, entregados: 18 },
+  ],
+  SUR: [
+    { localidad: 'Avellaneda', idChofer: 301, pqteDia: 19, porFuera: 3, entregados: 22 },
+  ],
+  NORTE: [
+    { localidad: 'San Isidro', idChofer: 503, pqteDia: 17, porFuera: 4, entregados: 21 },
+  ],
+  CABA: [
+    { localidad: 'Palermo',    idChofer: 705, pqteDia: 11, porFuera: 6, entregados: 17 },
+  ],
+};
+
+const NUEVO_CHOFER_DEFAULT: Chofer = {
+  id: 0, nombre: '', dni: '', celular: '', direccion: '', fechaIngreso: '', zona: [], vehiculo: [], condicion: 'SUPLENTE',
+};
+
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+
+const calcularPorcentaje = (r: Recorrido): string => {
+  const suma = r.pqteDia + r.porFuera;
+  if (suma === 0) return '0%';
+  return ((r.entregados / suma) * 100).toFixed(1) + '%';
+};
+
+const formatearFecha = (texto: string): string => {
+  const nums = texto.replace(/\D/g, '');
+  if (nums.length <= 2) return nums;
+  if (nums.length <= 4) return `${nums.slice(0, 2)}/${nums.slice(2)}`;
+  return `${nums.slice(0, 2)}/${nums.slice(2, 4)}/${nums.slice(4, 8)}`;
+};
+
+// ─────────────────────────────────────────────
+// COMPONENTE: SELECTOR CHIPS
+// ─────────────────────────────────────────────
+
+interface SelectorChipsProps {
+  opciones: string[];
+  seleccionados: string | string[];
+  multi?: boolean;
+  onToggle: (valor: string) => void;
+  colorActivo?: string;
+}
+
+const SelectorChips: React.FC<SelectorChipsProps> = ({ opciones, seleccionados, multi = false, onToggle, colorActivo = '#3b82f6' }) => {
+  const isActivo = (op: string) => multi ? (seleccionados as string[]).includes(op) : seleccionados === op;
+  return (
+    <View style={S.selectorRow}>
+      {opciones.map(op => (
+        <TouchableOpacity key={op} style={[S.chip, isActivo(op) && { backgroundColor: colorActivo, borderColor: colorActivo }]} onPress={() => onToggle(op)}>
+          <Text style={S.chipTexto}>{op}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+};
+
+// ─────────────────────────────────────────────
+// COMPONENTE: TABLA DE RECORRIDOS (SINCRONIZADA)
+// ─────────────────────────────────────────────
+
+interface TablaZonaProps {
+  zona: ZonaKey;
+  datos: Recorrido[];
+  choferes: Chofer[];
+  visible: boolean;
+  onToggle: (zona: ZonaKey) => void;
+  onActualizar: (zona: ZonaKey, index: number, campo: string, valor: string) => void;
+}
+
+const TablaZona: React.FC<TablaZonaProps> = ({ zona, datos, choferes, visible, onToggle, onActualizar }) => {
+  const color = ZONA_COLORES[zona];
+
+  return (
+    <View style={S.tablaContainer}>
+      <TouchableOpacity activeOpacity={0.75} onPress={() => onToggle(zona)} style={[S.zonaHeaderRow, { borderLeftColor: color }]}>
+        <Text style={[S.zonaFlecha, { color }]}>{visible ? '▼' : '▶'}</Text>
+        <Text style={[S.zonaHeader, { color }]}>ZONA {zona}</Text>
+        <View style={[S.zonaBadge, { backgroundColor: color + '22', borderColor: color + '44' }]}>
+          <Text style={[S.zonaBadgeTexto, { color }]}>{datos.length} rutas</Text>
+        </View>
+      </TouchableOpacity>
+
+      {visible && (
+        <ScrollView horizontal style={S.scrollHorizontal} showsHorizontalScrollIndicator={false}>
+          <View>
+            <View style={[S.filaTabla, S.filaHeader]}>
+              {['LOCALIDAD', 'ID', 'CHOFER', 'PQTE DÍA', 'POR FUERA', 'ENTREGADOS', '% DEL DÍA'].map(h => (
+                <View key={h} style={S.celdaHeader}><Text style={S.textoHeader}>{h}</Text></View>
+              ))}
+            </View>
+
+            {datos.map((rec, i) => {
+              // BÚSQUEDA EN VIVO (SINCRONIZACIÓN)
+              const choferEncontrado = choferes.find(c => c.id === rec.idChofer);
+              const nombreChofer = choferEncontrado ? choferEncontrado.nombre : 'Sin Asignar';
+
+              return (
+                <View key={i} style={[S.filaTabla, i % 2 === 1 && S.filaAlternada]}>
+                  <View style={S.celda}><Text style={S.textoCelda}>{rec.localidad}</Text></View>
+                  <View style={S.celda}>
+                    <TextInput
+                      style={[S.inputTabla, { color: '#60a5fa', fontWeight: 'bold' }]}
+                      keyboardType="numeric"
+                      value={rec.idChofer ? rec.idChofer.toString() : ''}
+                      placeholder="ID"
+                      placeholderTextColor="#334155"
+                      onChangeText={v => onActualizar(zona, i, 'idChofer', v)}
+                      selectTextOnFocus
+                    />
+                  </View>
+                  <View style={S.celda}>
+                    <Text style={[S.textoCelda, !choferEncontrado && { color: '#64748b', fontStyle: 'italic' }]}>
+                      {nombreChofer}
+                    </Text>
+                  </View>
+                  <View style={S.celda}><TextInput style={S.inputTabla} keyboardType="numeric" value={rec.pqteDia.toString()} onChangeText={v => onActualizar(zona, i, 'pqteDia', v)} selectTextOnFocus/></View>
+                  <View style={S.celda}><TextInput style={S.inputTabla} keyboardType="numeric" value={rec.porFuera.toString()} onChangeText={v => onActualizar(zona, i, 'porFuera', v)} selectTextOnFocus/></View>
+                  <View style={S.celda}><TextInput style={S.inputTabla} keyboardType="numeric" value={rec.entregados.toString()} onChangeText={v => onActualizar(zona, i, 'entregados', v)} selectTextOnFocus/></View>
+                  <View style={S.celda}><Text style={[S.porcentaje, { color }]}>{calcularPorcentaje(rec)}</Text></View>
+                </View>
+              );
+            })}
+          </View>
+        </ScrollView>
+      )}
+    </View>
+  );
+};
+
+// ─────────────────────────────────────────────
+// COMPONENTE: FICHA TÉCNICA DEL CHOFER
+// ─────────────────────────────────────────────
+
+interface FichaTecnicaProps {
+  chofer: Chofer;
+  rutasAsignadas: string[];
+  onActualizar: (id: number, campo: keyof Chofer, valor: string | number | string[]) => void;
+  onGuardar: () => void;
+}
+
+const FichaTecnica: React.FC<FichaTecnicaProps> = ({ chofer, rutasAsignadas, onActualizar, onGuardar }) => (
+  <View style={S.fichaTecnica}>
+    <View style={S.divisor} />
+
+    {/* PLUS: Sincronización Inversa */}
+    <Text style={S.labelRutas}>RUTAS ASIGNADAS (SINCRONIZADO)</Text>
+    <View style={S.rutasContainer}>
+      {rutasAsignadas.length > 0 ? (
+        rutasAsignadas.map((r, i) => <Text key={i} style={S.rutaItem}>🚚 {r}</Text>)
+      ) : (
+        <Text style={S.rutaVacia}>No tiene recorridos asignados hoy.</Text>
+      )}
+    </View>
+
+    <View style={S.fila}>
+      <View style={{ flex: 1, marginRight: 10 }}>
+        <Text style={S.label}>ID</Text>
+        <TextInput style={S.inputFicha} keyboardType="numeric" value={chofer.id.toString()} onChangeText={v => onActualizar(chofer.id, 'id', v)} selectTextOnFocus />
+      </View>
+      <View style={{ flex: 2 }}>
+        <Text style={S.label}>NOMBRE COMPLETO</Text>
+        <TextInput style={S.inputFicha} value={chofer.nombre} onChangeText={v => onActualizar(chofer.id, 'nombre', v)} />
+      </View>
+    </View>
+
+    <View style={S.fila}>
+      <View style={{ flex: 1, marginRight: 10 }}>
+        <Text style={S.label}>CELULAR</Text>
+        <TextInput style={S.inputFicha} keyboardType="phone-pad" value={chofer.celular} onChangeText={v => onActualizar(chofer.id, 'celular', v)} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={S.label}>DNI</Text>
+        <TextInput style={S.inputFicha} keyboardType="numeric" value={chofer.dni} onChangeText={v => onActualizar(chofer.id, 'dni', v)} selectTextOnFocus />
+      </View>
+    </View>
+
+    <Text style={S.label}>DIRECCIÓN</Text>
+    <TextInput style={S.inputFicha} value={chofer.direccion} onChangeText={v => onActualizar(chofer.id, 'direccion', v)} />
+
+    <Text style={S.label}>FECHA INGRESO</Text>
+    <TextInput style={S.inputFicha} value={chofer.fechaIngreso} onChangeText={v => onActualizar(chofer.id, 'fechaIngreso', formatearFecha(v))} maxLength={10} placeholder="DD/MM/YYYY" placeholderTextColor="#64748b" />
+
+    <Text style={S.label}>ZONA PREFERENCIAL</Text>
+    <SelectorChips opciones={ZONAS} seleccionados={chofer.zona} multi onToggle={z => { const actual = chofer.zona; onActualizar(chofer.id, 'zona', actual.includes(z) ? actual.filter(x => x !== z) : [...actual, z]); }} />
+
+    <Text style={S.label}>VEHÍCULO</Text>
+    <SelectorChips opciones={VEHICULOS} seleccionados={chofer.vehiculo} multi onToggle={v => { const actual = chofer.vehiculo; onActualizar(chofer.id, 'vehiculo', actual.includes(v) ? actual.filter(x => x !== v) : [...actual, v]); }} colorActivo="#10b981" />
+
+    <Text style={S.label}>CONDICIÓN</Text>
+    <SelectorChips opciones={CONDICIONES} seleccionados={chofer.condicion} onToggle={c => onActualizar(chofer.id, 'condicion', c)} colorActivo="#f59e0b" />
+
+    <TouchableOpacity style={S.botonGuardar} onPress={onGuardar}>
+      <Text style={S.botonGuardarTexto}>✓  Guardar Cambios</Text>
+    </TouchableOpacity>
+  </View>
+);
+
+// ─────────────────────────────────────────────
+// COMPONENTE: PANTALLA MAPA (RESTAURADO)
+// ─────────────────────────────────────────────
+
+const MapaScreen: React.FC = () => {
+  const [busqueda, setBusqueda] = useState('');
+  const [url, setUrl] = useState('https://www.google.com/maps');
+
+  return (
+    <View style={{ flex: 1, padding: 15 }}>
+      <View style={{ flexDirection: 'row', marginBottom: 15 }}>
+        <TextInput
+          style={S.inputMapa}
+          placeholder="🔍 Ej: Ruta 3 km 35..."
+          placeholderTextColor="#64748b"
+          value={busqueda}
+          onChangeText={setBusqueda}
+        />
+        <TouchableOpacity
+          style={S.botonBuscarMapa}
+          onPress={() => setUrl('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(busqueda))}
+        >
+          <Text style={S.botonBuscarMapaTexto}>Buscar</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={S.mapaContainer}>
+        <WebView source={{ uri: url }} style={{ flex: 1 }} />
+      </View>
+    </View>
+  );
+};
+
+// ─────────────────────────────────────────────
+// COMPONENTE: MODAL AGREGAR RECORRIDO (RESTAURADO)
+// ─────────────────────────────────────────────
+
+interface ModalRecorridoProps {
+  visible: boolean;
+  onCerrar: () => void;
+  onGuardar: (zona: ZonaKey, localidad: string) => void;
+}
+
+const ModalAgregarRecorrido: React.FC<ModalRecorridoProps> = ({ visible, onCerrar, onGuardar }) => {
+  const [paso, setPaso] = useState<1 | 2>(1);
+  const [zonaSeleccionada, setZonaSeleccionada] = useState<ZonaKey | null>(null);
+  const [localidad, setLocalidad] = useState('');
+
+  const resetear = () => { setPaso(1); setZonaSeleccionada(null); setLocalidad(''); };
+  const cerrar = () => { resetear(); onCerrar(); };
+  const confirmar = () => {
+    if (!zonaSeleccionada || !localidad.trim()) { alert('Ingresá una localidad'); return; }
+    onGuardar(zonaSeleccionada, localidad.trim());
+    resetear();
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <View style={S.modalOverlay}>
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={cerrar} />
+        <View style={S.bottomSheet}>
+          <View style={S.modalHeader}>
+            <View>
+              <Text style={S.modalTitulo}>{paso === 1 ? 'Nueva fila de recorrido' : `Zona ${zonaSeleccionada}`}</Text>
+              <Text style={S.modalSubtitulo}>{paso === 1 ? 'Seleccioná la tabla de destino' : 'Completá los datos de la ruta'}</Text>
+            </View>
+            <TouchableOpacity onPress={cerrar} style={S.botonCerrar}><Text style={S.botonCerrarTexto}>✕</Text></TouchableOpacity>
+          </View>
+
+          {paso === 1 && (
+            <View style={S.pasoContainer}>
+              <View style={S.gridZonas}>
+                {ZONAS.map(zona => (
+                  <TouchableOpacity key={zona} style={[S.botonZona, { borderColor: ZONA_COLORES[zona] + '55' }]} onPress={() => { setZonaSeleccionada(zona); setPaso(2); }} activeOpacity={0.75}>
+                    <Text style={S.botonZonaIcono}>{ZONA_ICONOS[zona]}</Text>
+                    <Text style={[S.botonZonaTexto, { color: ZONA_COLORES[zona] }]}>ZONA {zona}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {paso === 2 && zonaSeleccionada && (
+            <View style={S.pasoContainer}>
+              <TouchableOpacity onPress={() => setPaso(1)} style={S.botonVolver}><Text style={S.botonVolverTexto}>← Cambiar zona</Text></TouchableOpacity>
+              <View style={[S.zonaBadgeGrande, { backgroundColor: ZONA_COLORES[zonaSeleccionada] + '22', borderColor: ZONA_COLORES[zonaSeleccionada] + '66' }]}>
+                <Text style={S.zonaBadgeGrandeIcono}>{ZONA_ICONOS[zonaSeleccionada]}</Text>
+                <Text style={[S.zonaBadgeGrandeTexto, { color: ZONA_COLORES[zonaSeleccionada] }]}>ZONA {zonaSeleccionada}</Text>
+              </View>
+              <Text style={S.label}>LOCALIDAD / RUTA</Text>
+              <TextInput style={S.inputFicha} placeholder="Ej: Morón, Quilmes, etc." placeholderTextColor="#64748b" value={localidad} onChangeText={setLocalidad} autoFocus />
+              <Text style={S.labelInfo}>Se va a agregar una fila nueva a la tabla ZONA {zonaSeleccionada} con paquetes en 0.</Text>
+              <TouchableOpacity style={[S.botonGuardar, { backgroundColor: ZONA_COLORES[zonaSeleccionada] }]} onPress={confirmar}>
+                <Text style={S.botonGuardarTexto}>Agregar fila  →</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+};
+
+// ─────────────────────────────────────────────
+// COMPONENTE: MODAL AGREGAR CHOFER (RESTAURADO)
+// ─────────────────────────────────────────────
+
+interface ModalChoferProps {
+  visible: boolean;
+  onCerrar: () => void;
+  onGuardar: (chofer: Chofer) => void;
+}
+
+const ModalAgregarChofer: React.FC<ModalChoferProps> = ({ visible, onCerrar, onGuardar }) => {
+  const [form, setForm] = useState<Chofer>(NUEVO_CHOFER_DEFAULT);
+
+  const actualizar = (campo: keyof Chofer, valor: string | number | string[]) => {
+    setForm(prev => ({ ...prev, [campo]: campo === 'id' ? parseInt(valor as string) || 0 : valor }));
+  };
+
+  const guardar = () => {
+    if (!form.id || !form.nombre) { alert('ID y Nombre son requeridos'); return; }
+    onGuardar(form);
+    setForm(NUEVO_CHOFER_DEFAULT);
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide">
+      <SafeAreaView style={S.safeArea}>
+        <StatusBar barStyle="light-content" />
+        <View style={[S.header, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+          <Text style={S.headerTitle}>Cargar Nuevo Chofer</Text>
+          <TouchableOpacity onPress={onCerrar} style={S.botonCerrar}><Text style={S.botonCerrarTexto}>✕</Text></TouchableOpacity>
+        </View>
+        <ScrollView style={S.container}>
+          <View style={S.fichaTecnica}>
+            <View style={S.fila}>
+              <View style={{ flex: 1, marginRight: 10 }}>
+                <Text style={S.label}>ID</Text>
+                <TextInput style={S.inputFicha} keyboardType="numeric" value={form.id ? form.id.toString() : ''} onChangeText={v => actualizar('id', v)} selectTextOnFocus />
+              </View>
+              <View style={{ flex: 2 }}>
+                <Text style={S.label}>NOMBRE COMPLETO</Text>
+                <TextInput style={S.inputFicha} value={form.nombre} onChangeText={v => actualizar('nombre', v)} />
+              </View>
+            </View>
+            <View style={S.fila}>
+              <View style={{ flex: 1, marginRight: 10 }}>
+                <Text style={S.label}>CELULAR</Text>
+                <TextInput style={S.inputFicha} keyboardType="phone-pad" value={form.celular} onChangeText={v => actualizar('celular', v)} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={S.label}>DNI</Text>
+                <TextInput style={S.inputFicha} keyboardType="numeric" value={form.dni} onChangeText={v => actualizar('dni', v)} selectTextOnFocus />
+              </View>
+            </View>
+            <Text style={S.label}>DIRECCIÓN</Text>
+            <TextInput style={S.inputFicha} value={form.direccion} onChangeText={v => actualizar('direccion', v)} />
+            <Text style={S.label}>FECHA INGRESO</Text>
+            <TextInput style={S.inputFicha} value={form.fechaIngreso} onChangeText={v => actualizar('fechaIngreso', formatearFecha(v))} maxLength={10} placeholder="DD/MM/YYYY" placeholderTextColor="#64748b" />
+            <Text style={S.label}>ZONA PREFERENCIAL</Text>
+            <SelectorChips opciones={ZONAS} seleccionados={form.zona} multi onToggle={z => { const actual = form.zona; actualizar('zona', actual.includes(z) ? actual.filter(x => x !== z) : [...actual, z]); }} />
+            <Text style={S.label}>VEHÍCULO</Text>
+            <SelectorChips opciones={VEHICULOS} seleccionados={form.vehiculo} multi onToggle={v => { const actual = form.vehiculo; actualizar('vehiculo', actual.includes(v) ? actual.filter(x => x !== v) : [...actual, v]); }} colorActivo="#10b981" />
+            <Text style={S.label}>CONDICIÓN</Text>
+            <SelectorChips opciones={CONDICIONES} seleccionados={form.condicion} onToggle={c => actualizar('condicion', c)} colorActivo="#f59e0b" />
+            <TouchableOpacity style={S.botonGuardar} onPress={guardar}><Text style={S.botonGuardarTexto}>✓  Agregar Chofer</Text></TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
+// ─────────────────────────────────────────────
+// COMPONENTE: MENÚ NAVEGACIÓN
+// ─────────────────────────────────────────────
+
+const NavMenu: React.FC<{visible: boolean, pantallaActual: PantallaActual, onNavegar: (p: PantallaActual) => void, onCerrar: () => void}> = ({ visible, pantallaActual, onNavegar, onCerrar }) => (
+  <Modal visible={visible} animationType="slide" transparent>
+    <View style={S.modalOverlay}>
+      <TouchableOpacity style={{ flex: 1 }} onPress={onCerrar} />
+      <View style={S.bottomSheet}>
+        <View style={S.modalHeader}>
+          <Text style={S.modalTitulo}>Navegación</Text>
+          <TouchableOpacity onPress={onCerrar} style={S.botonCerrar}><Text style={S.botonCerrarTexto}>✕</Text></TouchableOpacity>
+        </View>
+        {[ { key: 'recorridos', i: '🚚', l: 'Recorridos' }, { key: 'choferes', i: '👥', l: 'Personal' }, { key: 'mapa', i: '🗺️', l: 'Mapa' } ].map(item => (
+          <TouchableOpacity key={item.key} style={[S.menuBoton, pantallaActual === item.key && S.menuBotonActivo]} onPress={() => onNavegar(item.key as PantallaActual)}>
+            <Text style={S.menuBotonTexto}>{item.i}  {item.l}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  </Modal>
+);
+
+
+// ─────────────────────────────────────────────
+// COMPONENTE RAÍZ: APP
+// ─────────────────────────────────────────────
+
+export default function App() {
+  const [pantalla, setPantalla] = useState<PantallaActual>('recorridos');
+  const [choferes, setChoferes] = useState<Chofer[]>(CHOFERES_INICIALES);
+  const [recorridos, setRecorridos] = useState<Record<ZonaKey, Recorrido[]>>(RECORRIDOS_INICIALES);
+  
+  const [modalRecorrido, setModalRecorrido] = useState(false);
+  const [modalChofer, setModalChofer] = useState(false);
+  const [navMenu, setNavMenu] = useState(false);
+  const [busquedaId, setBusquedaId] = useState('');
+  const [choferExpandido, setChoferExpandido] = useState<number | null>(null);
+
+  const [zonasVisibles, setZonasVisibles] = useState<Record<ZonaKey, boolean>>({
+    OESTE: true, SUR: false, NORTE: false, CABA: false,
+  });
+
+  const toggleZona = (zonaSeleccionada: ZonaKey) => {
+    setZonasVisibles(prev => ({
+      OESTE: zonaSeleccionada === 'OESTE' ? !prev.OESTE : false,
+      SUR:   zonaSeleccionada === 'SUR'   ? !prev.SUR   : false,
+      NORTE: zonaSeleccionada === 'NORTE' ? !prev.NORTE : false,
+      CABA:  zonaSeleccionada === 'CABA'  ? !prev.CABA  : false,
+    }));
+  };
+
+  const actualizarRecorrido = (zona: ZonaKey, index: number, campo: string, valor: string) => {
+    setRecorridos(prev => {
+      const copia = { ...prev, [zona]: [...prev[zona]] };
+      const fila = { ...copia[zona][index] };
+      if (campo === 'idChofer' || campo === 'pqteDia' || campo === 'porFuera' || campo === 'entregados') {
+        (fila as any)[campo] = parseInt(valor) || 0;
+      } else {
+        (fila as any)[campo] = valor;
+      }
+      copia[zona][index] = fila;
+      return copia;
+    });
+  };
+
+  const agregarRecorrido = (zona: ZonaKey, localidad: string) => {
+    setRecorridos(prev => ({ ...prev, [zona]: [...prev[zona], { localidad, idChofer: 0, pqteDia: 0, porFuera: 0, entregados: 0 }] }));
+    setZonasVisibles({ OESTE: zona === 'OESTE', SUR: zona === 'SUR', NORTE: zona === 'NORTE', CABA: zona === 'CABA' });
+    setModalRecorrido(false);
+  };
+
+  const actualizarChofer = (id: number, campo: keyof Chofer, valor: string | number | string[]) => {
+    setChoferes(prev => prev.map(c => c.id === id ? { ...c, [campo]: campo === 'id' ? parseInt(valor as string) || c.id : valor } : c));
+  };
+
+  const agregarChofer = (chofer: Chofer) => {
+    setChoferes(prev => [...prev, chofer]);
+    setModalChofer(false);
+  };
+
+  return (
+    <SafeAreaView style={S.safeArea}>
+      <StatusBar barStyle="light-content" />
+
+      {/* HEADER */}
+      <View style={S.header}>
+        <View>
+          <Text style={S.headerEyebrow}>GESTIÓN DE LOGÍSTICA</Text>
+          <Text style={S.headerTitle}>
+            {pantalla === 'recorridos' ? '🚚 Recorridos Activos' : pantalla === 'choferes' ? '👥 Gestión de Personal' : '🗺️ Mapa de Zonas'}
+          </Text>
+        </View>
+        {(pantalla === 'recorridos' || pantalla === 'choferes') && (
+          <TouchableOpacity onPress={() => pantalla === 'recorridos' ? setModalRecorrido(true) : setModalChofer(true)} style={S.botonAgregar}>
+            <Text style={S.botonAgregarTexto}>+</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* PANTALLA RECORRIDOS */}
+      {pantalla === 'recorridos' && (
+        <ScrollView style={S.container} showsVerticalScrollIndicator={false}>
+          {(Object.keys(recorridos) as ZonaKey[]).map(zona => (
+            <TablaZona key={zona} zona={zona} datos={recorridos[zona]} choferes={choferes} visible={zonasVisibles[zona]} onToggle={toggleZona} onActualizar={actualizarRecorrido} />
+          ))}
+          <View style={{ height: 80 }} />
+        </ScrollView>
+      )}
+
+      {/* PANTALLA CHOFERES */}
+      {pantalla === 'choferes' && (
+        <View style={{ flex: 1 }}>
+          <View style={S.buscadorContainer}>
+            <TextInput style={S.inputBusqueda} placeholder="🔍 Buscar por ID..." placeholderTextColor="#64748b" keyboardType="numeric" value={busquedaId} onChangeText={setBusquedaId} />
+          </View>
+          <ScrollView style={S.container}>
+            {choferes.filter(c => c.id.toString().includes(busquedaId)).map(chofer => {
+              
+              const rutasAsignadas: string[] = [];
+              (Object.keys(recorridos) as ZonaKey[]).forEach(zona => {
+                recorridos[zona].forEach(rec => {
+                  if (rec.idChofer === chofer.id) rutasAsignadas.push(`Zona ${zona} - ${rec.localidad}`);
+                });
+              });
+
+              return (
+                <View key={chofer.id} style={S.card}>
+                  <TouchableOpacity onPress={() => setChoferExpandido(choferExpandido === chofer.id ? null : chofer.id)} style={S.cardHeader} activeOpacity={0.7}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={S.nombreChofer}>{chofer.nombre}</Text>
+                      <Text style={S.idSubtitulo}>ID {chofer.id}  •  {chofer.condicion}  •  {chofer.zona.join(', ')}</Text>
+                    </View>
+                    <Text style={S.icono}>{choferExpandido === chofer.id ? '🔼' : '🔽'}</Text>
+                  </TouchableOpacity>
+                  {choferExpandido === chofer.id && <FichaTecnica chofer={chofer} rutasAsignadas={rutasAsignadas} onActualizar={actualizarChofer} onGuardar={() => setChoferExpandido(null)} />}
+                </View>
+              );
+            })}
+            <View style={{ height: 80 }} />
+          </ScrollView>
+        </View>
+      )}
+
+      {/* PANTALLA MAPA */}
+      {pantalla === 'mapa' && <MapaScreen />}
+
+      {/* MODALES RESTAURADOS */}
+      <ModalAgregarRecorrido visible={modalRecorrido} onCerrar={() => setModalRecorrido(false)} onGuardar={agregarRecorrido} />
+      <ModalAgregarChofer visible={modalChofer} onCerrar={() => setModalChofer(false)} onGuardar={agregarChofer} />
+      
+      <NavMenu visible={navMenu} pantallaActual={pantalla} onNavegar={p => { setPantalla(p); setNavMenu(false); }} onCerrar={() => setNavMenu(false)} />
+      <TouchableOpacity style={S.fab} onPress={() => setNavMenu(true)}><Text style={S.fabTexto}>☰</Text></TouchableOpacity>
+    </SafeAreaView>
+  );
+}
+
+// ─────────────────────────────────────────────
+// ESTILOS
+// ─────────────────────────────────────────────
+const S = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: '#0a0f1e' },
+  container: { flex: 1, padding: 15 },
+  header: { padding: 20, paddingBottom: 15, borderBottomWidth: 1, borderBottomColor: '#1a2540', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0d1526' },
+  headerEyebrow: { color: '#3b82f6', fontSize: 10, fontWeight: 'bold', letterSpacing: 2, marginBottom: 4 },
+  headerTitle: { color: '#f1f5f9', fontSize: 20, fontWeight: 'bold' },
+  botonAgregar: { backgroundColor: '#3b82f6', width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
+  botonAgregarTexto: { color: '#fff', fontSize: 26, fontWeight: 'bold', lineHeight: 30 },
+  tablaContainer: { marginBottom: 24 },
+  zonaHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, paddingLeft: 12, borderLeftWidth: 3 },
+  zonaHeader: { fontSize: 16, fontWeight: 'bold', flex: 1 },
+  zonaBadge: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  zonaBadgeTexto: { fontSize: 10, fontWeight: 'bold' },
+  zonaFlecha: { fontSize: 16, marginRight: 8 },
+  scrollHorizontal: { backgroundColor: '#111827', borderRadius: 10, borderWidth: 1, borderColor: '#1e2d45' },
+  filaTabla: { flexDirection: 'row' },
+  filaHeader: { backgroundColor: '#0d1526' },
+  filaAlternada: { backgroundColor: '#0f1b2d' },
+  celdaHeader: { width: 100, padding: 10, justifyContent: 'center', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1e2d45' },
+  textoHeader: { color: '#94a3b8', fontSize: 10, fontWeight: 'bold', textAlign: 'center' },
+  celda: { width: 100, padding: 10, justifyContent: 'center', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1a2540' },
+  textoCelda: { color: '#e2e8f0', fontSize: 13, textAlign: 'center' },
+  inputTabla: { backgroundColor: 'transparent', color: '#fff', textAlign: 'center', fontSize: 13, width: '100%', paddingVertical: 2 },
+  porcentaje: { fontSize: 13, fontWeight: 'bold', textAlign: 'center' },
+  buscadorContainer: { padding: 15, paddingBottom: 5 },
+  inputBusqueda: { backgroundColor: '#111827', color: '#fff', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#1e2d45', fontSize: 14 },
+  card: { backgroundColor: '#111827', borderRadius: 14, marginBottom: 10, borderWidth: 1, borderColor: '#1e2d45', overflow: 'hidden' },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
+  nombreChofer: { color: '#f1f5f9', fontSize: 17, fontWeight: 'bold' },
+  idSubtitulo: { color: '#64748b', fontSize: 12, marginTop: 2 },
+  icono: { fontSize: 16 },
+  fichaTecnica: { padding: 16, backgroundColor: '#0d1526' },
+  divisor: { height: 1, backgroundColor: '#1e2d45', marginBottom: 14 },
+  fila: { flexDirection: 'row', marginBottom: 4 },
+  label: { color: '#64748b', fontSize: 10, fontWeight: 'bold', marginBottom: 4, marginTop: 10, letterSpacing: 1 },
+  labelRutas: { color: '#10b981', fontSize: 11, fontWeight: 'bold', marginBottom: 6, letterSpacing: 1 },
+  inputFicha: { backgroundColor: '#0a0f1e', color: '#f1f5f9', padding: 12, borderRadius: 8, fontSize: 14, borderWidth: 1, borderColor: '#1e2d45' },
+  selectorRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
+  chip: { backgroundColor: '#111827', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: '#1e2d45' },
+  chipTexto: { color: '#f1f5f9', fontSize: 11, fontWeight: 'bold' },
+  botonGuardar: { backgroundColor: '#3b82f6', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 20 },
+  botonGuardarTexto: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  rutasContainer: { backgroundColor: '#111827', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#1e2d45', marginBottom: 10 },
+  rutaItem: { color: '#10b981', fontSize: 13, fontWeight: 'bold', marginBottom: 4 },
+  rutaVacia: { color: '#64748b', fontSize: 12, fontStyle: 'italic' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  bottomSheet: { backgroundColor: '#0d1526', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, borderTopWidth: 1, borderColor: '#1e2d45' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
+  modalTitulo: { color: '#f1f5f9', fontSize: 18, fontWeight: 'bold' },
+  modalSubtitulo: { color: '#64748b', fontSize: 12, marginTop: 3 },
+  botonCerrar: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1e2d45', justifyContent: 'center', alignItems: 'center' },
+  botonCerrarTexto: { color: '#94a3b8', fontSize: 14, fontWeight: 'bold' },
+  pasoContainer: { paddingBottom: 10 },
+  gridZonas: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: 4 },
+  botonZona: { width: '48%', backgroundColor: '#111827', borderWidth: 1, borderRadius: 14, padding: 20, alignItems: 'center', marginBottom: 12 },
+  botonZonaIcono: { fontSize: 28, marginBottom: 8 },
+  botonZonaTexto: { fontSize: 14, fontWeight: 'bold' },
+  botonVolver: { alignSelf: 'flex-start', marginBottom: 14, paddingVertical: 6, paddingHorizontal: 10 },
+  botonVolverTexto: { color: '#60a5fa', fontSize: 13 },
+  zonaBadgeGrande: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 16 },
+  zonaBadgeGrandeIcono: { fontSize: 20, marginRight: 8 },
+  zonaBadgeGrandeTexto: { fontSize: 15, fontWeight: 'bold' },
+  labelInfo: { color: '#64748b', fontSize: 11, marginTop: 10, marginBottom: 4, lineHeight: 16 },
+  menuBoton: { backgroundColor: '#111827', padding: 18, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#1e2d45' },
+  menuBotonActivo: { borderColor: '#3b82f6', backgroundColor: '#0d1e3d' },
+  menuBotonTexto: { color: '#f1f5f9', fontSize: 17, fontWeight: 'bold' },
+  fab: { position: 'absolute', bottom: 24, left: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: '#111827', borderWidth: 1, borderColor: '#1e2d45', justifyContent: 'center', alignItems: 'center', elevation: 8 },
+  fabTexto: { fontSize: 26, color: '#f1f5f9' },
+  inputMapa: { flex: 1, backgroundColor: '#111827', color: '#fff', padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#1e2d45' },
+  botonBuscarMapa: { backgroundColor: '#3b82f6', justifyContent: 'center', paddingHorizontal: 20, borderRadius: 10, marginLeft: 10 },
+  botonBuscarMapaTexto: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  mapaContainer: { flex: 1, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#1e2d45' },
+});
