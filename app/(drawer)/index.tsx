@@ -17,7 +17,7 @@ import {
   View,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { supabase } from '../supabase'; // Ruta confirmada por tu captura
+import { supabase } from '../../lib/supabase'; // Ruta confirmada por tu captura
 
 // ─────────────────────────────────────────────
 // TIPOS
@@ -736,45 +736,7 @@ const ModalAgregarChofer: React.FC<ModalChoferProps> = ({ visible, onCerrar, onG
   );
 };
 
-interface NavMenuProps {
-  visible: boolean;
-  pantallaActual: PantallaActual;
-  onNavegar: (pantalla: PantallaActual) => void;
-  onCerrar: () => void;
-}
 
-const MENU_ITEMS: { key: PantallaActual; icono: string; label: string }[] = [
-  { key: 'recorridos', icono: '🚚', label: 'Recorridos' },
-  { key: 'choferes',   icono: '👥', label: 'Personal' },
-  { key: 'mapa',       icono: '🗺️', label: 'Mapa' },
-];
-
-const NavMenu: React.FC<NavMenuProps> = ({ visible, pantallaActual, onNavegar, onCerrar }) => (
-  <Modal visible={visible} animationType="slide" transparent>
-    <View style={S.modalOverlay}>
-      <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onCerrar} />
-      <View style={S.bottomSheet}>
-        <View style={S.modalHeader}>
-          <Text style={S.modalTitulo}>Navegación</Text>
-          <TouchableOpacity onPress={onCerrar} style={S.botonCerrar}>
-            <Text style={S.botonCerrarTexto}>✕</Text>
-          </TouchableOpacity>
-        </View>
-        {MENU_ITEMS.map(item => (
-          <TouchableOpacity
-            key={item.key}
-            style={[S.menuBoton, pantallaActual === item.key && S.menuBotonActivo]}
-            onPress={() => onNavegar(item.key)}
-            activeOpacity={0.7}
-          >
-            <Text style={S.menuBotonTexto}>{item.icono}  {item.label}</Text>
-            {pantallaActual === item.key && <Text style={S.menuBotonCheck}>●</Text>}
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
-  </Modal>
-);
 
 // ─────────────────────────────────────────────
 // COMPONENTE RAÍZ: APP (LÓGICA SUPABASE)
@@ -789,7 +751,7 @@ export default function App() {
 
   const [modalRecorrido, setModalRecorrido] = useState(false);
   const [modalChofer, setModalChofer]       = useState(false);
-  const [navMenu, setNavMenu]               = useState(false);
+
 
   const refreshChoferes = useCallback(async () => {
     try {
@@ -1024,11 +986,7 @@ export default function App() {
 
       <ModalAgregarRecorrido visible={modalRecorrido} onCerrar={() => setModalRecorrido(false)} onGuardar={agregarRecorrido} />
       <ModalAgregarChofer visible={modalChofer} onCerrar={() => setModalChofer(false)} onGuardar={agregarChofer} />
-      <NavMenu visible={navMenu} pantallaActual={pantalla} onNavegar={p => { setPantalla(p); setNavMenu(false); }} onCerrar={() => setNavMenu(false)} />
 
-      <TouchableOpacity style={S.fab} onPress={() => setNavMenu(true)}>
-        <Text style={S.fabTexto}>☰</Text>
-      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -1252,37 +1210,5 @@ const S = StyleSheet.create({
     marginBottom: 4,
     lineHeight: 16,
   },
-  menuBoton: {
-    backgroundColor: '#111827',
-    padding: 18,
-    borderRadius: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#1e2d45',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  menuBotonActivo:  { borderColor: '#3b82f6', backgroundColor: '#0d1e3d' },
-  menuBotonTexto:   { color: '#f1f5f9', fontSize: 17, fontWeight: 'bold' },
-  menuBotonCheck:   { color: '#3b82f6', fontSize: 16 },
-  fab: {
-    position: 'absolute',
-    bottom: 24,
-    left: 24,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#111827',
-    borderWidth: 1,
-    borderColor: '#1e2d45',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  fabTexto:         { fontSize: 26, color: '#f1f5f9' },
+
 });
