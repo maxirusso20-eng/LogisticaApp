@@ -70,30 +70,44 @@ export default function RootLayout() {
   const segments = useSegments();
   const router = useRouter();
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      handleRouting(session);
-      setIsLoading(false);
-    };
+  // ─────────────────────────────────────────────────────────────────────
+  // FIX: antes, handleRouting se llamaba con isLoading=true (bug de closure),
+  // por lo que nunca redirigía en la carga inicial.
+  // Ahora separamos: (1) setIsLoading al recibir la sesión inicial,
+  // (2) un useEffect separado que reacciona a cambios de sesión/segmento
+  //     pero solo cuando ya terminó de cargar.
+  // ─────────────────────────────────────────────────────────────────────
 
+  const sessionRef = useRef<boolean | null>(null); // null = sin datos aún
+
+  useEffect(() => {
+    // Escuchar cambios de auth en tiempo real
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      handleRouting(session);
+      sessionRef.current = !!session;
     });
 
-    checkAuth();
-    return () => subscription.unsubscribe();
-  }, [segments]);
+    // Verificar sesión inicial
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      sessionRef.current = !!session;
+      setIsLoading(false); // ← primero actualizar estado, LUEGO el efecto de routing actúa
+    });
 
-  const handleRouting = (session: any) => {
-    if (isLoading) return;
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Redirigir cada vez que cambia la ruta o termina de cargar
+  useEffect(() => {
+    if (isLoading || sessionRef.current === null) return;
+
     const inAuthGroup = segments[0] === 'login';
-    if (!session && !inAuthGroup) {
+    const hasSession = sessionRef.current;
+
+    if (!hasSession && !inAuthGroup) {
       router.replace('/login' as any);
-    } else if (session && inAuthGroup) {
+    } else if (hasSession && inAuthGroup) {
       router.replace('/(drawer)' as any);
     }
-  };
+  }, [isLoading, segments]);
 
   if (isLoading) return <SplashLoader />;
 

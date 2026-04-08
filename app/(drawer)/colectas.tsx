@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,6 +27,20 @@ interface Cliente {
   completado: boolean;
 }
 
+type FiltroColecta = 'todas' | 'pendientes' | 'completadas';
+
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+
+/** Devuelve el saludo según la hora local */
+const getSaludo = (): string => {
+  const hora = new Date().getHours();
+  if (hora < 12) return 'Buenos días';
+  if (hora < 19) return 'Buenas tardes';
+  return 'Buenas noches';
+};
+
 // ─────────────────────────────────────────────
 // TARJETA DE COLECTA
 // ─────────────────────────────────────────────
@@ -41,7 +56,7 @@ function ColectaCard({
   onToggle: (id: number | string, actual: boolean) => void;
   toggling: boolean;
 }) {
-  const fade  = useRef(new Animated.Value(0)).current;
+  const fade = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -56,7 +71,7 @@ function ColectaCard({
   const handlePress = () => {
     Animated.sequence([
       Animated.timing(scale, { toValue: 0.96, duration: 70, useNativeDriver: true }),
-      Animated.timing(scale, { toValue: 1,    duration: 70, useNativeDriver: true }),
+      Animated.timing(scale, { toValue: 1, duration: 70, useNativeDriver: true }),
     ]).start();
     onToggle(item.id, item.completado);
   };
@@ -141,61 +156,67 @@ function ColectaCard({
 // ─────────────────────────────────────────────
 
 export default function ColectasScreen() {
-  const [clientes, setClientes]     = useState<Cliente[]>([]);
-  const [cargando, setCargando]     = useState(true);
-  const [search, setSearch]         = useState('');
-  const [nombreUsuario, setNombre]  = useState(''); // primer nombre del usuario logueado
-  // IDs cuyo toggle está en curso (para mostrar spinner individual)
-  const [toggling, setToggling]     = useState<Set<number | string>>(new Set());
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [refrescando, setRefrescando] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filtro, setFiltro] = useState<FiltroColecta>('todas');
+  const [nombreUsuario, setNombre] = useState('');
+  const [saludo] = useState(getSaludo); // calculado una vez al montar
+  const [toggling, setToggling] = useState<Set<number | string>>(new Set());
 
   // ── 1. Fetch personalizado por chofer logueado
-  const fetchClientes = useCallback(async () => {
+  const fetchClientes = useCallback(async (mostrarLoader = false) => {
+    if (mostrarLoader) setCargando(true);
     try {
-      // Obtener usuario logueado
       const { data: { user } } = await supabase.auth.getUser();
       if (!user?.email) {
         setCargando(false);
+        setRefrescando(false);
         return;
       }
 
-      // Extraer primer nombre del email o del metadata
+      // Nombre para el saludo
       const displayName: string =
         user.user_metadata?.full_name ||
         user.user_metadata?.name ||
         user.email.split('@')[0];
-      const primerNombre = displayName.split(' ')[0];
-      setNombre(primerNombre);
+      setNombre(displayName.split(' ')[0]);
 
-      // Traer solo las filas asignadas a este chofer
       const { data, error } = await supabase
         .from('Clientes')
         .select('id, cliente, direccion, horario, chofer, completado')
         .eq('email_chofer', user.email)
         .order('horario', { ascending: true });
+
       if (error) throw error;
       setClientes(data || []);
     } catch (err) {
       console.error('Error cargando clientes:', err);
     } finally {
       setCargando(false);
+      setRefrescando(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchClientes();
+    fetchClientes(true);
 
-    // Realtime: actualiza si otro chofer cambia su estado
     const channel = supabase
       .channel('colectas-sync')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'Clientes' }, fetchClientes)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'Clientes' }, () => fetchClientes())
       .subscribe();
 
     return () => { void supabase.removeChannel(channel); };
   }, [fetchClientes]);
 
-  // ── 2. Toggle en Supabase: cambia completado de false → true (o viceversa)
+  const handleRefresh = () => {
+    setRefrescando(true);
+    fetchClientes();
+  };
+
+  // ── 2. Toggle en Supabase con actualización optimista
   const handleToggle = async (id: number | string, actual: boolean) => {
-    // Actualización optimista local
     setClientes(prev =>
       prev.map(c => c.id === id ? { ...c, completado: !actual } : c)
     );
@@ -209,7 +230,6 @@ export default function ColectasScreen() {
 
       if (error) {
         // Revertir si falla
-        console.error('Error actualizando completado:', error);
         setClientes(prev =>
           prev.map(c => c.id === id ? { ...c, completado: actual } : c)
         );
@@ -223,13 +243,21 @@ export default function ColectasScreen() {
     }
   };
 
-  // ── Filtros y stats
-  const filtrados        = clientes.filter(c =>
-    (c.cliente || '').toLowerCase().includes(search.toLowerCase())
-  );
-  const totalHechas      = filtrados.filter(c => c.completado).length;
-  const totalPendientes  = filtrados.length - totalHechas;
-  const progreso         = filtrados.length > 0 ? totalHechas / filtrados.length : 0;
+  // ── Stats totales (no dependen del filtro de búsqueda)
+  const totalHechas = clientes.filter(c => c.completado).length;
+  const totalPendientes = clientes.length - totalHechas;
+  const progreso = clientes.length > 0 ? totalHechas / clientes.length : 0;
+
+  // ── Lista filtrada (búsqueda + tab)
+  const filtrados = clientes.filter(c => {
+    const matchSearch = (c.cliente || '').toLowerCase().includes(search.toLowerCase()) ||
+      (c.direccion || '').toLowerCase().includes(search.toLowerCase());
+    const matchFiltro =
+      filtro === 'todas' ||
+      (filtro === 'completadas' && c.completado) ||
+      (filtro === 'pendientes' && !c.completado);
+    return matchSearch && matchFiltro;
+  });
 
   if (cargando) {
     return (
@@ -245,21 +273,35 @@ export default function ColectasScreen() {
       style={styles.container}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refrescando}
+          onRefresh={handleRefresh}
+          tintColor="#4F8EF7"
+          colors={['#4F8EF7']}
+        />
+      }
     >
-      {/* ── Saludo personalizado ── */}
+      {/* ── Saludo dinámico ── */}
       <View style={styles.greetingBox}>
         <Text style={styles.greetingEyebrow}>COLECTAS DE HOY</Text>
         <Text style={styles.greetingTitle}>
-          Buenos días, {nombreUsuario || 'chofer'} 👋
+          {saludo}, {nombreUsuario || 'chofer'} 👋
         </Text>
         <Text style={styles.greetingSubtitle}>
-          La colecta que tenés para hoy es esta:
+          {clientes.length === 0
+            ? 'No tenés colectas asignadas hoy.'
+            : totalPendientes === 0
+              ? '¡Todo completado! Excelente trabajo. ✅'
+              : `Tenés ${totalPendientes} colecta${totalPendientes !== 1 ? 's' : ''} pendiente${totalPendientes !== 1 ? 's' : ''}.`
+          }
         </Text>
       </View>
-      {/* ── Stats ── */}
+
+      {/* ── Stats totales ── */}
       <View style={styles.statsRow}>
         <View style={styles.statBox}>
-          <Text style={styles.statNum}>{filtrados.length}</Text>
+          <Text style={styles.statNum}>{clientes.length}</Text>
           <Text style={styles.statLabel}>Total</Text>
         </View>
         <View style={[styles.statBox, styles.statBoxMid]}>
@@ -277,7 +319,7 @@ export default function ColectasScreen() {
       {/* ── Barra de progreso ── */}
       <View style={styles.progressWrap}>
         <View style={styles.progressBg}>
-          <View style={[styles.progressFill, { width: `${progreso * 100}%` as any }]} />
+          <Animated.View style={[styles.progressFill, { width: `${progreso * 100}%` as any }]} />
         </View>
         <Text style={styles.progressLabel}>{Math.round(progreso * 100)}% completado</Text>
       </View>
@@ -287,7 +329,7 @@ export default function ColectasScreen() {
         <Ionicons name="search-outline" size={16} color="#2A4A70" style={{ marginRight: 10 }} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar cliente..."
+          placeholder="Buscar cliente o dirección..."
           placeholderTextColor="#1A3050"
           value={search}
           onChangeText={setSearch}
@@ -299,13 +341,32 @@ export default function ColectasScreen() {
         )}
       </View>
 
-      {/* ── Conteo ── */}
-      <Text style={styles.count}>
-        {filtrados.length} colecta{filtrados.length !== 1 ? 's' : ''}
-      </Text>
+      {/* ── Filtros por tab ── */}
+      <View style={styles.filtrosRow}>
+        {([
+          { key: 'todas', label: 'Todas', count: clientes.length },
+          { key: 'pendientes', label: 'Pendientes', count: totalPendientes },
+          { key: 'completadas', label: 'Completadas', count: totalHechas },
+        ] as { key: FiltroColecta; label: string; count: number }[]).map(tab => (
+          <TouchableOpacity
+            key={tab.key}
+            style={[styles.filtroBtn, filtro === tab.key && styles.filtroBtnActive]}
+            onPress={() => setFiltro(tab.key)}
+          >
+            <Text style={[styles.filtroText, filtro === tab.key && styles.filtroTextActive]}>
+              {tab.label}
+            </Text>
+            <View style={[styles.filtroCount, filtro === tab.key && styles.filtroCountActive]}>
+              <Text style={[styles.filtroCountText, filtro === tab.key && styles.filtroCountTextActive]}>
+                {tab.count}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       {/* ── Lista ── */}
-      {filtrados.length === 0 && !search ? (
+      {filtrados.length === 0 && clientes.length === 0 ? (
         <View style={styles.emptyState}>
           <Ionicons name="bed-outline" size={52} color="#1A2540" />
           <Text style={styles.emptyTitle}>Hoy no tenés colectas asignadas.</Text>
@@ -315,6 +376,7 @@ export default function ColectasScreen() {
         <View style={styles.emptyState}>
           <Ionicons name="search-outline" size={48} color="#1A2540" />
           <Text style={styles.emptyTitle}>Sin resultados</Text>
+          <Text style={styles.emptySubtitle}>Probá con otro filtro o búsqueda.</Text>
         </View>
       ) : (
         filtrados.map((c, i) => (
@@ -338,9 +400,9 @@ export default function ColectasScreen() {
 // ─────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container:  { flex: 1, backgroundColor: '#060B18' },
-  content:    { padding: 20 },
-  loader:     { flex: 1, backgroundColor: '#060B18', alignItems: 'center', justifyContent: 'center', gap: 14 },
+  container: { flex: 1, backgroundColor: '#060B18' },
+  content: { padding: 20 },
+  loader: { flex: 1, backgroundColor: '#060B18', alignItems: 'center', justifyContent: 'center', gap: 14 },
   loaderText: { color: '#4A6FA5', fontSize: 13, fontWeight: '500' },
 
   // Stats
@@ -349,15 +411,15 @@ const styles = StyleSheet.create({
     borderRadius: 18, marginBottom: 14,
     borderWidth: 1, borderColor: '#1A2540', overflow: 'hidden',
   },
-  statBox:    { flex: 1, alignItems: 'center', paddingVertical: 16 },
+  statBox: { flex: 1, alignItems: 'center', paddingVertical: 16 },
   statBoxMid: { borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#1A2540' },
-  statNum:    { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
-  statLabel:  { fontSize: 10, color: '#2A4A70', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 2 },
+  statNum: { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
+  statLabel: { fontSize: 10, color: '#2A4A70', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 2 },
 
   // Progreso
-  progressWrap:  { marginBottom: 14 },
-  progressBg:    { height: 5, backgroundColor: '#0D1526', borderRadius: 3, borderWidth: 1, borderColor: '#1A2540', marginBottom: 6, overflow: 'hidden' },
-  progressFill:  { height: '100%', backgroundColor: '#34D399', borderRadius: 3 },
+  progressWrap: { marginBottom: 14 },
+  progressBg: { height: 6, backgroundColor: '#0D1526', borderRadius: 3, borderWidth: 1, borderColor: '#1A2540', marginBottom: 6, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: '#34D399', borderRadius: 3 },
   progressLabel: { fontSize: 11, color: '#2A4A70', fontWeight: '600', textAlign: 'right' },
 
   // Buscador
@@ -365,14 +427,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#0D1526', borderRadius: 14,
     borderWidth: 1, borderColor: '#1A2540',
-    paddingHorizontal: 16, height: 48, marginBottom: 14,
+    paddingHorizontal: 16, height: 48, marginBottom: 12,
   },
   searchInput: { flex: 1, color: '#FFFFFF', fontSize: 14 },
 
-  count: { fontSize: 12, fontWeight: '700', color: '#2A4A70', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  // Filtros
+  filtrosRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  filtroBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, paddingVertical: 9, borderRadius: 12,
+    backgroundColor: '#0D1526', borderWidth: 1, borderColor: '#1A2540',
+  },
+  filtroBtnActive: { backgroundColor: 'rgba(79,142,247,0.12)', borderColor: '#4F8EF7' },
+  filtroText: { fontSize: 12, fontWeight: '700', color: '#4A6FA5' },
+  filtroTextActive: { color: '#4F8EF7' },
+  filtroCount: { backgroundColor: '#111D35', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
+  filtroCountActive: { backgroundColor: 'rgba(79,142,247,0.2)' },
+  filtroCountText: { fontSize: 11, fontWeight: '800', color: '#2A4A70' },
+  filtroCountTextActive: { color: '#4F8EF7' },
 
-  emptyState:    { alignItems: 'center', paddingVertical: 48, gap: 10 },
-  emptyTitle:    { color: '#4A6FA5', fontSize: 15, fontWeight: '700', textAlign: 'center' },
+  emptyState: { alignItems: 'center', paddingVertical: 48, gap: 10 },
+  emptyTitle: { color: '#4A6FA5', fontSize: 15, fontWeight: '700', textAlign: 'center' },
   emptySubtitle: { color: '#2A4A70', fontSize: 13, fontWeight: '500' },
 
   // Saludo
@@ -381,8 +456,8 @@ const styles = StyleSheet.create({
     borderRadius: 18, padding: 20, marginBottom: 16,
     borderWidth: 1, borderColor: '#1A2540',
   },
-  greetingEyebrow:  { fontSize: 10, fontWeight: '800', color: '#4F8EF7', letterSpacing: 2, marginBottom: 6, textTransform: 'uppercase' },
-  greetingTitle:    { fontSize: 22, fontWeight: '800', color: '#FFFFFF', marginBottom: 4, letterSpacing: -0.3 },
+  greetingEyebrow: { fontSize: 10, fontWeight: '800', color: '#4F8EF7', letterSpacing: 2, marginBottom: 6, textTransform: 'uppercase' },
+  greetingTitle: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', marginBottom: 4, letterSpacing: -0.3 },
   greetingSubtitle: { fontSize: 13, color: '#4A6FA5', fontWeight: '500' },
 
   // Tarjeta
@@ -397,20 +472,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#060F1C',
     borderColor: 'rgba(52,211,153,0.15)',
   },
-  accent:     { width: 4, backgroundColor: '#4F8EF7' },
+  accent: { width: 4, backgroundColor: '#4F8EF7' },
   accentDone: { backgroundColor: '#34D399' },
-  cardBody:   { flex: 1, padding: 16 },
+  cardBody: { flex: 1, padding: 16 },
 
-  cardTop:      { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
-  clienteNombre:{ fontSize: 15, fontWeight: '700', color: '#FFFFFF', marginBottom: 4 },
-  horarioRow:   { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  horarioText:  { fontSize: 13, color: '#4F8EF7', fontWeight: '600' },
-  textDone:     { color: '#1A3050' },
+  cardTop: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
+  clienteNombre: { fontSize: 15, fontWeight: '700', color: '#FFFFFF', marginBottom: 4 },
+  horarioRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  horarioText: { fontSize: 13, color: '#4F8EF7', fontWeight: '600' },
+  textDone: { color: '#1A3050' },
 
   checkWrap: { paddingLeft: 12, justifyContent: 'center', minWidth: 42 },
 
-  details:    {},
-  detailRow:  { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
+  details: {},
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
   detailText: { flex: 1, fontSize: 12, color: '#4A6FA5', fontWeight: '500', lineHeight: 18 },
 
   doneBadge: {
