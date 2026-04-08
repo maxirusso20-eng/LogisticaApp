@@ -55,9 +55,10 @@ function HeaderRight() {
 function DrawerContent(props: any) {
   const router = useRouter();
   const items = [
-    { name: 'index', label: 'Recorridos', icon: 'bus-outline', route: '/(drawer)/' },
-    { name: 'personal', label: 'Personal', icon: 'people-outline', route: '/(drawer)/personal' },
-    { name: 'mapa', label: 'Mapa de Rutas', icon: 'map-outline', route: '/(drawer)/mapa' },
+    { name: 'index',    label: 'Recorridos',    icon: 'bus-outline',     route: '/(drawer)/' },
+    { name: 'personal', label: 'Personal',       icon: 'people-outline',  route: '/(drawer)/personal' },
+    { name: 'mapa',     label: 'Mapa de Rutas', icon: 'map-outline',     route: '/(drawer)/mapa' },
+    { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas' },
   ];
 
   const currentRoute = props.state?.routes[props.state?.index]?.name;
@@ -127,10 +128,11 @@ export default function DrawerLayout() {
         headerTitleStyle: { fontWeight: '700', fontSize: 17, color: '#FFFFFF' },
       }}
     >
-      <Drawer.Screen name="index" options={{ title: 'Recorridos' }} />
+      <Drawer.Screen name="index"    options={{ title: 'Recorridos' }} />
       <Drawer.Screen name="personal" options={{ title: 'Equipo Logístico' }} />
-      <Drawer.Screen name="mapa" options={{ title: 'Mapa de Rutas' }} />
-      <Drawer.Screen name="explore" options={{ drawerItemStyle: { display: 'none' } }} />
+      <Drawer.Screen name="mapa"     options={{ title: 'Mapa de Rutas' }} />
+      <Drawer.Screen name="colectas" options={{ title: 'Colectas de Hoy' }} />
+      <Drawer.Screen name="explore"  options={{ drawerItemStyle: { display: 'none' } }} />
     </Drawer>
   );
 }

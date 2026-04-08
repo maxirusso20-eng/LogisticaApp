@@ -2,6 +2,7 @@
  * APP DE GESTIÓN DE RECORRIDOS (VERSIÓN SUPABASE REAL)
  */
 
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -743,11 +744,33 @@ const ModalAgregarChofer: React.FC<ModalChoferProps> = ({ visible, onCerrar, onG
 // ─────────────────────────────────────────────
 
 export default function App() {
+  const router = useRouter();
   const [pantalla, setPantalla] = useState<PantallaActual>('recorridos');
   const [choferes, setChoferes] = useState<Chofer[]>([]);
   const [recorridos, setRecorridos] = useState<Record<ZonaKey, Recorrido[]>>({
     'ZONA OESTE': [], 'ZONA SUR': [], 'ZONA NORTE': [], 'CABA': []
   });
+
+  // ── Widget de colectas pendientes
+  const [colectasPendientes, setColectasPendientes] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchPendientes = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user?.email) return;
+        const { count, error } = await supabase
+          .from('Clientes')
+          .select('id', { count: 'exact', head: true })
+          .eq('email_chofer', user.email)
+          .eq('completado', false);
+        if (!error) setColectasPendientes(count ?? 0);
+      } catch (err) {
+        console.error('Error fetching colectas pendientes:', err);
+      }
+    };
+    fetchPendientes();
+  }, []);
 
   const [modalRecorrido, setModalRecorrido] = useState(false);
   const [modalChofer, setModalChofer]       = useState(false);
@@ -978,6 +1001,28 @@ export default function App() {
         )}
       </View>
 
+      {/* ── Widget Colectas Pendientes ── */}
+      {colectasPendientes != null && colectasPendientes > 0 && (
+        <View style={S.widgetColectas}>
+          <View style={S.widgetLeft}>
+            <Text style={S.widgetEmoji}>📦</Text>
+            <View>
+              <Text style={S.widgetTitle}>
+                ¡Hola! Tenés {colectasPendientes} colecta{colectasPendientes !== 1 ? 's' : ''} pendiente{colectasPendientes !== 1 ? 's' : ''} para hoy
+              </Text>
+              <Text style={S.widgetSub}>Tu lista de colectas te espera</Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={S.widgetBtn}
+            onPress={() => router.push('/(drawer)/colectas' as any)}
+            activeOpacity={0.8}
+          >
+            <Text style={S.widgetBtnText}>Ver{`\n`}Colectas</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {pantalla === 'recorridos' && (
         <RecorridosScreen recorridos={recorridos} choferes={choferes} onActualizar={actualizarRecorrido} />
       )}
@@ -1023,6 +1068,25 @@ const S = StyleSheet.create({
     elevation: 6,
   },
   botonAgregarTexto: { color: '#fff', fontSize: 26, fontWeight: 'bold', lineHeight: 30 },
+
+  // Widget colectas pendientes
+  widgetColectas: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#0d2240',
+    borderWidth: 1, borderColor: 'rgba(79,142,247,0.35)',
+    borderRadius: 16, marginHorizontal: 16, marginTop: 12, marginBottom: 4,
+    padding: 14,
+  },
+  widgetLeft:    { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  widgetEmoji:   { fontSize: 28 },
+  widgetTitle:   { fontSize: 13, fontWeight: '700', color: '#FFFFFF', flexShrink: 1 },
+  widgetSub:     { fontSize: 11, color: '#4A6FA5', marginTop: 2 },
+  widgetBtn: {
+    backgroundColor: '#3b82f6',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
+    alignItems: 'center', marginLeft: 10,
+  },
+  widgetBtnText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800', textAlign: 'center', lineHeight: 16 },
   tablaContainer:   { marginBottom: 24 },
   zonaHeaderRow: {
     flexDirection: 'row',
