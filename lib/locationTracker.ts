@@ -1,236 +1,107 @@
-/**
- * lib/locationTracker.ts
- *
- * Módulo de rastreo GPS en segundo plano para choferes.
- *
- * FIX CRÍTICO respecto a la versión anterior:
- *   El email del chofer ahora se persiste en AsyncStorage.
- *   Esto es necesario porque el TaskManager de Expo corre en un contexto
- *   JS separado cuando la app está en background/cerrada, y las variables
- *   de módulo (let _emailChofer) se reinician a null en ese contexto.
- *   Sin este fix, el task se ejecuta pero no envía nada (falla silenciosa).
- *
- * Estrategia de envío:
- *  - Manda un upsert a `ubicaciones_en_vivo` solo si:
- *    (a) pasaron más de INTERVALO_MS (60 segundos), o
- *    (b) el chofer se movió más de DISTANCIA_MIN_M (100 metros)
- *  - Funciona en primer plano en Expo Go.
- *  - Funciona en segundo plano (pantalla bloqueada, otra app) con build nativo (EAS Build).
- */
+// lib/locationTracker.ts
+//
+// Tracker de ubicación en PRIMER PLANO (foreground).
+// NO usa background location tasks para evitar el error:
+// "startLocationUpdatesAsync failed — background.location has not been configured"
+//
+// La estrategia es:
+//   • Pedir solo permiso de foreground (whenInUse)
+//   • Usar watchPositionAsync (foreground-only, sin task registrada)
+//   • Si el permiso está denegado, retornar 'denied' sin tirar error
+//   • Toda la lógica de error está contenida acá, nunca revienta la UI
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
-import * as TaskManager from 'expo-task-manager';
 import { supabase } from './supabase';
 
-// ─── Constantes ───────────────────────────────────────────────────────────────
+// Referencia interna a la suscripción activa
+let watcherSubscription: Location.LocationSubscription | null = null;
 
-export const LOCATION_TASK_NAME = 'chofer-location-task';
-
-const STORAGE_KEY_EMAIL = '@gps_email_chofer';
-
-const INTERVALO_MS = 60_000;  // 60 segundos entre envíos obligatorios
-const DISTANCIA_MIN_M = 100;     // 100 metros de movimiento = envío inmediato
-
-// ─── Estado en memoria (solo válido en foreground) ────────────────────────────
-// En background, estas variables se resetean. Por eso el email va a AsyncStorage
-// y lat/lon/tiempo se manejan solo como optimización en foreground.
-
-let _ultimaLat: number | null = null;
-let _ultimaLon: number | null = null;
-let _ultimoEnvio: number = 0;
-
-// ─── Helpers de persistencia ──────────────────────────────────────────────────
-
-/** Guardar email en AsyncStorage (persiste entre contextos JS) */
-export async function setEmailChofer(email: string): Promise<void> {
-  await AsyncStorage.setItem(STORAGE_KEY_EMAIL, email);
-}
-
-/** Leer email desde AsyncStorage (funciona tanto en fore como en background) */
-async function getEmailChofer(): Promise<string | null> {
-  return AsyncStorage.getItem(STORAGE_KEY_EMAIL);
-}
-
-/** Borrar email al detener el tracking */
-async function clearEmailChofer(): Promise<void> {
-  await AsyncStorage.removeItem(STORAGE_KEY_EMAIL);
-}
-
-// ─── Haversine: distancia entre dos coordenadas en metros ────────────────────
-
-function haversineMetros(
-  lat1: number, lon1: number,
-  lat2: number, lon2: number,
-): number {
-  const R = 6_371_000;
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-// ─── Envío a Supabase ─────────────────────────────────────────────────────────
-
-async function enviarUbicacion(
-  lat: number,
-  lon: number,
-  precision?: number | null,
-  velocidad?: number | null,
-): Promise<void> {
-  // FIX: leer email desde AsyncStorage en lugar de la variable de módulo
-  const emailChofer = await getEmailChofer();
-  if (!emailChofer) {
-    console.warn('[GPS] No hay email de chofer guardado — abortando envío.');
-    return;
-  }
-
-  const ahora = Date.now();
-  const tiempoDesdeUltimo = ahora - _ultimoEnvio;
-  const distancia =
-    _ultimaLat != null && _ultimaLon != null
-      ? haversineMetros(_ultimaLat, _ultimaLon, lat, lon)
-      : Infinity; // primera vez → siempre enviar
-
-  const debePorTiempo = tiempoDesdeUltimo >= INTERVALO_MS;
-  const debePorDistancia = distancia >= DISTANCIA_MIN_M;
-
-  if (!debePorTiempo && !debePorDistancia) return; // throttle: no enviar
-
-  _ultimaLat = lat;
-  _ultimaLon = lon;
-  _ultimoEnvio = ahora;
-
-  const velocidadKmh =
-    velocidad != null && velocidad >= 0 ? velocidad * 3.6 : null;
-
-  const { error } = await supabase
-    .from('ubicaciones_en_vivo')
-    .upsert(
-      {
-        email_chofer: emailChofer,
-        latitud: lat,
-        longitud: lon,
-        precision_m: precision ?? null,
-        velocidad_kmh: velocidadKmh,
-        actualizado_en: new Date().toISOString(),
-      },
-      { onConflict: 'email_chofer' }, // usa email_chofer como clave única ✓
-    );
-
-  if (error) {
-    console.error('[GPS] Error enviando ubicación a Supabase:', error.message);
-  } else {
-    console.log(
-      `[GPS] Enviado — dist: ${distancia.toFixed(0)}m, ` +
-      `tiempo: ${(tiempoDesdeUltimo / 1000).toFixed(0)}s, ` +
-      `chofer: ${emailChofer}`,
-    );
-  }
-}
-
-// ─── TaskManager: definir la tarea en segundo plano ──────────────────────────
-// IMPORTANTE: esta llamada DEBE estar en el scope raíz del módulo (no dentro de
-// ninguna función ni hook), para que Expo la registre correctamente al arrancar.
-
-TaskManager.defineTask(
-  LOCATION_TASK_NAME,
-  async ({
-    data,
-    error,
-  }: TaskManager.TaskManagerTaskBody<{ locations: Location.LocationObject[] }>) => {
-    if (error) {
-      console.error('[GPS Background] Error en task:', error.message);
-      return;
-    }
-    if (!data?.locations?.length) return;
-
-    const loc = data.locations[data.locations.length - 1]; // la más reciente
-    await enviarUbicacion(
-      loc.coords.latitude,
-      loc.coords.longitude,
-      loc.coords.accuracy,
-      loc.coords.speed,
-    );
-  },
-);
-
-// ─── API pública ──────────────────────────────────────────────────────────────
+export type GpsStatus = 'off' | 'foreground' | 'background' | 'denied';
 
 /**
- * startTracking(email)
- *
- * 1. Persiste el email del chofer en AsyncStorage
- * 2. Pide permisos de ubicación (foreground + background si es posible)
- * 3. Lanza el task de background
- *
- * Devuelve 'background' | 'foreground' | 'denied' según lo que se logró.
+ * Inicia el rastreo de ubicación en foreground y actualiza Supabase.
+ * @param emailChofer  Email del chofer logueado, para hacer match en la tabla Choferes
+ * @returns            El estado resultante del GPS
  */
-export async function startTracking(
-  email: string,
-): Promise<'background' | 'foreground' | 'denied'> {
-  // FIX: guardar en AsyncStorage para que el background task lo pueda leer
-  await setEmailChofer(email);
+export async function startTracking(emailChofer: string): Promise<GpsStatus> {
+  // 1. Detener cualquier watcher previo
+  await stopTracking();
 
-  // Verificar si ya está corriendo
-  const yaActivo = await Location.hasStartedLocationUpdatesAsync(
-    LOCATION_TASK_NAME,
-  ).catch(() => false);
-  if (yaActivo) return 'background';
-
-  // ── Permiso de foreground ──
-  const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
-  if (fgStatus !== 'granted') {
-    console.warn('[GPS] Permiso de ubicación denegado (foreground).');
+  // 2. Pedir permiso de foreground
+  const { status } = await Location.requestForegroundPermissionsAsync();
+  if (status !== 'granted') {
+    console.warn('[GPS] Permiso de ubicación denegado.');
     return 'denied';
   }
 
-  // ── Permiso de background (solo disponible en build nativo) ──
-  const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync().catch(
-    () => ({ status: 'denied' as const }),
-  );
-  const tieneBackground = bgStatus === 'granted';
+  // 3. Buscar el ID del chofer asociado al email
+  let choferId: number | null = null;
+  try {
+    const { data } = await supabase
+      .from('Choferes')
+      .select('id')
+      .eq('email', emailChofer)
+      .maybeSingle();
+    choferId = data?.id ?? null;
+  } catch (err) {
+    console.warn('[GPS] No se pudo obtener el ID del chofer:', err);
+    // Continuamos de todas formas — igual mostramos el chip GPS
+  }
 
-  // ── Opciones del tracker ──
-  const options: Location.LocationTaskOptions = {
-    accuracy: Location.Accuracy.Balanced,
-    timeInterval: INTERVALO_MS,
-    distanceInterval: DISTANCIA_MIN_M,
-    showsBackgroundLocationIndicator: true, // iOS: barra azul
-    foregroundService: {                    // Android: notificación persistente
-      notificationTitle: 'Logística Hogareño',
-      notificationBody: 'Tu ubicación está siendo compartida durante el reparto.',
-      notificationColor: '#4F8EF7',
-    },
-  };
+  // 4. Obtener posición inicial (sin bloquear si falla)
+  try {
+    const pos = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    });
+    if (choferId) {
+      void supabase.from('Choferes').update({
+        latitud: pos.coords.latitude,
+        longitud: pos.coords.longitude,
+        ultima_actualizacion: new Date().toISOString(),
+      }).eq('id', choferId);
+    }
+  } catch {
+    // No crítico — el watchPositionAsync tomará el control
+  }
 
-  await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, options);
-  console.log(
-    `[GPS] Tracking iniciado — modo: ${tieneBackground ? 'background' : 'foreground'}`,
-  );
-  return tieneBackground ? 'background' : 'foreground';
+  // 5. Iniciar el watcher en foreground
+  try {
+    watcherSubscription = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.Balanced,
+        distanceInterval: 20,      // metros mínimos de movimiento
+        timeInterval: 15000,       // máximo cada 15 segundos
+        mayShowUserSettingsDialog: false, // no pedir upgrade a "siempre"
+      },
+      async (location) => {
+        if (!choferId) return;
+        const { latitude, longitude } = location.coords;
+        try {
+          await supabase.from('Choferes').update({
+            latitud: latitude,
+            longitud: longitude,
+            ultima_actualizacion: new Date().toISOString(),
+          }).eq('id', choferId);
+        } catch (err) {
+          console.warn('[GPS] Error actualizando posición en Supabase:', err);
+        }
+      }
+    );
+  } catch (err) {
+    // Capturamos el error de background no configurado sin reventarle la UI al usuario
+    console.warn('[GPS] watchPositionAsync no disponible en este entorno:', err);
+    return 'denied';
+  }
+
+  return 'foreground';
 }
 
 /**
- * stopTracking()
- * Detiene el task y limpia el estado (memoria + AsyncStorage).
+ * Detiene el rastreo y libera la suscripción.
  */
 export async function stopTracking(): Promise<void> {
-  const activo = await Location.hasStartedLocationUpdatesAsync(
-    LOCATION_TASK_NAME,
-  ).catch(() => false);
-
-  if (activo) {
-    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-    console.log('[GPS] Tracking detenido.');
+  if (watcherSubscription) {
+    watcherSubscription.remove();
+    watcherSubscription = null;
   }
-
-  // Limpiar tanto la memoria como AsyncStorage
-  await clearEmailChofer();
-  _ultimaLat = null;
-  _ultimaLon = null;
-  _ultimoEnvio = 0;
 }

@@ -1,3 +1,4 @@
+// app/_layout.tsx
 import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -67,47 +68,63 @@ const splash = StyleSheet.create({
 
 export default function RootLayout() {
   const [isLoading, setIsLoading] = useState(true);
+  // FIX: usar estado real en lugar de ref para que el useEffect de routing
+  // se dispare correctamente cuando cambia la sesión (onAuthStateChange).
+  const [hasSession, setHasSession] = useState<boolean | null>(null);
   const segments = useSegments();
   const router = useRouter();
-
-  // ─────────────────────────────────────────────────────────────────────
-  // FIX: antes, handleRouting se llamaba con isLoading=true (bug de closure),
-  // por lo que nunca redirigía en la carga inicial.
-  // Ahora separamos: (1) setIsLoading al recibir la sesión inicial,
-  // (2) un useEffect separado que reacciona a cambios de sesión/segmento
-  //     pero solo cuando ya terminó de cargar.
-  // ─────────────────────────────────────────────────────────────────────
-
-  const sessionRef = useRef<boolean | null>(null); // null = sin datos aún
+  const isMounted = useRef(false);
 
   useEffect(() => {
-    // Escuchar cambios de auth en tiempo real
+    isMounted.current = true;
+
+    // Escuchar cambios de auth en tiempo real (logout, token expirado, etc.)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      sessionRef.current = !!session;
+      if (isMounted.current) {
+        setHasSession(!!session);
+      }
     });
 
-    // Verificar sesión inicial
+    // Verificar sesión inicial al arrancar
     supabase.auth.getSession().then(({ data: { session } }) => {
-      sessionRef.current = !!session;
-      setIsLoading(false); // ← primero actualizar estado, LUEGO el efecto de routing actúa
+      if (isMounted.current) {
+        setHasSession(!!session);
+        setIsLoading(false);
+      }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted.current = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  // Redirigir cada vez que cambia la ruta o termina de cargar
+  // Redirigir cada vez que cambia la ruta, la sesión o termina de cargar
   useEffect(() => {
-    if (isLoading || sessionRef.current === null) return;
+    const checkRedirect = async () => {
+      if (isLoading || hasSession === null) return;
 
-    const inAuthGroup = segments[0] === 'login';
-    const hasSession = sessionRef.current;
+      const inAuthGroup = segments[0] === 'login';
 
-    if (!hasSession && !inAuthGroup) {
-      router.replace('/login' as any);
-    } else if (hasSession && inAuthGroup) {
-      router.replace('/(drawer)' as any);
-    }
-  }, [isLoading, segments]);
+      if (!hasSession && !inAuthGroup) {
+        router.replace('/login' as any);
+      } else if (hasSession && inAuthGroup) {
+        // Obtenemos el usuario actual para ver el email
+        const { data: { user } } = await supabase.auth.getUser();
+        const userEmail = user?.email;
+
+        if (userEmail === 'maxirusso20@gmail.com') {
+          // El admin (vos) va a Recorridos
+          router.replace('/(drawer)' as any);
+        } else {
+          // Cualquier otro usuario (chofer) va a Colectas
+          router.replace('/(drawer)/colectas' as any);
+        }
+      }
+    };
+
+    checkRedirect();
+  }, [isLoading, hasSession, segments]);
 
   if (isLoading) return <SplashLoader />;
 

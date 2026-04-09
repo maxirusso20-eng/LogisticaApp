@@ -1,10 +1,22 @@
+// app/(drawer)/_layout.tsx
+//
+// ROLES:
+//   Admin (maxirusso20@gmail.com) → ve todo: Recorridos, Personal, Mapa, Colectas, Chat
+//   Chofer                        → ve solo: Recorridos, Colectas, Chat
+
 import { Ionicons } from '@expo/vector-icons';
 import { DrawerActions, useNavigation } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
+
+const ADMIN_EMAIL = 'maxirusso20@gmail.com';
+
+// ─────────────────────────────────────────────
+// HEADER
+// ─────────────────────────────────────────────
 
 function HeaderLeft() {
   const navigation = useNavigation();
@@ -51,16 +63,40 @@ function HeaderRight() {
   );
 }
 
-// Componente personalizado para el contenido del Drawer
+// ─────────────────────────────────────────────
+// DEFINICIÓN DE ÍTEMS DEL DRAWER
+// ─────────────────────────────────────────────
+
+const ITEMS_ADMIN = [
+  { name: 'index', label: 'Recorridos', icon: 'bus-outline', route: '/(drawer)/' },
+  { name: 'personal', label: 'Personal', icon: 'people-outline', route: '/(drawer)/personal' },
+  { name: 'mapa', label: 'Mapa de Rutas', icon: 'map-outline', route: '/(drawer)/mapa' },
+  { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas' },
+  { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
+];
+
+const ITEMS_CHOFER = [
+  { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas' },
+  { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
+];
+
+// ─────────────────────────────────────────────
+// CONTENIDO DEL DRAWER
+// ─────────────────────────────────────────────
+
 function DrawerContent(props: any) {
   const router = useRouter();
-  const items = [
-    { name: 'index',    label: 'Recorridos',    icon: 'bus-outline',     route: '/(drawer)/' },
-    { name: 'personal', label: 'Personal',       icon: 'people-outline',  route: '/(drawer)/personal' },
-    { name: 'mapa',     label: 'Mapa de Rutas', icon: 'map-outline',     route: '/(drawer)/mapa' },
-    { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas' },
-  ];
+  const [esAdmin, setEsAdmin] = useState<boolean | null>(null);
 
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setEsAdmin(user?.email === ADMIN_EMAIL);
+    });
+  }, []);
+
+  if (esAdmin === null) return <View style={styles.drawerContainer} />;
+
+  const items = esAdmin ? ITEMS_ADMIN : ITEMS_CHOFER;
   const currentRoute = props.state?.routes[props.state?.index]?.name;
 
   return (
@@ -71,7 +107,18 @@ function DrawerContent(props: any) {
           <Ionicons name="bus" size={28} color="#4F8EF7" />
         </View>
         <Text style={styles.drawerBrand}>Logística Hogareño</Text>
-        <Text style={styles.drawerSub}>Panel de Control</Text>
+        <View style={styles.rolBadgeRow}>
+          <View style={[styles.rolBadge, esAdmin ? styles.rolBadgeAdmin : styles.rolBadgeChofer]}>
+            <Ionicons
+              name={esAdmin ? 'shield-checkmark-outline' : 'person-outline'}
+              size={10}
+              color={esAdmin ? '#F59E0B' : '#4F8EF7'}
+            />
+            <Text style={[styles.rolBadgeText, esAdmin ? { color: '#F59E0B' } : { color: '#4F8EF7' }]}>
+              {esAdmin ? 'Administrador' : 'Chofer'}
+            </Text>
+          </View>
+        </View>
       </View>
 
       {/* Divisor */}
@@ -113,9 +160,18 @@ function DrawerContent(props: any) {
   );
 }
 
+// ─────────────────────────────────────────────
+// LAYOUT PRINCIPAL
+// ─────────────────────────────────────────────
+
 export default function DrawerLayout() {
   return (
     <Drawer
+      // FIX: initialRouteName="index" garantiza que después del login
+      // siempre se aterrice en Recorridos con el header y el menú montados.
+      // Sin esto, Expo Router podía resolver /(drawer) al último screen
+      // visitado (ej: chat) sin montar correctamente el header del Drawer.
+      initialRouteName="index"
       drawerContent={(props) => <DrawerContent {...props} />}
       screenOptions={{
         drawerType: 'front',
@@ -128,19 +184,25 @@ export default function DrawerLayout() {
         headerTitleStyle: { fontWeight: '700', fontSize: 17, color: '#FFFFFF' },
       }}
     >
-      <Drawer.Screen name="index"    options={{ title: 'Recorridos' }} />
+      <Drawer.Screen name="index" options={{ title: 'Recorridos' }} />
       <Drawer.Screen name="personal" options={{ title: 'Equipo Logístico' }} />
-      <Drawer.Screen name="mapa"     options={{ title: 'Mapa de Rutas' }} />
+      <Drawer.Screen name="mapa" options={{ title: 'Mapa de Rutas' }} />
       <Drawer.Screen name="colectas" options={{ title: 'Colectas de Hoy' }} />
-      <Drawer.Screen name="explore"  options={{ drawerItemStyle: { display: 'none' } }} />
+      <Drawer.Screen name="chat" options={{ title: 'Chat' }} />
+      <Drawer.Screen name="explore" options={{ drawerItemStyle: { display: 'none' } }} />
     </Drawer>
   );
 }
 
+// ─────────────────────────────────────────────
+// ESTILOS
+// ─────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   headerBtn: { marginHorizontal: 14, padding: 4 },
+
   drawerContainer: { flex: 1, backgroundColor: '#060B18', paddingTop: 56 },
-  drawerHeader: { paddingHorizontal: 24, paddingBottom: 24, alignItems: 'flex-start' },
+  drawerHeader: { paddingHorizontal: 24, paddingBottom: 20, alignItems: 'flex-start' },
   drawerLogoBox: {
     width: 54, height: 54, borderRadius: 16,
     backgroundColor: 'rgba(79,142,247,0.12)',
@@ -148,7 +210,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', marginBottom: 14,
   },
   drawerBrand: { fontSize: 18, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.2 },
-  drawerSub: { fontSize: 12, color: '#2A4A70', marginTop: 4, fontWeight: '500' },
+
+  rolBadgeRow: { marginTop: 8 },
+  rolBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4,
+    borderWidth: 1, alignSelf: 'flex-start',
+  },
+  rolBadgeAdmin: {
+    backgroundColor: 'rgba(245,158,11,0.1)',
+    borderColor: 'rgba(245,158,11,0.25)',
+  },
+  rolBadgeChofer: {
+    backgroundColor: 'rgba(79,142,247,0.1)',
+    borderColor: 'rgba(79,142,247,0.25)',
+  },
+  rolBadgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
+
   divider: { height: 1, backgroundColor: '#0D1A2E', marginHorizontal: 24, marginBottom: 16 },
   drawerItems: { paddingHorizontal: 16, gap: 4 },
   drawerItem: {

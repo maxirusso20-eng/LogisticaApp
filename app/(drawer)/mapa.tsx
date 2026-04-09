@@ -78,7 +78,7 @@ export default function MapaScreen() {
     }
   }, []);
 
-  // ── 2. Realtime: actualización incremental en lugar de re-fetch completo
+  // ── 2. Realtime: actualización incremental
   const handleRealtimeUpdate = useCallback((payload: any) => {
     const updated = payload.new as ChoferConGPS;
     setVehiculos(prev => {
@@ -87,7 +87,6 @@ export default function MapaScreen() {
       return prev.map(v => v.id === updated.id ? { ...v, ...updated } : v);
     });
     setUltimaActualizacion(new Date());
-    // Si el chofer seleccionado cambió, actualizar su panel también
     setChoferSeleccionado(prev =>
       prev?.id === updated.id ? { ...prev, ...updated } : prev
     );
@@ -112,48 +111,84 @@ export default function MapaScreen() {
     return () => { void supabase.removeChannel(channel); };
   }, [fetchVehiculos, handleRealtimeUpdate, handleRealtimeDelete]);
 
-  // ── 3. Pedir permisos GPS y empezar rastreo del usuario logueado
+  // ── 3. GPS en foreground — sin background tasks
   useEffect(() => {
     let active = true;
 
     const iniciarRastreo = async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setErrorPermiso('Permiso de ubicación denegado. Activalo en Configuración.');
+      // Pedir solo permiso de foreground (whenInUse)
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          setErrorPermiso('Permiso de ubicación denegado. Activalo en Configuración.');
+          return;
+        }
+      } catch (err) {
+        console.warn('[GPS] Error pidiendo permisos:', err);
         return;
       }
 
+      // Obtener el ID del chofer logueado (puede ser null si el usuario es admin)
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data: choferData } = await supabase
-        .from('Choferes')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
-
-      const choferId = choferData?.id ?? null;
-
-      watcherRef.current = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.Balanced,
-          distanceInterval: 15,
-          timeInterval: 10000,
-        },
-        async (location) => {
-          if (!active) return;
-          const { latitude, longitude } = location.coords;
-          setMiUbicacion({ latitud: latitude, longitud: longitude });
-
-          if (choferId) {
-            await supabase.from('Choferes').update({
-              latitud: latitude,
-              longitud: longitude,
-              ultima_actualizacion: new Date().toISOString(),
-            }).eq('id', choferId);
-          }
+      let choferId: number | null = null;
+      if (user) {
+        try {
+          const { data: choferData } = await supabase
+            .from('Choferes')
+            .select('id')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          choferId = choferData?.id ?? null;
+        } catch {
+          // No crítico — el mapa sigue mostrando otros vehículos
         }
-      );
+      }
+
+      // Posición inicial rápida
+      try {
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        if (active) {
+          setMiUbicacion({ latitud: pos.coords.latitude, longitud: pos.coords.longitude });
+        }
+      } catch {
+        // No bloquea el flujo si falla
+      }
+
+      // Watcher en foreground — wrapped en try/catch para el error de background
+      try {
+        watcherRef.current = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Balanced,
+            distanceInterval: 15,
+            timeInterval: 10000,
+            mayShowUserSettingsDialog: false, // evita el diálogo de "siempre permitir"
+          },
+          async (location) => {
+            if (!active) return;
+            const { latitude, longitude } = location.coords;
+            setMiUbicacion({ latitud: latitude, longitud: longitude });
+
+            if (choferId) {
+              try {
+                await supabase.from('Choferes').update({
+                  latitud: latitude,
+                  longitud: longitude,
+                  ultima_actualizacion: new Date().toISOString(),
+                }).eq('id', choferId);
+              } catch (err) {
+                console.warn('[GPS] Error actualizando posición:', err);
+              }
+            }
+          }
+        );
+      } catch (err) {
+        // FIX PRINCIPAL: captura el error de background no configurado.
+        // La pantalla sigue siendo 100% funcional — solo no actualiza la posición propia.
+        console.warn('[GPS] watchPositionAsync no disponible:', err);
+        setErrorPermiso('GPS no disponible en este modo. El mapa sigue activo.');
+      }
     };
 
     iniciarRastreo();
@@ -258,7 +293,7 @@ export default function MapaScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* ── BANNER: error de permisos — debajo de los botones para no solapar ── */}
+      {/* ── BANNER: error de permisos ── */}
       {errorPermiso && (
         <View style={styles.errorBanner}>
           <Ionicons name="warning-outline" size={15} color="#F59E0B" />
@@ -330,10 +365,9 @@ const styles = StyleSheet.create({
   statNum: { fontSize: 20, fontWeight: '800', color: '#FFFFFF' },
   statLabel: { fontSize: 10, color: '#2A4A70', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 2 },
 
-  // Columna de botones de acción (derecha, bajo el statsBar)
   actionButtons: {
     position: 'absolute',
-    top: 90,    // debajo del statsBar (≈72px alto + 12px top + margen)
+    top: 90,
     right: 16,
     gap: 10,
   },
@@ -350,7 +384,6 @@ const styles = StyleSheet.create({
     shadowColor: '#000',
   },
 
-  // Banner de error — encima del panel de detalle, no solapa con botones
   errorBanner: {
     position: 'absolute',
     bottom: 80,
@@ -362,7 +395,6 @@ const styles = StyleSheet.create({
   },
   errorText: { flex: 1, color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
 
-  // Timestamp
   timestampBar: {
     position: 'absolute', bottom: 16, left: 16,
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -372,7 +404,6 @@ const styles = StyleSheet.create({
   },
   timestampText: { fontSize: 11, color: '#2A4A70', fontWeight: '600' },
 
-  // Panel de detalle del chofer
   detailPanel: {
     position: 'absolute', bottom: 16, left: 16, right: 16,
     backgroundColor: 'rgba(13,21,38,0.96)',
