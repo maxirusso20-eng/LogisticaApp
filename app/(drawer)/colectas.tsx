@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Linking,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { startTracking, stopTracking } from '../../lib/locationTracker';
 import { supabase } from '../../lib/supabase';
 
 // ─────────────────────────────────────────────
@@ -39,6 +42,21 @@ const getSaludo = (): string => {
   if (hora < 12) return 'Buenos días';
   if (hora < 19) return 'Buenas tardes';
   return 'Buenas noches';
+};
+
+/** Abre la dirección en la app de mapas por defecto */
+const abrirMapa = (direccion: string) => {
+  if (!direccion) return;
+  const urlEncoded = encodeURIComponent(direccion);
+  const url = Platform.select({
+    ios: `maps:0,0?q=${urlEncoded}`,
+    android: `geo:0,0?q=${urlEncoded}`,
+    default: `https://www.google.com/maps/search/?api=1&query=${urlEncoded}`,
+  });
+  
+  if (url) {
+    Linking.openURL(url).catch(err => console.error('Error abriendo mapa:', err));
+  }
 };
 
 // ─────────────────────────────────────────────
@@ -125,13 +143,23 @@ function ColectaCard({
 
         {/* Detalles */}
         <View style={styles.details}>
-          <View style={styles.detailRow}>
-            <Ionicons name="location-outline" size={13} color="#2A4A70" />
+          <TouchableOpacity 
+            style={styles.addressTouchable}
+            activeOpacity={0.6}
+            onPress={() => item.direccion && abrirMapa(item.direccion)}
+          >
+            <Ionicons name="location-outline" size={14} color={done ? '#1A3050' : '#4F8EF7'} />
             <Text style={[styles.detailText, done && styles.textDone]} numberOfLines={2}>
               {item.direccion || '—'}
             </Text>
-          </View>
-          <View style={[styles.detailRow, { marginTop: 5 }]}>
+            {item.direccion ? (
+              <View style={[styles.mapNavIconWrap, done && { backgroundColor: 'rgba(26,48,80,0.2)' }]}>
+                <Ionicons name="map-outline" size={18} color={done ? '#1A3050' : '#4F8EF7'} />
+              </View>
+            ) : null}
+          </TouchableOpacity>
+
+          <View style={[styles.detailRow, { marginTop: 4, marginLeft: 2 }]}>
             <Ionicons name="person-outline" size={13} color="#2A4A70" />
             <Text style={[styles.detailText, done && styles.textDone]}>
               {item.chofer || 'Sin asignar'}
@@ -164,6 +192,7 @@ export default function ColectasScreen() {
   const [nombreUsuario, setNombre] = useState('');
   const [saludo] = useState(getSaludo); // calculado una vez al montar
   const [toggling, setToggling] = useState<Set<number | string>>(new Set());
+  const [gpsStatus, setGpsStatus] = useState<'off' | 'foreground' | 'background' | 'denied'>('off');
 
   // ── 1. Fetch personalizado por chofer logueado
   const fetchClientes = useCallback(async (mostrarLoader = false) => {
@@ -209,6 +238,30 @@ export default function ColectasScreen() {
 
     return () => { void supabase.removeChannel(channel); };
   }, [fetchClientes]);
+
+  // ── GPS tracking en segundo plano ─────────────────────────────────────────
+  useEffect(() => {
+    let montado = true;
+
+    const iniciarGPS = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user?.email || !montado) return;
+
+        const resultado = await startTracking(user.email);
+        if (montado) setGpsStatus(resultado);
+      } catch (err) {
+        console.error('[GPS] Error al iniciar tracking:', err);
+      }
+    };
+
+    iniciarGPS();
+
+    return () => {
+      montado = false;
+      void stopTracking().then(() => setGpsStatus('off'));
+    };
+  }, []);
 
   const handleRefresh = () => {
     setRefrescando(true);
@@ -284,7 +337,27 @@ export default function ColectasScreen() {
     >
       {/* ── Saludo dinámico ── */}
       <View style={styles.greetingBox}>
-        <Text style={styles.greetingEyebrow}>COLECTAS DE HOY</Text>
+        <View style={styles.greetingTopRow}>
+          <Text style={styles.greetingEyebrow}>COLECTAS DE HOY</Text>
+          {/* Chip GPS */}
+          {gpsStatus !== 'off' && gpsStatus !== 'denied' && (
+            <View style={[
+              styles.gpsChip,
+              gpsStatus === 'background' && styles.gpsChipBackground,
+            ]}>
+              <View style={styles.gpsDot} />
+              <Text style={styles.gpsChipText}>
+                {gpsStatus === 'background' ? 'GPS activo' : 'GPS (primer plano)'}
+              </Text>
+            </View>
+          )}
+          {gpsStatus === 'denied' && (
+            <View style={[styles.gpsChip, styles.gpsChipDenied]}>
+              <Ionicons name="location-outline" size={11} color="#F59E0B" />
+              <Text style={[styles.gpsChipText, { color: '#F59E0B' }]}>GPS sin permiso</Text>
+            </View>
+          )}
+        </View>
         <Text style={styles.greetingTitle}>
           {saludo}, {nombreUsuario || 'chofer'} 👋
         </Text>
@@ -456,9 +529,34 @@ const styles = StyleSheet.create({
     borderRadius: 18, padding: 20, marginBottom: 16,
     borderWidth: 1, borderColor: '#1A2540',
   },
-  greetingEyebrow: { fontSize: 10, fontWeight: '800', color: '#4F8EF7', letterSpacing: 2, marginBottom: 6, textTransform: 'uppercase' },
+  greetingTopRow: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', marginBottom: 6,
+  },
+  greetingEyebrow: { fontSize: 10, fontWeight: '800', color: '#4F8EF7', letterSpacing: 2, textTransform: 'uppercase' },
   greetingTitle: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', marginBottom: 4, letterSpacing: -0.3 },
   greetingSubtitle: { fontSize: 13, color: '#4A6FA5', fontWeight: '500' },
+
+  // Chip GPS
+  gpsChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(52,211,153,0.10)',
+    borderWidth: 1, borderColor: 'rgba(52,211,153,0.25)',
+    borderRadius: 20, paddingHorizontal: 9, paddingVertical: 4,
+  },
+  gpsChipBackground: {
+    backgroundColor: 'rgba(52,211,153,0.15)',
+    borderColor: 'rgba(52,211,153,0.40)',
+  },
+  gpsChipDenied: {
+    backgroundColor: 'rgba(245,158,11,0.10)',
+    borderColor: 'rgba(245,158,11,0.25)',
+  },
+  gpsDot: {
+    width: 6, height: 6, borderRadius: 3,
+    backgroundColor: '#34D399',
+  },
+  gpsChipText: { fontSize: 10, fontWeight: '700', color: '#34D399', letterSpacing: 0.3 },
 
   // Tarjeta
   card: {
@@ -485,6 +583,8 @@ const styles = StyleSheet.create({
   checkWrap: { paddingLeft: 12, justifyContent: 'center', minWidth: 42 },
 
   details: {},
+  addressTouchable: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 6, marginTop: -2 },
+  mapNavIconWrap: { backgroundColor: 'rgba(79,142,247,0.15)', borderRadius: 10, padding: 8, marginLeft: 6 },
   detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
   detailText: { flex: 1, fontSize: 12, color: '#4A6FA5', fontWeight: '500', lineHeight: 18 },
 

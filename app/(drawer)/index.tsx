@@ -1,3 +1,4 @@
+
 /**
  * app/(drawer)/index.tsx — Pantalla principal: Recorridos
  *
@@ -14,6 +15,9 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
+import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -30,6 +34,63 @@ import {
   View,
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
+
+// ─────────────────────────────────────────────
+// PUSH NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+// Mostrar notificación como banner aunque la app esté en primer plano
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true, // <-- AGREGÁ ESTA LÍNEA
+    shouldShowList: true,   // <-- Y AGREGÁ ESTA LÍNEA
+  }),
+});
+async function registerForPushNotificationsAsync(): Promise<Notifications.ExpoPushToken | null | undefined> {
+  if (!Device.isDevice) {
+    console.warn('Push notifications solo funcionan en dispositivos físicos.');
+    return null;
+  }
+
+  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  let finalStatus = existingStatus;
+
+  if (existingStatus !== 'granted') {
+    const { status } = await Notifications.requestPermissionsAsync();
+    finalStatus = status;
+  }
+
+  if (finalStatus !== 'granted') {
+    console.warn('Permiso de notificaciones denegado.');
+    return null;
+  }
+
+  // En Android se requiere un canal
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#4F8EF7',
+    });
+  }
+
+  try {
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    if (!projectId) {
+      throw new Error('Project ID no existe en expoConfig. Pasando en modo desarrollo o Expo Go.');
+    }
+    
+    const token = await Notifications.getExpoPushTokenAsync({ projectId });
+    return token;
+  } catch (err) {
+    console.log('Aviso (Push Token ignorado temporalmente):', err instanceof Error ? err.message : err);
+    return undefined;
+  }
+}
 
 // ─────────────────────────────────────────────
 // TIPOS
@@ -459,11 +520,56 @@ export default function RecorridosScreen() {
     } catch { /* silencioso — el widget es opcional */ }
   }, []);
 
+  // ── Al cargar la pantalla principal ────────
   useEffect(() => {
     refreshChoferes();
     refreshRecorridos();
     fetchColectasPendientes();
   }, [refreshChoferes, refreshRecorridos, fetchColectasPendientes]);
+
+  // ── Manejo de Push Notifications ───────────
+  useEffect(() => {
+    // 1. Reaccionar al tap de la notificación para ir directo a la tarea
+    const responseListener = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data;
+      // 'tipo' coincide con el payload que mandamos desde la Edge Function
+      if (data?.tipo === 'NUEVA_COLECTA') {
+        router.push('/(drawer)/colectas' as any);
+      }
+    });
+
+    // 2. Registro seguro del token
+    const registrarTokenSeguro = async () => {
+      try {
+        // Obtenemos la info primero para no pedir permisos innecesariamente si no hay sesión
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user?.email) return; 
+
+        // Una vez asegurado de que es un chofer, procedemos a solicitar el token
+        const token = await registerForPushNotificationsAsync();
+        if (!token) return;
+
+        const { error } = await supabase
+          .from('Choferes')
+          .update({ push_token: token.data })
+          .eq('email', user.email);
+
+        if (error) {
+          console.error('Error guardando push token en Supabase:', error.message);
+        } else {
+          console.log('✅ Push token vinculado a:', user.email);
+        }
+      } catch (err) {
+        console.error('Error en registro de push notifications:', err);
+      }
+    };
+
+    registrarTokenSeguro();
+
+    return () => {
+      responseListener.remove();
+    };
+  }, [router]);
 
   // ── Realtime con debounce ──────────────────
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
