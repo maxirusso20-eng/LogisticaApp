@@ -1,8 +1,12 @@
 // app/(drawer)/_layout.tsx
 //
 // ROLES:
-//   Admin (maxirusso20@gmail.com) → ve todo: Recorridos, Personal, Mapa, Colectas, Chat
-//   Chofer                        → ve solo: Recorridos, Colectas, Chat
+//   Admin (maxirusso20@gmail.com) → Recorridos, Personal, Mapa, Colectas, Chat
+//   Chofer                        → Panel del Día, Mis Colectas, Chat
+//
+// El rol se detecta con getSession() (síncrono desde caché local, sin
+// network call) para que el drawer muestre los ítems correctos desde
+// el primer frame sin parpadeo ni espera.
 
 import { Ionicons } from '@expo/vector-icons';
 import { DrawerActions, useNavigation } from '@react-navigation/native';
@@ -13,6 +17,32 @@ import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 
 const ADMIN_EMAIL = 'maxirusso20@gmail.com';
+
+// ─────────────────────────────────────────────
+// HOOK: useEsAdmin
+// Detecta el rol leyendo primero la sesión en caché (instantáneo)
+// y luego verificando con el servidor si hace falta.
+// ─────────────────────────────────────────────
+
+function useEsAdmin(): boolean | null {
+  const [esAdmin, setEsAdmin] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    // getSession() lee AsyncStorage — sin network, resultado inmediato
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.email) {
+        setEsAdmin(session.user.email === ADMIN_EMAIL);
+      } else {
+        // Sin sesión en caché, verificar con servidor
+        supabase.auth.getUser().then(({ data }) => {
+          setEsAdmin((data.user?.email ?? '') === ADMIN_EMAIL);
+        });
+      }
+    });
+  }, []);
+
+  return esAdmin;
+}
 
 // ─────────────────────────────────────────────
 // HEADER
@@ -64,7 +94,7 @@ function HeaderRight() {
 }
 
 // ─────────────────────────────────────────────
-// DEFINICIÓN DE ÍTEMS DEL DRAWER
+// ÍTEMS DEL DRAWER
 // ─────────────────────────────────────────────
 
 const ITEMS_ADMIN = [
@@ -76,7 +106,8 @@ const ITEMS_ADMIN = [
 ];
 
 const ITEMS_CHOFER = [
-  { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas' },
+  { name: 'Panel', label: 'Panel del Día', icon: 'clipboard-outline', route: '/(drawer)/Panel' },
+  { name: 'colectas', label: 'Mis Colectas', icon: 'archive-outline', route: '/(drawer)/colectas' },
   { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
 ];
 
@@ -86,14 +117,9 @@ const ITEMS_CHOFER = [
 
 function DrawerContent(props: any) {
   const router = useRouter();
-  const [esAdmin, setEsAdmin] = useState<boolean | null>(null);
+  const esAdmin = useEsAdmin();
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setEsAdmin(user?.email === ADMIN_EMAIL);
-    });
-  }, []);
-
+  // Mientras detectamos el rol mostramos el container vacío (sin flash)
   if (esAdmin === null) return <View style={styles.drawerContainer} />;
 
   const items = esAdmin ? ITEMS_ADMIN : ITEMS_CHOFER;
@@ -101,7 +127,7 @@ function DrawerContent(props: any) {
 
   return (
     <View style={styles.drawerContainer}>
-      {/* Header del Drawer */}
+      {/* Header */}
       <View style={styles.drawerHeader}>
         <View style={styles.drawerLogoBox}>
           <Ionicons name="bus" size={28} color="#4F8EF7" />
@@ -121,7 +147,6 @@ function DrawerContent(props: any) {
         </View>
       </View>
 
-      {/* Divisor */}
       <View style={styles.divider} />
 
       {/* Ítems de navegación */}
@@ -136,11 +161,7 @@ function DrawerContent(props: any) {
               activeOpacity={0.7}
             >
               <View style={[styles.drawerIconBox, isActive && styles.drawerIconBoxActive]}>
-                <Ionicons
-                  name={item.icon as any}
-                  size={20}
-                  color={isActive ? '#4F8EF7' : '#4A6FA5'}
-                />
+                <Ionicons name={item.icon as any} size={20} color={isActive ? '#4F8EF7' : '#4A6FA5'} />
               </View>
               <Text style={[styles.drawerLabel, isActive && styles.drawerLabelActive]}>
                 {item.label}
@@ -151,7 +172,7 @@ function DrawerContent(props: any) {
         })}
       </View>
 
-      {/* Footer del Drawer */}
+      {/* Footer */}
       <View style={styles.drawerFooter}>
         <View style={styles.divider} />
         <Text style={styles.drawerFooterText}>v1.0.0 · © 2026</Text>
@@ -165,13 +186,16 @@ function DrawerContent(props: any) {
 // ─────────────────────────────────────────────
 
 export default function DrawerLayout() {
+  const esAdmin = useEsAdmin();
+
+  // Mientras no sabemos el rol, usamos 'colectas' como fallback seguro.
+  // El root _layout.tsx ya hizo el redirect correcto antes de llegar acá,
+  // así que el usuario ya está en la pantalla correcta.
+  const rutaInicial = esAdmin === true ? 'index' : 'colectas';
+
   return (
     <Drawer
-      // FIX: initialRouteName="index" garantiza que después del login
-      // siempre se aterrice en Recorridos con el header y el menú montados.
-      // Sin esto, Expo Router podía resolver /(drawer) al último screen
-      // visitado (ej: chat) sin montar correctamente el header del Drawer.
-      initialRouteName="index"
+      initialRouteName={rutaInicial}
       drawerContent={(props) => <DrawerContent {...props} />}
       screenOptions={{
         drawerType: 'front',
@@ -189,6 +213,7 @@ export default function DrawerLayout() {
       <Drawer.Screen name="mapa" options={{ title: 'Mapa de Rutas' }} />
       <Drawer.Screen name="colectas" options={{ title: 'Colectas de Hoy' }} />
       <Drawer.Screen name="chat" options={{ title: 'Chat' }} />
+      <Drawer.Screen name="Panel" options={{ title: 'Panel del Día' }} />
       <Drawer.Screen name="explore" options={{ drawerItemStyle: { display: 'none' } }} />
     </Drawer>
   );
@@ -217,14 +242,8 @@ const styles = StyleSheet.create({
     borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4,
     borderWidth: 1, alignSelf: 'flex-start',
   },
-  rolBadgeAdmin: {
-    backgroundColor: 'rgba(245,158,11,0.1)',
-    borderColor: 'rgba(245,158,11,0.25)',
-  },
-  rolBadgeChofer: {
-    backgroundColor: 'rgba(79,142,247,0.1)',
-    borderColor: 'rgba(79,142,247,0.25)',
-  },
+  rolBadgeAdmin: { backgroundColor: 'rgba(245,158,11,0.1)', borderColor: 'rgba(245,158,11,0.25)' },
+  rolBadgeChofer: { backgroundColor: 'rgba(79,142,247,0.1)', borderColor: 'rgba(79,142,247,0.25)' },
   rolBadgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
 
   divider: { height: 1, backgroundColor: '#0D1A2E', marginHorizontal: 24, marginBottom: 16 },

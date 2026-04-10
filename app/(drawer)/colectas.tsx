@@ -1,7 +1,7 @@
 // app/(drawer)/colectas.tsx
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -19,18 +19,22 @@ import { startTracking, stopTracking } from '../../lib/locationTracker';
 import { supabase } from '../../lib/supabase';
 
 // ─────────────────────────────────────────────
+// CONSTANTE: email del administrador
+// ─────────────────────────────────────────────
+
+const ADMIN_EMAIL = 'maxirusso20@gmail.com';
+
+// ─────────────────────────────────────────────
 // CACHÉ GLOBAL — fuera del componente React
 //
 // Sobrevive re-renders, hot-reloads del metro bundler en dev, y cualquier
-// desmontaje/remontaje del componente.  Nunca se limpia solo por setState.
+// desmontaje/remontaje del componente. Nunca se limpia solo por setState.
 //
-// Clave  : String(id)  →  garantiza igualdad estricta sin importar si la
-//          DB devuelve el id como number o string.
-// Valor  : Date.now() en el momento en que el CHOFER hizo el toggle.
-//
-// TTL    : 5 000 ms.  Si el eco de Supabase Realtime llega después de 5 s
-//          (muy improbable) se trata igual como cambio externo y se notifica.
-//          Si llega antes (lo normal, ~100-800 ms) se suprime.
+// Clave : String(id)  → garantiza igualdad estricta sin importar si la
+//         DB devuelve el id como number o string.
+// Valor : Date.now() en el momento en que el CHOFER hizo el toggle.
+// TTL   : 5 000 ms. Si el eco de Supabase Realtime llega después de 5 s
+//         se trata como cambio externo y se notifica.
 // ─────────────────────────────────────────────
 
 const ignorarNotificacionesCache = new Map<string, number>();
@@ -97,16 +101,16 @@ async function notificarCambioDesdecentral(payload: {
 
 async function enviarMensajeAutoChatColecta(
   userId: string,
-  nombreChofer: string,
   nombreColecta: string,
 ): Promise<void> {
   try {
-    await supabase.from('mensajes').insert([{
+    const { error } = await supabase.from('mensajes').insert([{
       user_id: userId,
       remitente: 'Sistema',
       texto: `🔔 Colecta recogida: ${nombreColecta}`,
       chofer_id: userId,
     }]);
+    if (error) console.warn('[Chat auto] Error Supabase:', error.message);
   } catch (err) {
     console.warn('[Chat auto] Error enviando mensaje:', err);
   }
@@ -123,6 +127,14 @@ interface Cliente {
   horario: string;
   chofer: string;
   completado: boolean;
+}
+
+// Grupo de colectas por nombre de chofer — usado exclusivamente en la vista admin
+interface GrupoChofer {
+  nombre: string;
+  colectas: Cliente[];
+  hechas: number;
+  total: number;
 }
 
 type FiltroColecta = 'todas' | 'pendientes' | 'completadas';
@@ -149,8 +161,35 @@ const abrirMapa = (direccion: string) => {
   if (url) Linking.openURL(url).catch(err => console.error('Error abriendo mapa:', err));
 };
 
+// Agrupa un array de Cliente por el campo `chofer`, ordenando los grupos
+// alfabéticamente y poniendo primero los que tienen colectas pendientes.
+const agruparPorChofer = (lista: Cliente[]): GrupoChofer[] => {
+  const mapa = new Map<string, Cliente[]>();
+
+  for (const c of lista) {
+    const nombre = c.chofer?.trim() || 'Sin asignar';
+    if (!mapa.has(nombre)) mapa.set(nombre, []);
+    mapa.get(nombre)!.push(c);
+  }
+
+  return Array.from(mapa.entries())
+    .map(([nombre, colectas]) => ({
+      nombre,
+      colectas: colectas.sort((a, b) => (a.horario || '').localeCompare(b.horario || '')),
+      hechas: colectas.filter(c => c.completado).length,
+      total: colectas.length,
+    }))
+    // Primero los grupos con pendientes, luego por nombre
+    .sort((a, b) => {
+      const aPendientes = a.total - a.hechas;
+      const bPendientes = b.total - b.hechas;
+      if (bPendientes !== aPendientes) return bPendientes - aPendientes;
+      return a.nombre.localeCompare(b.nombre);
+    });
+};
+
 // ─────────────────────────────────────────────
-// TARJETA DE COLECTA
+// COMPONENTE: ColectaCard (vista CHOFER — sin cambios)
 // ─────────────────────────────────────────────
 
 function ColectaCard({
@@ -233,6 +272,284 @@ function ColectaCard({
 }
 
 // ─────────────────────────────────────────────
+// COMPONENTE: FilaColectaAdmin
+// Fila compacta dentro de la card de chofer (vista ADMIN)
+// ─────────────────────────────────────────────
+
+const FilaColectaAdmin: React.FC<{ item: Cliente }> = ({ item }) => {
+  const done = item.completado;
+  return (
+    <View style={[adminStyles.fila, done && adminStyles.filaDone]}>
+      {/* Indicador de estado */}
+      <View style={[adminStyles.filaIndicador, done && adminStyles.filaIndicadorDone]} />
+
+      {/* Datos */}
+      <View style={{ flex: 1 }}>
+        <Text style={[adminStyles.filaNombre, done && adminStyles.filaTextoDone]} numberOfLines={1}>
+          {item.cliente || '—'}
+        </Text>
+        <View style={adminStyles.filaMeta}>
+          <Ionicons name="time-outline" size={11} color={done ? '#1A3050' : '#4A6FA5'} />
+          <Text style={[adminStyles.filaMetaText, done && { color: '#1A3050' }]}>
+            {item.horario || 'Sin horario'}
+          </Text>
+          {item.direccion ? (
+            <>
+              <Text style={adminStyles.filaMetaSep}>·</Text>
+              <Ionicons name="location-outline" size={11} color={done ? '#1A3050' : '#4A6FA5'} />
+              <Text style={[adminStyles.filaMetaText, { flex: 1 }, done && { color: '#1A3050' }]} numberOfLines={1}>
+                {item.direccion}
+              </Text>
+            </>
+          ) : null}
+        </View>
+      </View>
+
+      {/* Badge de estado */}
+      {done ? (
+        <View style={adminStyles.badgeDone}>
+          <Ionicons name="checkmark-done" size={10} color="#34D399" />
+          <Text style={adminStyles.badgeDoneText}>Hecha</Text>
+        </View>
+      ) : (
+        <View style={adminStyles.badgePendiente}>
+          <Text style={adminStyles.badgePendienteText}>Pendiente</Text>
+        </View>
+      )}
+    </View>
+  );
+};
+
+// ─────────────────────────────────────────────
+// COMPONENTE: CardChoferAdmin
+// Card colapsable por chofer (vista ADMIN)
+// ─────────────────────────────────────────────
+
+const CardChoferAdmin: React.FC<{ grupo: GrupoChofer; index: number }> = ({ grupo, index }) => {
+  const [expandido, setExpandido] = useState(true);
+  const fade = useRef(new Animated.Value(0)).current;
+  const rotacion = useRef(new Animated.Value(expandido ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.timing(fade, {
+      toValue: 1, duration: 400,
+      delay: index * 80, useNativeDriver: true,
+    }).start();
+  }, []);
+
+  const toggleExpandido = () => {
+    const nuevoValor = !expandido;
+    setExpandido(nuevoValor);
+    Animated.timing(rotacion, {
+      toValue: nuevoValor ? 1 : 0,
+      duration: 220, useNativeDriver: true,
+    }).start();
+  };
+
+  const rotarIcono = rotacion.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '180deg'],
+  });
+
+  const pendientes = grupo.total - grupo.hechas;
+  const porcentaje = grupo.total > 0 ? grupo.hechas / grupo.total : 0;
+  const todoCompleto = pendientes === 0;
+
+  // Color del anillo de progreso según avance
+  const colorProgreso = todoCompleto
+    ? '#34D399'
+    : porcentaje >= 0.5
+      ? '#4F8EF7'
+      : '#F59E0B';
+
+  // Iniciales del chofer para el avatar
+  const iniciales = grupo.nombre
+    .split(' ')
+    .map(p => p[0] || '')
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+
+  return (
+    <Animated.View style={[adminStyles.card, { opacity: fade }]}>
+      {/* ── Header del grupo ── */}
+      <TouchableOpacity
+        style={adminStyles.cardHeader}
+        onPress={toggleExpandido}
+        activeOpacity={0.75}
+      >
+        {/* Avatar con inicial */}
+        <View style={[adminStyles.avatar, { borderColor: colorProgreso + '55' }]}>
+          <Text style={[adminStyles.avatarText, { color: colorProgreso }]}>{iniciales}</Text>
+        </View>
+
+        {/* Nombre y contador */}
+        <View style={{ flex: 1 }}>
+          <Text style={adminStyles.choferNombre} numberOfLines={1}>{grupo.nombre}</Text>
+          <View style={adminStyles.progresoRow}>
+            <Text style={[adminStyles.progresoTexto, { color: colorProgreso }]}>
+              {grupo.hechas}/{grupo.total} completadas
+            </Text>
+            {!todoCompleto && (
+              <View style={adminStyles.pendienteBadge}>
+                <Text style={adminStyles.pendienteBadgeText}>{pendientes} pend.</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Barra de progreso circular simplificada → barra lineal compacta */}
+        <View style={{ alignItems: 'flex-end', gap: 6 }}>
+          <View style={adminStyles.miniBarBg}>
+            <View style={[
+              adminStyles.miniBarFill,
+              { width: `${porcentaje * 100}%` as any, backgroundColor: colorProgreso },
+            ]} />
+          </View>
+          <Animated.View style={{ transform: [{ rotate: rotarIcono }] }}>
+            <Ionicons name="chevron-down" size={16} color="#4A6FA5" />
+          </Animated.View>
+        </View>
+      </TouchableOpacity>
+
+      {/* ── Filas de colectas (colapsable) ── */}
+      {expandido && (
+        <View style={adminStyles.filasContainer}>
+          <View style={adminStyles.filasDivider} />
+          {grupo.colectas.map((c) => (
+            <FilaColectaAdmin key={String(c.id)} item={c} />
+          ))}
+        </View>
+      )}
+    </Animated.View>
+  );
+};
+
+// ─────────────────────────────────────────────
+// COMPONENTE: VistaAdmin
+// Panel completo de supervisión (solo admin)
+// ─────────────────────────────────────────────
+
+const VistaAdmin: React.FC<{
+  clientes: Cliente[];
+  refrescando: boolean;
+  onRefresh: () => void;
+}> = ({ clientes, refrescando, onRefresh }) => {
+  const [busqueda, setBusqueda] = useState('');
+
+  // Agrupa y filtra en memoria — no hace fetch adicional
+  const grupos = useMemo(() => {
+    const lista = busqueda.trim()
+      ? clientes.filter(c =>
+        (c.cliente || '').toLowerCase().includes(busqueda.toLowerCase()) ||
+        (c.chofer || '').toLowerCase().includes(busqueda.toLowerCase()) ||
+        (c.direccion || '').toLowerCase().includes(busqueda.toLowerCase())
+      )
+      : clientes;
+    return agruparPorChofer(lista);
+  }, [clientes, busqueda]);
+
+  // Stats globales del día
+  const totalGlobal = clientes.length;
+  const hechasGlobal = clientes.filter(c => c.completado).length;
+  const pendientesGlobal = totalGlobal - hechasGlobal;
+  const progresoGlobal = totalGlobal > 0 ? hechasGlobal / totalGlobal : 0;
+
+  return (
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={refrescando} onRefresh={onRefresh} tintColor="#4F8EF7" colors={['#4F8EF7']} />
+      }
+    >
+      {/* ── Header admin ── */}
+      <View style={adminStyles.headerBox}>
+        <View style={adminStyles.headerTopRow}>
+          <View>
+            <Text style={adminStyles.headerEyebrow}>PANEL DE SUPERVISIÓN</Text>
+            <Text style={adminStyles.headerTitle}>Vista del día</Text>
+          </View>
+          <View style={adminStyles.adminBadge}>
+            <Ionicons name="shield-checkmark-outline" size={12} color="#F59E0B" />
+            <Text style={adminStyles.adminBadgeText}>Admin</Text>
+          </View>
+        </View>
+
+        {/* Stats globales */}
+        <View style={adminStyles.statsGlobales}>
+          <View style={adminStyles.statGlobal}>
+            <Text style={adminStyles.statGlobalNum}>{totalGlobal}</Text>
+            <Text style={adminStyles.statGlobalLabel}>Total</Text>
+          </View>
+          <View style={[adminStyles.statGlobal, adminStyles.statGlobalMid]}>
+            <Text style={[adminStyles.statGlobalNum, { color: '#34D399' }]}>{hechasGlobal}</Text>
+            <Text style={adminStyles.statGlobalLabel}>Hechas</Text>
+          </View>
+          <View style={adminStyles.statGlobal}>
+            <Text style={[adminStyles.statGlobalNum, { color: pendientesGlobal > 0 ? '#F59E0B' : '#6B7280' }]}>
+              {pendientesGlobal}
+            </Text>
+            <Text style={adminStyles.statGlobalLabel}>Pendientes</Text>
+          </View>
+          <View style={[adminStyles.statGlobal, adminStyles.statGlobalMid]}>
+            <Text style={[adminStyles.statGlobalNum, { color: '#4F8EF7' }]}>{grupos.length}</Text>
+            <Text style={adminStyles.statGlobalLabel}>Choferes</Text>
+          </View>
+        </View>
+
+        {/* Barra de progreso global */}
+        <View style={{ marginTop: 14 }}>
+          <View style={styles.progressBg}>
+            <View style={[styles.progressFill, { width: `${progresoGlobal * 100}%` as any }]} />
+          </View>
+          <Text style={[styles.progressLabel, { marginTop: 5 }]}>
+            {Math.round(progresoGlobal * 100)}% del día completado
+          </Text>
+        </View>
+      </View>
+
+      {/* ── Buscador global ── */}
+      <View style={styles.searchRow}>
+        <Ionicons name="search-outline" size={16} color="#2A4A70" style={{ marginRight: 10 }} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Buscar cliente, chofer o dirección..."
+          placeholderTextColor="#1A3050"
+          value={busqueda}
+          onChangeText={setBusqueda}
+        />
+        {busqueda.length > 0 && (
+          <TouchableOpacity onPress={() => setBusqueda('')}>
+            <Ionicons name="close-circle" size={16} color="#2A4A70" />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* ── Cards por chofer ── */}
+      {grupos.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Ionicons name="people-outline" size={52} color="#1A2540" />
+          <Text style={styles.emptyTitle}>
+            {busqueda ? 'Sin resultados' : 'Sin colectas hoy'}
+          </Text>
+          <Text style={styles.emptySubtitle}>
+            {busqueda ? 'Probá con otro término.' : 'No hay colectas cargadas para hoy.'}
+          </Text>
+        </View>
+      ) : (
+        grupos.map((g, i) => (
+          <CardChoferAdmin key={g.nombre} grupo={g} index={i} />
+        ))
+      )}
+
+      <View style={{ height: 32 }} />
+    </ScrollView>
+  );
+};
+
+// ─────────────────────────────────────────────
 // PANTALLA PRINCIPAL
 // ─────────────────────────────────────────────
 
@@ -246,13 +563,16 @@ export default function ColectasScreen() {
   const [saludo] = useState(getSaludo);
   const [toggling, setToggling] = useState<Set<number | string>>(new Set());
   const [gpsStatus, setGpsStatus] = useState<'off' | 'foreground' | 'background' | 'denied'>('off');
+  const [esAdmin, setEsAdmin] = useState(false);
 
-  // Datos del usuario logueado
   const emailUsuarioRef = useRef<string | null>(null);
   const userIdRef = useRef<string | null>(null);
-  const nombreUsuarioRef = useRef<string>('Chofer');
+  const esAdminRef = useRef(false);
 
-  // ── 1. Fetch personalizado por chofer logueado ─────────────────────────
+  // ── 1. Fetch de colectas (inteligente según rol) ───────────────────────
+  //
+  // Admin  → trae TODAS las colectas de la tabla sin filtrar por email.
+  // Chofer → filtra por email_chofer (comportamiento original).
 
   const fetchClientes = useCallback(async (mostrarLoader = false) => {
     if (mostrarLoader) setCargando(true);
@@ -262,21 +582,28 @@ export default function ColectasScreen() {
 
       emailUsuarioRef.current = user.email;
       userIdRef.current = user.id;
+      esAdminRef.current = user.email === ADMIN_EMAIL;
+      setEsAdmin(user.email === ADMIN_EMAIL);
 
       const displayName: string =
         user.user_metadata?.full_name ||
         user.user_metadata?.name ||
         user.email.split('@')[0];
-      const primerNombre = displayName.split(' ')[0];
-      setNombre(primerNombre);
-      nombreUsuarioRef.current = primerNombre;
+      setNombre(displayName.split(' ')[0]);
 
-      const { data, error } = await supabase
+      // ── Consulta diferente según rol ───────────────────────────────────
+      let query = supabase
         .from('Clientes')
         .select('id, cliente, direccion, horario, chofer, completado')
-        .eq('email_chofer', user.email)
         .order('horario', { ascending: true });
 
+      if (!esAdminRef.current) {
+        // Chofer: solo sus colectas
+        query = query.eq('email_chofer', user.email);
+      }
+      // Admin: sin filtro → trae todo
+
+      const { data, error } = await query;
       if (error) throw error;
       setClientes(data || []);
     } catch (err) {
@@ -287,19 +614,7 @@ export default function ColectasScreen() {
     }
   }, []);
 
-  // ── 2. Realtime — solo notifica cambios que vienen DE LA CENTRAL ───────
-  //
-  // La lógica de filtrado usa el caché global `ignorarNotificacionesCache`.
-  //
-  // Flujo:
-  //   a) handleToggle escribe  Map.set(idStr, Date.now())  ANTES del update.
-  //   b) Supabase Realtime dispara el eco (siempre llega, incluso para los
-  //      cambios propios) con un delay típico de 100-800 ms.
-  //   c) Acá chequeamos:
-  //        · Si el ID está en el Map Y pasaron < 5 s  → eco propio → ignorar.
-  //        · Si no está, o pasaron ≥ 5 s              → cambio externo → notificar.
-  //   d) Después de la decisión, limpiar la entrada del Map.
-  // ──────────────────────────────────────────────────────────────────────
+  // ── 2. Realtime — actualiza UI + notifica solo cambios de la central ───
 
   useEffect(() => {
     fetchClientes(true);
@@ -308,29 +623,57 @@ export default function ColectasScreen() {
       .channel('colectas-sync')
 
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'Clientes' }, (payload) => {
-        const registro = payload.new as Cliente;
+        const registro = payload.new as Cliente & { email_chofer?: string };
+        const registroOld = payload.old as Cliente & { email_chofer?: string };
 
-        // Actualización incremental en UI (siempre, sea propio o externo)
         setClientes(prev => prev.map(c => c.id === registro.id ? { ...c, ...registro } : c));
 
-        // ── Lógica anti-eco con caché global ──────────────────────────
+        // Admin no recibe notificaciones locales — solo el chofer las necesita
+        if (esAdminRef.current) return;
+
         const idStr = String(registro.id);
         const timestampPropio = ignorarNotificacionesCache.get(idStr);
 
         if (timestampPropio !== undefined) {
           const edad = Date.now() - timestampPropio;
-          // Limpiar siempre para no acumular entradas viejas
           ignorarNotificacionesCache.delete(idStr);
-
-          if (edad < CACHE_TTL_MS) {
-            // Eco del propio chofer dentro de la ventana TTL → silenciar
-            return;
-          }
-          // Si ya pasaron ≥ 5 s (improbable pero posible) → caído fuera del TTL,
-          // tratar como cambio externo y continuar hacia la notificación.
+          if (edad < CACHE_TTL_MS) return; // eco del propio chofer → silenciar
         }
 
-        // Cambio real desde la central → notificar
+        // ── LÓGICA DE ASIGNACIÓN ──────────────────────────────────────────
+        // Solo notificar al chofer cuando el campo email_chofer pasa de
+        // vacío/null a tener un valor → es una ASIGNACIÓN nueva.
+        // Si email_chofer se borró o cambió a otro → no notificar.
+        //
+        // Casos:
+        //   old: ''  / null  → new: 'chofer@mail.com'  → asignación  → NOTIFICAR ✅
+        //   old: 'x@mail.com'→ new: ''  / null          → desasignación → NO notificar ❌
+        //   old: 'x@mail.com'→ new: 'y@mail.com'        → cambio de chofer → NO notificar ❌
+        //   old: 'x@mail.com'→ new: 'x@mail.com' (completado cambia) → solo si es el propio chofer
+        const emailViejo = registroOld.email_chofer?.trim() || '';
+        const emailNuevo = registro.email_chofer?.trim() || '';
+        const esAsignacionNueva = !emailViejo && !!emailNuevo;
+
+        // Si no hay email nuevo asignado para este chofer → salir sin notificar
+        if (!emailNuevo) return;
+
+        // Solo notificar al chofer que fue asignado, no a todos
+        if (emailNuevo !== emailUsuarioRef.current) return;
+
+        // Si fue una desasignación o no es asignación nueva → no notificar
+        if (!esAsignacionNueva && registro.completado === registroOld.completado) return;
+
+        // Es una asignación nueva → notificar
+        if (esAsignacionNueva) {
+          notificarCambioDesdecentral({
+            tipo: 'INSERT', // usamos INSERT para el texto "Nueva colecta asignada"
+            clienteNombre: registro.cliente,
+            clienteDireccion: registro.direccion,
+          });
+          return;
+        }
+
+        // Cambio de completado que viene de la central (no del propio chofer)
         notificarCambioDesdecentral({
           tipo: 'UPDATE',
           clienteNombre: registro.cliente,
@@ -341,24 +684,33 @@ export default function ColectasScreen() {
 
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Clientes' }, (payload) => {
         const registro = payload.new as Cliente & { email_chofer?: string };
-        if (emailUsuarioRef.current && registro.email_chofer && registro.email_chofer !== emailUsuarioRef.current) return;
+
+        // Admin recibe todo; chofer solo lo suyo
+        if (!esAdminRef.current) {
+          if (emailUsuarioRef.current && registro.email_chofer && registro.email_chofer !== emailUsuarioRef.current) return;
+        }
 
         setClientes(prev => {
           if (prev.some(c => c.id === registro.id)) return prev;
           return [...prev, registro].sort((a, b) => (a.horario || '').localeCompare(b.horario || ''));
         });
 
-        notificarCambioDesdecentral({
-          tipo: 'INSERT',
-          clienteNombre: registro.cliente,
-          clienteDireccion: registro.direccion,
-        });
+        if (!esAdminRef.current) {
+          notificarCambioDesdecentral({
+            tipo: 'INSERT',
+            clienteNombre: registro.cliente,
+            clienteDireccion: registro.direccion,
+          });
+        }
       })
 
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'Clientes' }, (payload) => {
         const eliminado = payload.old as { id: number | string; cliente?: string };
         setClientes(prev => prev.filter(c => c.id !== eliminado.id));
-        notificarCambioDesdecentral({ tipo: 'DELETE', clienteNombre: eliminado.cliente });
+
+        if (!esAdminRef.current) {
+          notificarCambioDesdecentral({ tipo: 'DELETE', clienteNombre: eliminado.cliente });
+        }
       })
 
       .subscribe();
@@ -366,7 +718,7 @@ export default function ColectasScreen() {
     return () => { void supabase.removeChannel(channel); };
   }, [fetchClientes]);
 
-  // ── 3. GPS tracking en foreground ─────────────────────────────────────
+  // ── 3. GPS tracking — solo para choferes, no para el admin ────────────
 
   useEffect(() => {
     let montado = true;
@@ -374,7 +726,8 @@ export default function ColectasScreen() {
     const iniciarGPS = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user?.email || !montado) return;
+        // El admin no necesita trackear su posición
+        if (!user?.email || !montado || user.email === ADMIN_EMAIL) return;
         const resultado = await startTracking(user.email);
         if (montado) setGpsStatus(resultado);
       } catch (err) {
@@ -389,49 +742,32 @@ export default function ColectasScreen() {
 
   const handleRefresh = () => { setRefrescando(true); fetchClientes(); };
 
-  // ── 4. Toggle — registra en caché global ANTES del update a Supabase ──
-  //
-  // El Map.set se ejecuta síncronamente antes de cualquier await, por lo que
-  // cuando el eco de Realtime llegue (siempre posterior al await) el ID ya
-  // estará en el caché con su timestamp.  Sin race condition posible.
-  // ─────────────────────────────────────────────────────────────────────
+  // ── 4. Toggle — solo disponible para el chofer (no para admin) ─────────
 
   const handleToggle = async (id: number | string, actual: boolean, nombreCliente: string) => {
     const idStr = String(id);
     const nuevoEstado = !actual;
 
-    // ── PASO CLAVE: registrar en el caché GLOBAL antes del await ─────────
-    // Este set() ocurre de forma síncrona, en el mismo tick del event loop,
-    // mucho antes de que Supabase Realtime pueda disparar el eco.
     ignorarNotificacionesCache.set(idStr, Date.now());
 
-    // Actualización optimista en UI
     setClientes(prev => prev.map(c => c.id === id ? { ...c, completado: nuevoEstado } : c));
     setToggling(prev => new Set(prev).add(id));
 
     try {
       const { error } = await supabase
         .from('Clientes')
-        .update({
-          completado: nuevoEstado,
-          modificado_por: 'chofer' // <--- LA FIRMA PARA EL ROBOT
-        })
+        .update({ completado: nuevoEstado })
         .eq('id', id);
+
       if (error) {
-        // Rollback optimista
+        console.error('[Colectas] Error en update:', error.message);
         setClientes(prev => prev.map(c => c.id === id ? { ...c, completado: actual } : c));
-        // Limpiar caché para no silenciar el próximo intento real desde la central
         ignorarNotificacionesCache.delete(idStr);
         return;
       }
 
-      // Solo si se marcó COMPLETADA → mensaje automático al chat para que el admin lo vea
       if (nuevoEstado === true && userIdRef.current) {
-        void enviarMensajeAutoChatColecta(
-          userIdRef.current,
-          nombreUsuarioRef.current,
-          nombreCliente || 'Sin nombre',
-        );
+        void enviarMensajeAutoChatColecta(userIdRef.current, nombreCliente || 'Sin nombre');
       }
 
     } finally {
@@ -443,7 +779,7 @@ export default function ColectasScreen() {
     }
   };
 
-  // ── Stats ──────────────────────────────────────────────────────────────
+  // ── Stats (vista chofer) ───────────────────────────────────────────────
 
   const totalHechas = clientes.filter(c => c.completado).length;
   const totalPendientes = clientes.length - totalHechas;
@@ -465,11 +801,25 @@ export default function ColectasScreen() {
     return (
       <View style={styles.loader}>
         <ActivityIndicator size="large" color="#4F8EF7" />
-        <Text style={styles.loaderText}>Cargando colectas...</Text>
+        <Text style={styles.loaderText}>
+          {esAdmin ? 'Cargando panel de supervisión...' : 'Cargando colectas...'}
+        </Text>
       </View>
     );
   }
 
+  // ── VISTA ADMIN ─────────────────────────────────────────────────────────
+  if (esAdmin) {
+    return (
+      <VistaAdmin
+        clientes={clientes}
+        refrescando={refrescando}
+        onRefresh={handleRefresh}
+      />
+    );
+  }
+
+  // ── VISTA CHOFER (sin cambios) ─────────────────────────────────────────
   return (
     <ScrollView
       style={styles.container}
@@ -599,12 +949,12 @@ export default function ColectasScreen() {
 }
 
 // ─────────────────────────────────────────────
-// ESTILOS
+// ESTILOS COMPARTIDOS (chofer + admin)
 // ─────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#060B18' },
-  content: { padding: 20 },
+  content: { padding: 16 },
   loader: { flex: 1, backgroundColor: '#060B18', alignItems: 'center', justifyContent: 'center', gap: 14 },
   loaderText: { color: '#4A6FA5', fontSize: 13, fontWeight: '500' },
 
@@ -666,26 +1016,23 @@ const styles = StyleSheet.create({
   gpsDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#34D399' },
   gpsChipText: { fontSize: 10, fontWeight: '700', color: '#34D399', letterSpacing: 0.3 },
 
+  // Cards vista chofer
   card: { flexDirection: 'row', backgroundColor: '#0D1526', borderRadius: 18, marginBottom: 10, borderWidth: 1, borderColor: '#1A2540', overflow: 'hidden' },
   cardDone: { backgroundColor: '#060F1C', borderColor: 'rgba(52,211,153,0.15)' },
   accent: { width: 4, backgroundColor: '#4F8EF7' },
   accentDone: { backgroundColor: '#34D399' },
   cardBody: { flex: 1, padding: 16 },
-
   cardTop: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
   clienteNombre: { fontSize: 15, fontWeight: '700', color: '#FFFFFF', marginBottom: 4 },
   horarioRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   horarioText: { fontSize: 13, color: '#4F8EF7', fontWeight: '600' },
   textDone: { color: '#1A3050' },
-
   checkWrap: { paddingLeft: 12, justifyContent: 'center', minWidth: 42 },
-
   details: {},
   addressTouchable: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 6, marginTop: -2 },
   mapNavIconWrap: { backgroundColor: 'rgba(79,142,247,0.15)', borderRadius: 10, padding: 8, marginLeft: 6 },
   detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
   detailText: { flex: 1, fontSize: 12, color: '#4A6FA5', fontWeight: '500', lineHeight: 18 },
-
   doneBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     marginTop: 10, alignSelf: 'flex-start',
@@ -694,4 +1041,124 @@ const styles = StyleSheet.create({
     borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4,
   },
   doneBadgeText: { fontSize: 11, color: '#34D399', fontWeight: '700' },
+});
+
+// ─────────────────────────────────────────────
+// ESTILOS EXCLUSIVOS DE LA VISTA ADMIN
+// ─────────────────────────────────────────────
+
+const adminStyles = StyleSheet.create({
+  // Header del panel admin
+  headerBox: {
+    backgroundColor: '#0D1526',
+    borderRadius: 20, padding: 20, marginBottom: 14,
+    borderWidth: 1, borderColor: '#1A2540',
+  },
+  headerTopRow: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    justifyContent: 'space-between', marginBottom: 16,
+  },
+  headerEyebrow: {
+    fontSize: 10, fontWeight: '800', color: '#4A6FA5',
+    letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4,
+  },
+  headerTitle: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.3 },
+  adminBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(245,158,11,0.1)',
+    borderWidth: 1, borderColor: 'rgba(245,158,11,0.25)',
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5,
+  },
+  adminBadgeText: { fontSize: 11, fontWeight: '700', color: '#F59E0B' },
+
+  // Stats globales del día
+  statsGlobales: {
+    flexDirection: 'row',
+    backgroundColor: '#060B18',
+    borderRadius: 14, overflow: 'hidden',
+    borderWidth: 1, borderColor: '#0D1A2E',
+  },
+  statGlobal: { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  statGlobalMid: { borderLeftWidth: 1, borderColor: '#0D1A2E' },
+  statGlobalNum: { fontSize: 18, fontWeight: '800', color: '#FFFFFF' },
+  statGlobalLabel: {
+    fontSize: 9, color: '#2A4A70', fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 0.3, marginTop: 2,
+  },
+
+  // Card de chofer (admin)
+  card: {
+    backgroundColor: '#0D1526',
+    borderRadius: 18, marginBottom: 12,
+    borderWidth: 1, borderColor: '#1A2540',
+    overflow: 'hidden',
+  },
+  cardHeader: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: 12, padding: 16,
+  },
+
+  // Avatar con iniciales
+  avatar: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: '#111D35',
+    borderWidth: 1.5,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  avatarText: { fontSize: 15, fontWeight: '800' },
+
+  // Nombre y progreso del chofer
+  choferNombre: { fontSize: 15, fontWeight: '700', color: '#FFFFFF', marginBottom: 4 },
+  progresoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  progresoTexto: { fontSize: 12, fontWeight: '600' },
+  pendienteBadge: {
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    borderWidth: 1, borderColor: 'rgba(245,158,11,0.25)',
+    borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2,
+  },
+  pendienteBadgeText: { fontSize: 10, fontWeight: '700', color: '#F59E0B' },
+
+  // Mini barra de progreso en el header
+  miniBarBg: {
+    width: 64, height: 4, backgroundColor: '#111D35',
+    borderRadius: 2, overflow: 'hidden',
+  },
+  miniBarFill: { height: '100%', borderRadius: 2 },
+
+  // Sección colapsable con filas
+  filasContainer: { paddingHorizontal: 16, paddingBottom: 12 },
+  filasDivider: { height: 1, backgroundColor: '#111D35', marginBottom: 10 },
+
+  // Fila individual compacta
+  fila: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: 10, paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: '#0D1A2E',
+  },
+  filaDone: { opacity: 0.55 },
+  filaIndicador: {
+    width: 3, height: 36, borderRadius: 2,
+    backgroundColor: '#4F8EF7',
+  },
+  filaIndicadorDone: { backgroundColor: '#34D399' },
+  filaNombre: { fontSize: 13, fontWeight: '700', color: '#FFFFFF', marginBottom: 3 },
+  filaTextoDone: { color: '#2A4A70' },
+  filaMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  filaMetaText: { fontSize: 11, color: '#4A6FA5', fontWeight: '500' },
+  filaMetaSep: { fontSize: 11, color: '#2A4A70' },
+
+  // Badges de estado en fila
+  badgeDone: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(52,211,153,0.08)',
+    borderWidth: 1, borderColor: 'rgba(52,211,153,0.2)',
+    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3,
+  },
+  badgeDoneText: { fontSize: 10, fontWeight: '700', color: '#34D399' },
+  badgePendiente: {
+    backgroundColor: 'rgba(245,158,11,0.08)',
+    borderWidth: 1, borderColor: 'rgba(245,158,11,0.2)',
+    borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3,
+  },
+  badgePendienteText: { fontSize: 10, fontWeight: '700', color: '#F59E0B' },
 });

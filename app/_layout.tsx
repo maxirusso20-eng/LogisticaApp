@@ -12,6 +12,8 @@ export const unstable_settings = {
   initialRouteName: '(drawer)',
 };
 
+const ADMIN_EMAIL = 'maxirusso20@gmail.com';
+
 function SplashLoader() {
   const pulse = useRef(new Animated.Value(0.4)).current;
 
@@ -36,41 +38,23 @@ function SplashLoader() {
 }
 
 const splash = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#060B18',
-  },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#060B18' },
   logoRing: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
-    borderWidth: 2,
-    borderColor: '#4F8EF7',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
+    width: 80, height: 80, borderRadius: 24,
+    borderWidth: 2, borderColor: '#4F8EF7',
+    justifyContent: 'center', alignItems: 'center', marginBottom: 20,
   },
-  logoDot: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#4F8EF7',
-  },
-  brand: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.5,
-  },
+  logoDot: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#4F8EF7' },
+  brand: { fontSize: 20, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.5 },
 });
 
 export default function RootLayout() {
   const [isLoading, setIsLoading] = useState(true);
-  // FIX: usar estado real en lugar de ref para que el useEffect de routing
-  // se dispare correctamente cuando cambia la sesión (onAuthStateChange).
   const [hasSession, setHasSession] = useState<boolean | null>(null);
+  // FIX FLASH: guardamos el email durante el splash, ANTES de renderizar
+  // el Drawer. Así cuando el Drawer se monta ya sabe a qué pantalla ir
+  // y nunca muestra Recorridos por un instante.
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const segments = useSegments();
   const router = useRouter();
   const isMounted = useRef(false);
@@ -78,15 +62,27 @@ export default function RootLayout() {
   useEffect(() => {
     isMounted.current = true;
 
-    // Escuchar cambios de auth en tiempo real (logout, token expirado, etc.)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (isMounted.current) {
         setHasSession(!!session);
+        // Si la sesión cambia (logout) limpiamos el email
+        if (!session) setUserEmail(null);
       }
     });
 
-    // Verificar sesión inicial al arrancar
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Verificar sesión inicial — también resolvemos el email aquí
+    // para que el Drawer ya sepa el rol al primer render.
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!isMounted.current) return;
+
+      if (session) {
+        // Obtener el email durante el splash, no después
+        const { data } = await supabase.auth.getUser();
+        if (isMounted.current) {
+          setUserEmail(data.user?.email ?? null);
+        }
+      }
+
       if (isMounted.current) {
         setHasSession(!!session);
         setIsLoading(false);
@@ -99,40 +95,41 @@ export default function RootLayout() {
     };
   }, []);
 
-  // Redirigir cada vez que cambia la ruta, la sesión o termina de cargar
+  // Redirigir según sesión y rol — ahora con email ya disponible
   useEffect(() => {
-    const checkRedirect = async () => {
-      if (isLoading || hasSession === null) return;
+    if (isLoading || hasSession === null) return;
 
-      const inAuthGroup = segments[0] === 'login';
+    const inAuthGroup = segments[0] === 'login';
 
-      if (!hasSession && !inAuthGroup) {
-        router.replace('/login' as any);
-      } else if (hasSession && inAuthGroup) {
-        // Obtenemos el usuario actual para ver el email
-        const { data: { user } } = await supabase.auth.getUser();
-        const userEmail = user?.email;
-
-        if (userEmail === 'maxirusso20@gmail.com') {
-          // El admin (vos) va a Recorridos
-          router.replace('/(drawer)' as any);
-        } else {
-          // Cualquier otro usuario (chofer) va a Colectas
-          router.replace('/(drawer)/colectas' as any);
-        }
+    if (!hasSession && !inAuthGroup) {
+      router.replace('/login' as any);
+    } else if (hasSession && inAuthGroup) {
+      // Admin → Recorridos, Chofer → Colectas
+      if (userEmail === ADMIN_EMAIL) {
+        router.replace('/(drawer)' as any);
+      } else {
+        router.replace('/(drawer)/colectas' as any);
       }
-    };
-
-    checkRedirect();
-  }, [isLoading, hasSession, segments]);
+    }
+  }, [isLoading, hasSession, segments, userEmail]);
 
   if (isLoading) return <SplashLoader />;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={DarkTheme}>
+        {/*
+          Pasamos userEmail como parámetro de contexto al Stack para que
+          el DrawerLayout pueda leerlo sin hacer otro getUser().
+          El Drawer usa este valor para definir su initialRouteName
+          sin flash visible.
+        */}
         <Stack>
-          <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="(drawer)"
+            options={{ headerShown: false }}
+            initialParams={{ userEmail }}
+          />
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
