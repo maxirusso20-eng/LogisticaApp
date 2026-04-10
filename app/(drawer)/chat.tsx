@@ -1,12 +1,15 @@
 // app/(drawer)/chat.tsx
 //
-// Chat 1-a-1 estilo WhatsApp con:
-//   ✅ Ticks de visto (✓ enviado, ✓✓ visto)
-//   ✅ "Escribiendo..." en tiempo real (Supabase Presence)
-//   ✅ Indicador online/offline
-//   ✅ Mensajes agrupados por fecha
-//   ✅ Admin ve selector de conversaciones
-//   ✅ Chofer ve solo su chat con el admin
+// DOS VISTAS COMPLETAMENTE SEPARADAS:
+//
+//  ADMIN  → Lista de conversaciones estilo WhatsApp
+//           (último mensaje, hora, badge de no leídos, online)
+//           Al tocar una → abre la conversación
+//
+//  CHOFER → Entra directo a su chat con el admin
+//           (sin selector, sin bugs de "chat consigo mismo")
+//
+// La separación total elimina los bugs de esPropio/userId/timing.
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -16,6 +19,7 @@ import {
     FlatList,
     KeyboardAvoidingView,
     Platform,
+    Pressable,
     StyleSheet,
     Text,
     TextInput,
@@ -24,12 +28,8 @@ import {
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
 
-// ─────────────────────────────────────────────
-// CONSTANTES
-// ─────────────────────────────────────────────
-
 const ADMIN_EMAIL = 'maxirusso20@gmail.com';
-const TYPING_TIMEOUT_MS = 2500; // cuánto esperar sin tipear para dejar de mostrar "escribiendo"
+const TYPING_TIMEOUT_MS = 2500;
 
 // ─────────────────────────────────────────────
 // TIPOS
@@ -45,9 +45,13 @@ interface Mensaje {
     visto_admin: boolean;
 }
 
-interface ChoferChat {
+interface Conversacion {
     email: string;
     nombre: string;
+    ultimoMensaje: string;
+    ultimaHora: string;
+    noLeidos: number;
+    online: boolean;
 }
 
 // ─────────────────────────────────────────────
@@ -56,11 +60,16 @@ interface ChoferChat {
 
 const formatHora = (iso: string): string => {
     try {
-        return new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+        const d = new Date(iso);
+        const hoy = new Date();
+        if (d.toDateString() === hoy.toDateString()) {
+            return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+        }
+        return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
     } catch { return ''; }
 };
 
-const formatFecha = (iso: string): string => {
+const formatFechaGrupo = (iso: string): string => {
     try {
         const d = new Date(iso);
         const hoy = new Date();
@@ -71,21 +80,26 @@ const formatFecha = (iso: string): string => {
     } catch { return ''; }
 };
 
-// Agrupa mensajes por fecha para mostrar separadores "Hoy", "Ayer", etc.
-// El FlatList está invertido, así que el array viene descendente.
-const necesitaSeparadorFecha = (mensajes: Mensaje[], index: number): boolean => {
-    if (index === mensajes.length - 1) return true;
-    const fechaActual = new Date(mensajes[index].created_at).toDateString();
-    const fechaSiguiente = new Date(mensajes[index + 1].created_at).toDateString();
-    return fechaActual !== fechaSiguiente;
+const necesitaSeparador = (msgs: Mensaje[], index: number): boolean => {
+    if (index === msgs.length - 1) return true;
+    return new Date(msgs[index].created_at).toDateString() !==
+        new Date(msgs[index + 1].created_at).toDateString();
 };
 
 const iniciales = (nombre: string): string =>
     nombre.split(' ').map(p => p[0] || '').slice(0, 2).join('').toUpperCase();
 
 // ─────────────────────────────────────────────
-// COMPONENTE: IndicadorEscribiendo (animado)
+// COMPONENTES REUTILIZABLES
 // ─────────────────────────────────────────────
+
+const SeparadorFecha: React.FC<{ fecha: string }> = ({ fecha }) => (
+    <View style={S.separadorWrapper}>
+        <View style={S.separadorLinea} />
+        <Text style={S.separadorTexto}>{fecha}</Text>
+        <View style={S.separadorLinea} />
+    </View>
+);
 
 const IndicadorEscribiendo: React.FC<{ nombre: string }> = ({ nombre }) => {
     const dot1 = useRef(new Animated.Value(0.3)).current;
@@ -94,18 +108,13 @@ const IndicadorEscribiendo: React.FC<{ nombre: string }> = ({ nombre }) => {
 
     useEffect(() => {
         const animar = (dot: Animated.Value, delay: number) =>
-            Animated.loop(
-                Animated.sequence([
-                    Animated.delay(delay),
-                    Animated.timing(dot, { toValue: 1, duration: 300, useNativeDriver: true }),
-                    Animated.timing(dot, { toValue: 0.3, duration: 300, useNativeDriver: true }),
-                    Animated.delay(600),
-                ])
-            ).start();
-
-        animar(dot1, 0);
-        animar(dot2, 200);
-        animar(dot3, 400);
+            Animated.loop(Animated.sequence([
+                Animated.delay(delay),
+                Animated.timing(dot, { toValue: 1, duration: 300, useNativeDriver: true }),
+                Animated.timing(dot, { toValue: 0.3, duration: 300, useNativeDriver: true }),
+                Animated.delay(600),
+            ])).start();
+        animar(dot1, 0); animar(dot2, 200); animar(dot3, 400);
     }, []);
 
     return (
@@ -122,21 +131,13 @@ const IndicadorEscribiendo: React.FC<{ nombre: string }> = ({ nombre }) => {
     );
 };
 
-// ─────────────────────────────────────────────
-// COMPONENTE: Burbuja de mensaje
-// ─────────────────────────────────────────────
-
-interface BurbujaProps {
+// Burbuja — solo usada en la vista de conversación (chofer y admin dentro de un chat)
+const Burbuja: React.FC<{
     mensaje: Mensaje;
-    esPropio: boolean;
+    esPropio: boolean;    // ← calculado por el padre con ref, nunca null
     mostrarRemitente: boolean;
-    esAdmin: boolean;
-}
-
-const Burbuja: React.FC<BurbujaProps> = ({ mensaje, esPropio, mostrarRemitente, esAdmin }) => {
-    const esSistema = mensaje.texto.startsWith('🔔') || mensaje.remitente === 'Sistema';
-
-    if (esSistema) {
+}> = ({ mensaje, esPropio, mostrarRemitente }) => {
+    if (mensaje.texto.startsWith('🔔') || mensaje.remitente === 'Sistema') {
         return (
             <View style={S.sistemaWrapper}>
                 <View style={S.sistemaBurbuja}>
@@ -146,33 +147,27 @@ const Burbuja: React.FC<BurbujaProps> = ({ mensaje, esPropio, mostrarRemitente, 
             </View>
         );
     }
-
     return (
-        <View style={[S.burbujaWrapper, esPropio ? S.burbujaWrapperDerecha : S.burbujaWrapperIzquierda]}>
+        <View style={[S.burbujaWrapper, esPropio ? S.burbujaRight : S.burbujaLeft]}>
             {!esPropio && mostrarRemitente && (
                 <Text style={S.remitente}>{mensaje.remitente}</Text>
             )}
             <View style={[S.burbuja, esPropio ? S.burbujaPropia : S.burbujaAjena]}>
-                <Text style={[S.burbujaTexto, esPropio ? S.burbujaTextoPropio : S.burbujaTextoAjeno]}>
+                <Text style={[S.burbujaTexto, esPropio ? S.textoPropio : S.textoAjeno]}>
                     {mensaje.texto}
                 </Text>
-
-                {/* Hora + ticks de visto */}
                 <View style={S.burbujaFooter}>
-                    <Text style={[S.burbujaHora, esPropio ? S.burbujaHoraPropia : S.burbujaHoraAjena]}>
+                    <Text style={[S.hora, esPropio ? S.horaPropia : S.horaAjena]}>
                         {formatHora(mensaje.created_at)}
                     </Text>
-                    {/* Ticks solo en mensajes propios */}
                     {esPropio && (
-                        <View style={S.ticksWrapper}>
+                        <View style={S.ticks}>
                             {mensaje.visto_admin ? (
-                                // ✓✓ azul = visto
                                 <>
                                     <Ionicons name="checkmark" size={12} color="#60AEFF" style={{ marginRight: -5 }} />
                                     <Ionicons name="checkmark" size={12} color="#60AEFF" />
                                 </>
                             ) : (
-                                // ✓ gris = enviado, no visto
                                 <Ionicons name="checkmark" size={12} color="rgba(255,255,255,0.4)" />
                             )}
                         </View>
@@ -183,514 +178,406 @@ const Burbuja: React.FC<BurbujaProps> = ({ mensaje, esPropio, mostrarRemitente, 
     );
 };
 
-// ─────────────────────────────────────────────
-// COMPONENTE: Separador de fecha
-// ─────────────────────────────────────────────
+// ═════════════════════════════════════════════
+// VISTA ADMIN: Lista de conversaciones
+// ═════════════════════════════════════════════
 
-const SeparadorFecha: React.FC<{ fecha: string }> = ({ fecha }) => (
-    <View style={S.separadorFechaWrapper}>
-        <View style={S.separadorFechaLinea} />
-        <Text style={S.separadorFechaTexto}>{fecha}</Text>
-        <View style={S.separadorFechaLinea} />
-    </View>
-);
-
-// ─────────────────────────────────────────────
-// COMPONENTE: Selector de conversaciones (admin)
-// ─────────────────────────────────────────────
-
-interface SelectorProps {
-    choferes: ChoferChat[];
-    seleccionado: ChoferChat | null;
-    onSeleccionar: (c: ChoferChat) => void;
-    onlineEmails: Set<string>;
-}
-
-const SelectorConversaciones: React.FC<SelectorProps> = ({ choferes, seleccionado, onSeleccionar, onlineEmails }) => (
-    <View style={S.selectorContainer}>
-        <Text style={S.selectorLabel}>CONVERSACIONES · {choferes.length} choferes</Text>
-        <FlatList
-            data={choferes}
-            keyExtractor={c => c.email}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={S.selectorList}
-            renderItem={({ item }) => {
-                const activo = seleccionado?.email === item.email;
-                const online = onlineEmails.has(item.email);
-                return (
-                    <TouchableOpacity
-                        style={[S.selectorChip, activo && S.selectorChipActivo]}
-                        onPress={() => onSeleccionar(item)}
-                        activeOpacity={0.75}
-                    >
-                        <View style={S.selectorAvatarWrap}>
-                            <View style={[S.selectorAvatar, activo && S.selectorAvatarActivo]}>
-                                <Text style={[S.selectorAvatarText, activo && { color: '#4F8EF7' }]}>
-                                    {iniciales(item.nombre)}
-                                </Text>
-                            </View>
-                            {/* Punto verde de online */}
-                            {online && <View style={S.onlineDotSelector} />}
-                        </View>
-                        <Text style={[S.selectorNombre, activo && S.selectorNombreActivo]} numberOfLines={1}>
-                            {item.nombre.split(' ')[0]}
-                        </Text>
-                    </TouchableOpacity>
-                );
-            }}
-        />
-    </View>
-);
-
-// ─────────────────────────────────────────────
-// PANTALLA PRINCIPAL
-// ─────────────────────────────────────────────
-
-export default function ChatScreen() {
-    const [mensajes, setMensajes] = useState<Mensaje[]>([]);
-    const [texto, setTexto] = useState('');
+const ListaConversaciones: React.FC<{
+    onAbrir: (conv: Conversacion) => void;
+}> = ({ onAbrir }) => {
+    const [conversaciones, setConversaciones] = useState<Conversacion[]>([]);
     const [cargando, setCargando] = useState(true);
-    const [enviando, setEnviando] = useState(false);
-    const [authError, setAuthError] = useState(false);
-
-    const [userId, setUserId] = useState<string | null>(null);
-    const [userEmail, setUserEmail] = useState<string | null>(null);
-    const [nombreRemitente, setNombreRemitente] = useState('Chofer');
-    const [esAdmin, setEsAdmin] = useState(false);
-
-    const [choferes, setChoferes] = useState<ChoferChat[]>([]);
-    const [choferSeleccionado, setChoferSeleccionado] = useState<ChoferChat | null>(null);
-
-    // Presencia: quién está online y quién está escribiendo
     const [onlineEmails, setOnlineEmails] = useState<Set<string>>(new Set());
-    const [otroEscribiendo, setOtroEscribiendo] = useState(false);
-    const [nombreEscribiendo, setNombreEscribiendo] = useState('');
+    const presenceRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
-    const inputRef = useRef<TextInput>(null);
-    const mensajesChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-    const presenceChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-    const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const estabaEscribiendoRef = useRef(false);
-
-    // Email de la conversación activa
-    const conversacionEmail = esAdmin ? choferSeleccionado?.email ?? null : userEmail;
-
-    // ── 1. Cargar choferes (admin) ────────────────────────────────────────
-
-    const cargarChoferes = useCallback(async () => {
+    const cargar = useCallback(async () => {
         try {
-            const { data, error } = await supabase
+            // 1. Traer todos los choferes con email
+            const { data: chofData } = await supabase
                 .from('Choferes')
                 .select('email, nombre')
                 .not('email', 'is', null)
                 .neq('email', '')
                 .order('nombre', { ascending: true });
 
-            if (error) { console.error('[Chat] Error cargando choferes:', error.message); return; }
-
-            const lista: ChoferChat[] = (data || [])
-                .filter((c: any) => c.email?.trim())
-                .map((c: any) => ({ email: c.email.trim(), nombre: c.nombre || c.email }));
-
-            setChoferes(lista);
-            if (lista.length > 0) setChoferSeleccionado(lista[0]);
-        } catch (err) {
-            console.error('[Chat] Error inesperado cargando choferes:', err);
-        }
-    }, []);
-
-    // ── 2. Inicializar usuario y rol ──────────────────────────────────────
-
-    useEffect(() => {
-        const inicializar = async () => {
-            try {
-                const { data: { user }, error } = await supabase.auth.getUser();
-                if (error || !user) { setAuthError(true); return; }
-
-                setUserId(user.id);
-                setUserEmail(user.email ?? null);
-
-                const nombre =
-                    user.user_metadata?.full_name ||
-                    user.user_metadata?.name ||
-                    user.email?.split('@')[0] || 'Chofer';
-                setNombreRemitente(nombre.split(' ')[0]);
-
-                const admin = user.email === ADMIN_EMAIL;
-                setEsAdmin(admin);
-                if (admin) await cargarChoferes();
-
-            } catch (err) {
-                console.error('[Chat] Error en inicializar:', err);
-                setAuthError(true);
-            } finally {
+            if (!chofData || chofData.length === 0) {
                 setCargando(false);
+                return;
             }
-        };
-        inicializar();
-    }, [cargarChoferes]);
 
-    // ── 3. Fetch de mensajes + Realtime de nuevos mensajes ────────────────
+            // 2. Para cada chofer, traer el último mensaje y no leídos
+            const lista: Conversacion[] = await Promise.all(
+                chofData.map(async (c: any) => {
+                    const email = c.email.trim();
 
-    const fetchMensajes = useCallback(async (emailConversacion: string) => {
-        try {
-            const { data, error } = await supabase
-                .from('mensajes')
-                .select('id, created_at, user_id, remitente, texto, chofer_email, visto_admin')
-                .eq('chofer_email', emailConversacion)
-                .order('created_at', { ascending: false })
-                .limit(50);
+                    const { data: ultMsg } = await supabase
+                        .from('mensajes')
+                        .select('texto, created_at')
+                        .eq('chofer_email', email)
+                        .order('created_at', { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
 
-            if (error) { console.error('[Chat] Error cargando mensajes:', error.message); setMensajes([]); return; }
-            setMensajes(data ?? []);
+                    const { count: noLeidos } = await supabase
+                        .from('mensajes')
+                        .select('id', { count: 'exact', head: true })
+                        .eq('chofer_email', email)
+                        .eq('visto_admin', false);
+
+                    return {
+                        email,
+                        nombre: c.nombre || email,
+                        ultimoMensaje: ultMsg?.texto ?? 'Sin mensajes aún',
+                        ultimaHora: ultMsg?.created_at ?? '',
+                        noLeidos: noLeidos ?? 0,
+                        online: false,
+                    };
+                })
+            );
+
+            // Ordenar: con no leídos primero, luego por hora del último mensaje
+            lista.sort((a, b) => {
+                if (b.noLeidos !== a.noLeidos) return b.noLeidos - a.noLeidos;
+                return b.ultimaHora.localeCompare(a.ultimaHora);
+            });
+
+            setConversaciones(lista);
         } catch (err) {
-            console.error('[Chat] Error inesperado:', err);
-            setMensajes([]);
+            console.error('[Chat Admin] Error cargando conversaciones:', err);
         } finally {
             setCargando(false);
         }
     }, []);
 
-    // ── 4. Marcar mensajes como vistos ────────────────────────────────────
-    //
-    // Cuando el admin abre una conversación, marca como vistos todos los
-    // mensajes del chofer que todavía no tienen visto_admin = true.
-    // El chofer ve el cambio al instante via Realtime UPDATE.
-
-    const marcarComoVisto = useCallback(async (emailConversacion: string, esAdminLocal: boolean) => {
-        if (!esAdminLocal) return; // solo el admin marca como visto
-        try {
-            const { error } = await supabase
-                .from('mensajes')
-                .update({ visto_admin: true })
-                .eq('chofer_email', emailConversacion)
-                .eq('visto_admin', false);
-            if (error) {
-                // Silencioso — los ticks son una feature opcional, no bloquean el chat
-                console.warn('[Chat] visto_admin update:', error.message);
-            }
-        } catch (err) {
-            console.warn('[Chat] Error marcando como visto:', err);
-        }
-    }, []);
-
-    // ── 5. Canal de mensajes (INSERT + UPDATE para ticks de visto) ─────────
-
     useEffect(() => {
-        if (!conversacionEmail) return;
+        cargar();
 
-        fetchMensajes(conversacionEmail);
-
-        // Marcar como visto cuando el admin abre la conversación
-        if (esAdmin) marcarComoVisto(conversacionEmail, true);
-
-        if (mensajesChannelRef.current) void supabase.removeChannel(mensajesChannelRef.current);
-
+        // Realtime: actualizar lista cuando llegan mensajes nuevos
         const canal = supabase
-            .channel(`chat-msgs-${conversacionEmail.replace(/[@.]/g, '-')}`)
+            .channel('admin-chat-lista')
             .on('postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'mensajes', filter: `chofer_email=eq.${conversacionEmail}` },
-                (payload) => {
-                    const nuevo = payload.new as Mensaje;
-                    setMensajes(prev => {
-                        if (prev.some(m => m.id === nuevo.id)) return prev;
-                        return [nuevo, ...prev];
-                    });
-                    // Si soy admin y acabo de recibir un mensaje del chofer → marcarlo visto inmediatamente
-                    if (esAdmin) marcarComoVisto(conversacionEmail, true);
-                }
-            )
-            .on('postgres_changes',
-                { event: 'UPDATE', schema: 'public', table: 'mensajes', filter: `chofer_email=eq.${conversacionEmail}` },
-                (payload) => {
-                    // Actualizar el campo visto_admin para que los ticks cambien en tiempo real
-                    const actualizado = payload.new as Mensaje;
-                    setMensajes(prev =>
-                        prev.map(m => m.id === actualizado.id ? { ...m, visto_admin: actualizado.visto_admin } : m)
-                    );
-                }
+                { event: 'INSERT', schema: 'public', table: 'mensajes' },
+                () => cargar() // re-cargar para actualizar último mensaje y no leídos
             )
             .subscribe();
 
-        mensajesChannelRef.current = canal;
+        // Presence global para saber quién está online
+        const presence = supabase.channel('chat-global-presence');
+        presence
+            .on('presence', { event: 'sync' }, () => {
+                const emails = new Set(Object.keys(presence.presenceState()));
+                setOnlineEmails(emails);
+                setConversaciones(prev =>
+                    prev.map(c => ({ ...c, online: emails.has(c.email) }))
+                );
+            })
+            .subscribe();
+
+        presenceRef.current = presence;
 
         return () => {
-            if (mensajesChannelRef.current) {
-                void supabase.removeChannel(mensajesChannelRef.current);
-                mensajesChannelRef.current = null;
-            }
+            void supabase.removeChannel(canal);
+            if (presenceRef.current) void supabase.removeChannel(presenceRef.current);
         };
-    }, [conversacionEmail, fetchMensajes, esAdmin, marcarComoVisto]);
-
-    // ── 6. Canal de Presence (online + escribiendo) ───────────────────────
-    //
-    // Supabase Presence es un canal efímero: cuando el usuario cierra la app
-    // o navega a otra pantalla, su presencia desaparece automáticamente.
-    // Usamos el mismo canal para dos cosas:
-    //   a) saber quién está online (track de presencia)
-    //   b) broadcasting de "escribiendo" (broadcast efímero, sin DB)
-
-    useEffect(() => {
-        if (!conversacionEmail || !userEmail) return;
-
-        if (presenceChannelRef.current) void supabase.removeChannel(presenceChannelRef.current);
-
-        const canalId = `chat-presence-${conversacionEmail.replace(/[@.]/g, '-')}`;
-
-        const canal = supabase.channel(canalId, {
-            config: { presence: { key: userEmail } },
-        });
-
-        // Escuchar cambios de presencia (quién está online)
-        canal.on('presence', { event: 'sync' }, () => {
-            const state = canal.presenceState();
-            const emails = new Set(Object.keys(state));
-            setOnlineEmails(emails);
-        });
-
-        // Escuchar broadcasts de "escribiendo"
-        canal.on('broadcast', { event: 'typing' }, (payload) => {
-            const { email: emailEmisor, nombre: nombreEmisor, escribiendo } = payload.payload as {
-                email: string;
-                nombre: string;
-                escribiendo: boolean;
-            };
-
-            // No mostrar "escribiendo" si soy yo el que escribe
-            if (emailEmisor === userEmail) return;
-
-            setOtroEscribiendo(escribiendo);
-            setNombreEscribiendo(escribiendo ? nombreEmisor : '');
-        });
-
-        // Entrar al canal y trackear mi presencia
-        canal.subscribe(async (status) => {
-            if (status === 'SUBSCRIBED') {
-                await canal.track({ email: userEmail, nombre: nombreRemitente, online_at: new Date().toISOString() });
-            }
-        });
-
-        presenceChannelRef.current = canal;
-
-        return () => {
-            // Al salir del chat, dejar de trackear presencia
-            if (presenceChannelRef.current) {
-                void presenceChannelRef.current.untrack();
-                void supabase.removeChannel(presenceChannelRef.current);
-                presenceChannelRef.current = null;
-            }
-        };
-    }, [conversacionEmail, userEmail, nombreRemitente]);
-
-    // ── 7. Emitir "escribiendo" mientras el usuario tipea ─────────────────
-
-    const emitirTyping = useCallback((escribiendo: boolean) => {
-        if (!presenceChannelRef.current || !userEmail) return;
-        presenceChannelRef.current.send({
-            type: 'broadcast',
-            event: 'typing',
-            payload: { email: userEmail, nombre: nombreRemitente, escribiendo },
-        });
-    }, [userEmail, nombreRemitente]);
-
-    const handleChangeText = (value: string) => {
-        setTexto(value);
-
-        if (!estabaEscribiendoRef.current) {
-            estabaEscribiendoRef.current = true;
-            emitirTyping(true);
-        }
-
-        // Resetear el timeout cada vez que se tipea
-        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-        typingTimeoutRef.current = setTimeout(() => {
-            estabaEscribiendoRef.current = false;
-            emitirTyping(false);
-        }, TYPING_TIMEOUT_MS);
-    };
-
-    // ── 8. Enviar mensaje ─────────────────────────────────────────────────
-
-    const handleEnviar = async () => {
-        const textoLimpio = texto.trim();
-        if (!textoLimpio || !userId || !conversacionEmail || enviando) return;
-
-        // Dejar de emitir "escribiendo" al enviar
-        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-        estabaEscribiendoRef.current = false;
-        emitirTyping(false);
-
-        setEnviando(true);
-        setTexto('');
-
-        try {
-            const { error } = await supabase
-                .from('mensajes')
-                .insert([{
-                    user_id: userId,
-                    remitente: esAdmin ? 'Maxi (Admin)' : nombreRemitente,
-                    texto: textoLimpio,
-                    chofer_email: conversacionEmail,
-                    // visto_admin se setea via UPDATE separado, no en el insert
-                    // para evitar conflictos si la columna no está en todas las versiones de RLS
-                }]);
-
-            if (error) {
-                setTexto(textoLimpio);
-                console.error('[Chat] Error enviando:', error.message);
-            }
-        } catch (err) {
-            setTexto(textoLimpio);
-            console.error('[Chat] Error inesperado:', err);
-        } finally {
-            setEnviando(false);
-            inputRef.current?.focus();
-        }
-    };
-
-    // ── Estado online del interlocutor ────────────────────────────────────
-
-    const interlocutorOnline = esAdmin
-        ? onlineEmails.has(choferSeleccionado?.email ?? '')
-        : onlineEmails.has(ADMIN_EMAIL);
-
-    const interlocutorNombre = esAdmin
-        ? (choferSeleccionado?.nombre.split(' ')[0] ?? 'Chofer')
-        : 'Maxi (Admin)';
-
-    // ── Render ─────────────────────────────────────────────────────────────
-
-    if (authError) {
-        return (
-            <View style={S.authErrorContainer}>
-                <Ionicons name="lock-closed-outline" size={52} color="#1A2540" />
-                <Text style={S.authErrorTitulo}>Sesión no disponible</Text>
-                <Text style={S.authErrorSub}>Volvé a iniciar sesión para usar el chat.</Text>
-            </View>
-        );
-    }
+    }, [cargar]);
 
     if (cargando) {
         return (
             <View style={S.loader}>
                 <ActivityIndicator size="large" color="#4F8EF7" />
-                <Text style={S.loaderText}>{esAdmin ? 'Cargando conversaciones...' : 'Conectando al chat...'}</Text>
+                <Text style={S.loaderText}>Cargando conversaciones...</Text>
             </View>
         );
     }
 
-    if (esAdmin && choferes.length === 0) {
+    if (conversaciones.length === 0) {
         return (
             <View style={S.vacio}>
-                <Ionicons name="people-outline" size={52} color="#1A2540" />
-                <Text style={S.vacioTitulo}>Sin choferes con email</Text>
-                <Text style={S.vacioSub}>Asigná un email a tus choferes en la tabla Choferes.</Text>
+                <Ionicons name="chatbubbles-outline" size={52} color="#1A2540" />
+                <Text style={S.vacioTitulo}>Sin choferes disponibles</Text>
+                <Text style={S.vacioSub}>
+                    {'Para chatear con un chofer:\n1. Cargá su email en tabla Choferes\n2. Creá el usuario en Authentication'}
+                </Text>
             </View>
         );
     }
 
     return (
+        <FlatList
+            data={conversaciones}
+            keyExtractor={c => c.email}
+            style={{ backgroundColor: '#060B18' }}
+            contentContainerStyle={{ paddingTop: 8 }}
+            renderItem={({ item }) => (
+                <Pressable
+                    style={({ pressed }) => [S.convItem, pressed && { opacity: 0.75 }]}
+                    onPress={() => onAbrir(item)}
+                >
+                    {/* Avatar con punto online */}
+                    <View style={S.convAvatarWrap}>
+                        <View style={S.convAvatar}>
+                            <Text style={S.convAvatarText}>{iniciales(item.nombre)}</Text>
+                        </View>
+                        {item.online && <View style={S.onlineDot} />}
+                    </View>
+
+                    {/* Contenido */}
+                    <View style={S.convInfo}>
+                        <View style={S.convTopRow}>
+                            <Text style={S.convNombreItem} numberOfLines={1}>{item.nombre}</Text>
+                            <Text style={[S.convHora, item.noLeidos > 0 && { color: '#4F8EF7' }]}>
+                                {item.ultimaHora ? formatHora(item.ultimaHora) : ''}
+                            </Text>
+                        </View>
+                        <View style={S.convBottomRow}>
+                            <Text style={[S.convUltimoMsg, item.noLeidos > 0 && { color: '#FFFFFF', fontWeight: '600' }]}
+                                numberOfLines={1}>
+                                {item.ultimoMensaje.startsWith('🔔') ? '📦 ' + item.ultimoMensaje.slice(2) : item.ultimoMensaje}
+                            </Text>
+                            {item.noLeidos > 0 && (
+                                <View style={S.badge}>
+                                    <Text style={S.badgeText}>{item.noLeidos > 99 ? '99+' : item.noLeidos}</Text>
+                                </View>
+                            )}
+                        </View>
+                    </View>
+                </Pressable>
+            )}
+            ItemSeparatorComponent={() => <View style={S.convSeparador} />}
+        />
+    );
+};
+
+// ═════════════════════════════════════════════
+// VISTA CONVERSACIÓN: usada por admin (al tocar) y chofer (directa)
+// ═════════════════════════════════════════════
+
+const Conversacion: React.FC<{
+    miUserId: string;
+    miEmail: string;
+    miNombre: string;
+    esAdmin: boolean;
+    choferEmail: string;      // email del chofer dueño de la conversación
+    choferNombre: string;     // nombre a mostrar en el header
+    onVolver?: () => void;    // solo admin tiene botón de volver
+}> = ({ miUserId, miEmail, miNombre, esAdmin, choferEmail, choferNombre, onVolver }) => {
+    const [mensajes, setMensajes] = useState<Mensaje[]>([]);
+    const [texto, setTexto] = useState('');
+    const [enviando, setEnviando] = useState(false);
+    const [online, setOnline] = useState(false);
+    const [otroEscribiendo, setOtroEscribiendo] = useState(false);
+    const [nombreEscribiendo, setNombreEscribiendo] = useState('');
+
+    const inputRef = useRef<TextInput>(null);
+    const msgCanalRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+    const presenceCanalRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+    const typingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const estabaTypingRef = useRef(false);
+
+    // ── Fetch + Realtime mensajes ─────────────────────────────────────────
+
+    const fetchMensajes = useCallback(async () => {
+        const { data } = await supabase
+            .from('mensajes')
+            .select('id, created_at, user_id, remitente, texto, chofer_email, visto_admin')
+            .eq('chofer_email', choferEmail)
+            .order('created_at', { ascending: false })
+            .limit(50);
+        setMensajes(data ?? []);
+    }, [choferEmail]);
+
+    const marcarVisto = useCallback(async () => {
+        if (!esAdmin) return;
+        await supabase
+            .from('mensajes')
+            .update({ visto_admin: true })
+            .eq('chofer_email', choferEmail)
+            .eq('visto_admin', false);
+    }, [esAdmin, choferEmail]);
+
+    useEffect(() => {
+        fetchMensajes();
+        if (esAdmin) marcarVisto();
+
+        if (msgCanalRef.current) void supabase.removeChannel(msgCanalRef.current);
+
+        const canal = supabase
+            .channel(`msgs-${choferEmail.replace(/[@.]/g, '-')}`)
+            .on('postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'mensajes', filter: `chofer_email=eq.${choferEmail}` },
+                (payload) => {
+                    const nuevo = payload.new as Mensaje;
+                    setMensajes(prev => prev.some(m => m.id === nuevo.id) ? prev : [nuevo, ...prev]);
+                    if (esAdmin) marcarVisto();
+                }
+            )
+            .on('postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'mensajes', filter: `chofer_email=eq.${choferEmail}` },
+                (payload) => {
+                    const upd = payload.new as Mensaje;
+                    setMensajes(prev => prev.map(m => m.id === upd.id ? { ...m, visto_admin: upd.visto_admin } : m));
+                }
+            )
+            .subscribe();
+
+        msgCanalRef.current = canal;
+        return () => {
+            if (msgCanalRef.current) { void supabase.removeChannel(msgCanalRef.current); msgCanalRef.current = null; }
+        };
+    }, [choferEmail, fetchMensajes, esAdmin, marcarVisto]);
+
+    // ── Presence: online + escribiendo ───────────────────────────────────
+
+    useEffect(() => {
+        if (presenceCanalRef.current) void supabase.removeChannel(presenceCanalRef.current);
+
+        const canalId = `presence-${choferEmail.replace(/[@.]/g, '-')}`;
+        const canal = supabase.channel(canalId, { config: { presence: { key: miEmail } } });
+
+        canal
+            .on('presence', { event: 'sync' }, () => {
+                const state = canal.presenceState();
+                const emails = Object.keys(state);
+                // El interlocutor está online si su email aparece en la presencia
+                const interlocutorEmail = esAdmin ? choferEmail : ADMIN_EMAIL;
+                setOnline(emails.includes(interlocutorEmail));
+            })
+            .on('broadcast', { event: 'typing' }, (payload) => {
+                const { email: emailEmisor, nombre: nomEmisor, escribiendo } = payload.payload as any;
+                if (emailEmisor === miEmail) return;
+                setOtroEscribiendo(escribiendo);
+                setNombreEscribiendo(escribiendo ? nomEmisor : '');
+            })
+            .subscribe(async (status) => {
+                if (status === 'SUBSCRIBED') {
+                    await canal.track({ email: miEmail, nombre: miNombre, at: new Date().toISOString() });
+                }
+            });
+
+        presenceCanalRef.current = canal;
+        return () => {
+            if (presenceCanalRef.current) {
+                void presenceCanalRef.current.untrack();
+                void supabase.removeChannel(presenceCanalRef.current);
+                presenceCanalRef.current = null;
+            }
+        };
+    }, [choferEmail, miEmail, miNombre, esAdmin]);
+
+    // ── Typing broadcast ─────────────────────────────────────────────────
+
+    const emitirTyping = (escribiendo: boolean) => {
+        presenceCanalRef.current?.send({
+            type: 'broadcast', event: 'typing',
+            payload: { email: miEmail, nombre: miNombre, escribiendo },
+        });
+    };
+
+    const handleChangeText = (val: string) => {
+        setTexto(val);
+        if (!estabaTypingRef.current) { estabaTypingRef.current = true; emitirTyping(true); }
+        if (typingRef.current) clearTimeout(typingRef.current);
+        typingRef.current = setTimeout(() => { estabaTypingRef.current = false; emitirTyping(false); }, TYPING_TIMEOUT_MS);
+    };
+
+    // ── Enviar ────────────────────────────────────────────────────────────
+
+    const handleEnviar = async () => {
+        const txt = texto.trim();
+        if (!txt || enviando) return;
+        if (typingRef.current) clearTimeout(typingRef.current);
+        estabaTypingRef.current = false;
+        emitirTyping(false);
+        setEnviando(true);
+        setTexto('');
+        try {
+            const { error } = await supabase.from('mensajes').insert([{
+                user_id: miUserId,
+                remitente: esAdmin ? 'Maxi (Admin)' : miNombre,
+                texto: txt,
+                chofer_email: choferEmail,
+            }]);
+            if (error) { setTexto(txt); console.error('[Chat] Error:', error.message); }
+        } catch { setTexto(txt); }
+        finally { setEnviando(false); inputRef.current?.focus(); }
+    };
+
+    return (
         <KeyboardAvoidingView
-            style={S.root}
+            style={{ flex: 1, backgroundColor: '#060B18' }}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-            {/* ── Selector de conversaciones (admin) ── */}
-            {esAdmin && (
-                <SelectorConversaciones
-                    choferes={choferes}
-                    seleccionado={choferSeleccionado}
-                    onlineEmails={onlineEmails}
-                    onSeleccionar={(c) => {
-                        setChoferSeleccionado(c);
-                        setMensajes([]);
-                        setOtroEscribiendo(false);
-                        setCargando(true);
-                    }}
-                />
-            )}
-
-            {/* ── Header de conversación ── */}
-            <View style={S.convHeader}>
-                <View style={S.convAvatarWrap}>
-                    <View style={S.convAvatarBox}>
+            {/* Header */}
+            <View style={S.chatHeader}>
+                {onVolver && (
+                    <TouchableOpacity onPress={onVolver} style={S.btnVolver} activeOpacity={0.7}>
+                        <Ionicons name="arrow-back" size={22} color="#4F8EF7" />
+                    </TouchableOpacity>
+                )}
+                <View style={S.chatAvatarWrap}>
+                    <View style={S.chatAvatar}>
                         {esAdmin
-                            ? <Text style={S.convAvatarText}>{iniciales(choferSeleccionado?.nombre ?? 'C')}</Text>
+                            ? <Text style={S.chatAvatarText}>{iniciales(choferNombre)}</Text>
                             : <Ionicons name="person-outline" size={16} color="#4F8EF7" />
                         }
                     </View>
-                    {interlocutorOnline && <View style={S.onlineDot} />}
+                    {online && <View style={S.onlineDot} />}
                 </View>
                 <View style={{ flex: 1 }}>
-                    <Text style={S.convNombre}>{interlocutorNombre}</Text>
-                    <Text style={S.convSub}>
-                        {otroEscribiendo
-                            ? '✏️ escribiendo...'
-                            : interlocutorOnline
-                                ? 'En línea'
-                                : 'Logística Hogareño'
-                        }
+                    <Text style={S.chatNombre}>{esAdmin ? choferNombre : 'Maxi (Admin)'}</Text>
+                    <Text style={S.chatSub}>
+                        {otroEscribiendo ? '✏️ escribiendo...' : online ? 'En línea' : 'Logística Hogareño'}
                     </Text>
                 </View>
             </View>
 
-            {/* ── Lista de mensajes ── */}
+            {/* Mensajes */}
             {mensajes.length === 0 ? (
                 <View style={S.vacio}>
-                    <Ionicons name="chatbubbles-outline" size={52} color="#1A2540" />
-                    <Text style={S.vacioTitulo}>
-                        {esAdmin && choferSeleccionado ? `Sin mensajes con ${choferSeleccionado.nombre}` : 'Aún no hay mensajes'}
-                    </Text>
-                    <Text style={S.vacioSub}>
-                        {esAdmin ? 'Escribí para iniciar la conversación.' : 'Escribile a la central.'}
-                    </Text>
+                    <Ionicons name="chatbubbles-outline" size={48} color="#1A2540" />
+                    <Text style={S.vacioTitulo}>Sin mensajes aún</Text>
+                    <Text style={S.vacioSub}>{esAdmin ? 'Escribí para iniciar.' : 'Escribile a la central.'}</Text>
                 </View>
             ) : (
                 <FlatList
                     data={mensajes}
-                    keyExtractor={(item) => String(item.id)}
-                    renderItem={({ item, index }) => (
-                        <View>
-                            {necesitaSeparadorFecha(mensajes, index) && (
-                                <SeparadorFecha fecha={formatFecha(item.created_at)} />
-                            )}
-                            <Burbuja
-                                mensaje={item}
-                                esPropio={item.user_id === userId}
-                                mostrarRemitente={!esAdmin && item.user_id !== userId}
-                                esAdmin={esAdmin}
-                            />
-                        </View>
-                    )}
-                    inverted={true}
+                    keyExtractor={m => String(m.id)}
+                    inverted
                     contentContainerStyle={S.lista}
                     showsVerticalScrollIndicator={false}
-                    removeClippedSubviews={true}
-                    maxToRenderPerBatch={15}
-                    windowSize={10}
-                    initialNumToRender={20}
                     keyboardShouldPersistTaps="handled"
+                    removeClippedSubviews
+                    maxToRenderPerBatch={15}
+                    renderItem={({ item, index }) => {
+                        // esPropio se calcula con el miUserId pasado por prop — nunca null
+                        const esPropio = item.user_id === miUserId;
+                        return (
+                            <View>
+                                {necesitaSeparador(mensajes, index) && (
+                                    <SeparadorFecha fecha={formatFechaGrupo(item.created_at)} />
+                                )}
+                                <Burbuja
+                                    mensaje={item}
+                                    esPropio={esPropio}
+                                    mostrarRemitente={!esAdmin && !esPropio}
+                                />
+                            </View>
+                        );
+                    }}
                 />
             )}
 
-            {/* ── Indicador "escribiendo" debajo de la lista ── */}
-            {otroEscribiendo && (
-                <IndicadorEscribiendo nombre={nombreEscribiendo} />
-            )}
+            {otroEscribiendo && <IndicadorEscribiendo nombre={nombreEscribiendo} />}
 
-            {/* ── Input bar ── */}
+            {/* Input */}
             <View style={S.inputBar}>
                 <TextInput
                     ref={inputRef}
                     style={S.input}
                     value={texto}
                     onChangeText={handleChangeText}
-                    placeholder={
-                        esAdmin && choferSeleccionado
-                            ? `Escribirle a ${choferSeleccionado.nombre.split(' ')[0]}...`
-                            : 'Escribile a la central...'
-                    }
+                    placeholder={esAdmin ? `Escribirle a ${choferNombre.split(' ')[0]}...` : 'Escribile a la central...'}
                     placeholderTextColor="#2A4A70"
                     multiline
                     maxLength={500}
@@ -699,19 +586,98 @@ export default function ChatScreen() {
                     onSubmitEditing={handleEnviar}
                 />
                 <TouchableOpacity
-                    style={[S.btnEnviar, (!texto.trim() || enviando) && S.btnEnviarDeshabilitado]}
+                    style={[S.btnEnviar, (!texto.trim() || enviando) && S.btnEnviarOff]}
                     onPress={handleEnviar}
                     disabled={!texto.trim() || enviando}
                     activeOpacity={0.75}
                 >
                     {enviando
-                        ? <ActivityIndicator size="small" color="#FFFFFF" />
-                        : <Ionicons name="send" size={18} color="#FFFFFF" />
+                        ? <ActivityIndicator size="small" color="#FFF" />
+                        : <Ionicons name="send" size={18} color="#FFF" />
                     }
                 </TouchableOpacity>
             </View>
         </KeyboardAvoidingView>
     );
+};
+
+// ═════════════════════════════════════════════
+// PANTALLA PRINCIPAL — router entre las dos vistas
+// ═════════════════════════════════════════════
+
+export default function ChatScreen() {
+    const [cargando, setCargando] = useState(true);
+    const [authError, setAuthError] = useState(false);
+
+    const [miUserId, setMiUserId] = useState('');
+    const [miEmail, setMiEmail] = useState('');
+    const [miNombre, setMiNombre] = useState('Chofer');
+    const [esAdmin, setEsAdmin] = useState(false);
+
+    // Admin: qué conversación tiene abierta (null = lista)
+    const [convAbierta, setConvAbierta] = useState<Conversacion | null>(null);
+
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data: { user }, error }) => {
+            if (error || !user) { setAuthError(true); setCargando(false); return; }
+            setMiUserId(user.id);
+            setMiEmail(user.email ?? '');
+            const nombre = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Chofer';
+            setMiNombre(nombre.split(' ')[0]);
+            setEsAdmin(user.email === ADMIN_EMAIL);
+            setCargando(false);
+        });
+    }, []);
+
+    if (authError) {
+        return (
+            <View style={S.vacio}>
+                <Ionicons name="lock-closed-outline" size={52} color="#1A2540" />
+                <Text style={S.vacioTitulo}>Sesión no disponible</Text>
+                <Text style={S.vacioSub}>Volvé a iniciar sesión.</Text>
+            </View>
+        );
+    }
+
+    if (cargando) {
+        return (
+            <View style={S.loader}>
+                <ActivityIndicator size="large" color="#4F8EF7" />
+                <Text style={S.loaderText}>{esAdmin ? 'Cargando conversaciones...' : 'Conectando...'}</Text>
+            </View>
+        );
+    }
+
+    // ── CHOFER: entra directo a su conversación con el admin ──────────────
+    if (!esAdmin) {
+        return (
+            <Conversacion
+                miUserId={miUserId}
+                miEmail={miEmail}
+                miNombre={miNombre}
+                esAdmin={false}
+                choferEmail={miEmail}        // la conversación se identifica por el email del chofer
+                choferNombre="Maxi (Admin)"
+            />
+        );
+    }
+
+    // ── ADMIN: si hay conversación abierta, mostrarla; si no, la lista ────
+    if (convAbierta) {
+        return (
+            <Conversacion
+                miUserId={miUserId}
+                miEmail={miEmail}
+                miNombre={miNombre}
+                esAdmin={true}
+                choferEmail={convAbierta.email}
+                choferNombre={convAbierta.nombre}
+                onVolver={() => setConvAbierta(null)}
+            />
+        );
+    }
+
+    return <ListaConversaciones onAbrir={setConvAbierta} />;
 }
 
 // ─────────────────────────────────────────────
@@ -719,106 +685,90 @@ export default function ChatScreen() {
 // ─────────────────────────────────────────────
 
 const S = StyleSheet.create({
-    root: { flex: 1, backgroundColor: '#060B18' },
     loader: { flex: 1, backgroundColor: '#060B18', justifyContent: 'center', alignItems: 'center', gap: 14 },
     loaderText: { color: '#4A6FA5', fontSize: 13, fontWeight: '500' },
-    authErrorContainer: { flex: 1, backgroundColor: '#060B18', justifyContent: 'center', alignItems: 'center', gap: 12, paddingHorizontal: 40 },
-    authErrorTitulo: { color: '#4A6FA5', fontSize: 16, fontWeight: '700', textAlign: 'center' },
-    authErrorSub: { color: '#2A4A70', fontSize: 13, fontWeight: '500', textAlign: 'center', lineHeight: 20 },
+    vacio: { flex: 1, backgroundColor: '#060B18', justifyContent: 'center', alignItems: 'center', gap: 10, padding: 32 },
+    vacioTitulo: { color: '#4A6FA5', fontSize: 15, fontWeight: '700', textAlign: 'center' },
+    vacioSub: { color: '#2A4A70', fontSize: 13, fontWeight: '500', textAlign: 'center', lineHeight: 20 },
 
-    // Header
-    convHeader: {
+    // Lista de conversaciones (admin)
+    convItem: {
+        flexDirection: 'row', alignItems: 'center', gap: 14,
+        paddingHorizontal: 16, paddingVertical: 14,
+        backgroundColor: '#060B18',
+    },
+    convSeparador: { height: 1, backgroundColor: '#0A0F1E', marginLeft: 82 },
+    convAvatarWrap: { position: 'relative' },
+    convAvatar: {
+        width: 52, height: 52, borderRadius: 26,
+        backgroundColor: '#0D1526',
+        borderWidth: 1, borderColor: '#1A2540',
+        justifyContent: 'center', alignItems: 'center',
+    },
+    convAvatarText: { fontSize: 17, fontWeight: '800', color: '#4F8EF7' },
+    convInfo: { flex: 1 },
+    convTopRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+    convNombreItem: { fontSize: 15, fontWeight: '700', color: '#FFFFFF', flex: 1, marginRight: 8 },
+    convHora: { fontSize: 11, color: '#2A4A70', fontWeight: '500' },
+    convBottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    convUltimoMsg: { flex: 1, fontSize: 13, color: '#4A6FA5', fontWeight: '400', marginRight: 8 },
+    badge: {
+        backgroundColor: '#4F8EF7', borderRadius: 10,
+        minWidth: 20, height: 20,
+        justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5,
+    },
+    badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
+
+    // Header de conversación
+    chatHeader: {
         flexDirection: 'row', alignItems: 'center', gap: 12,
         paddingHorizontal: 16, paddingVertical: 12,
         backgroundColor: '#0A0F1E',
         borderBottomWidth: 1, borderBottomColor: '#0D1A2E',
     },
-    convAvatarWrap: { position: 'relative' },
-    convAvatarBox: {
+    btnVolver: { padding: 4, marginRight: 4 },
+    chatAvatarWrap: { position: 'relative' },
+    chatAvatar: {
         width: 40, height: 40, borderRadius: 20,
         backgroundColor: 'rgba(79,142,247,0.12)',
         borderWidth: 1, borderColor: 'rgba(79,142,247,0.25)',
         justifyContent: 'center', alignItems: 'center',
     },
-    convAvatarText: { fontSize: 14, fontWeight: '800', color: '#4F8EF7' },
-    convNombre: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
-    convSub: { fontSize: 11, color: '#4A6FA5', marginTop: 1 },
-
-    // Punto online en header
+    chatAvatarText: { fontSize: 14, fontWeight: '800', color: '#4F8EF7' },
+    chatNombre: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
+    chatSub: { fontSize: 11, color: '#4A6FA5', marginTop: 1 },
     onlineDot: {
         position: 'absolute', bottom: 0, right: 0,
         width: 11, height: 11, borderRadius: 6,
-        backgroundColor: '#34D399',
-        borderWidth: 2, borderColor: '#0A0F1E',
+        backgroundColor: '#34D399', borderWidth: 2, borderColor: '#0A0F1E',
     },
 
-    // Selector admin
-    selectorContainer: { backgroundColor: '#0A0F1E', borderBottomWidth: 1, borderBottomColor: '#0D1A2E' },
-    selectorLabel: {
-        fontSize: 10, fontWeight: '800', color: '#2A4A70',
-        letterSpacing: 1.5, paddingHorizontal: 16, paddingTop: 12, textTransform: 'uppercase',
-    },
-    selectorList: { gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
-    selectorChip: {
-        flexDirection: 'row', alignItems: 'center', gap: 8,
-        backgroundColor: '#0D1526', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8,
-        borderWidth: 1, borderColor: '#1A2540',
-    },
-    selectorChipActivo: { backgroundColor: 'rgba(79,142,247,0.12)', borderColor: '#4F8EF7' },
-    selectorAvatarWrap: { position: 'relative' },
-    selectorAvatar: {
-        width: 28, height: 28, borderRadius: 14,
-        backgroundColor: '#111D35', justifyContent: 'center', alignItems: 'center',
-    },
-    selectorAvatarActivo: { backgroundColor: 'rgba(79,142,247,0.2)' },
-    selectorAvatarText: { fontSize: 12, fontWeight: '800', color: '#4A6FA5' },
-    selectorNombre: { fontSize: 13, fontWeight: '600', color: '#4A6FA5', maxWidth: 80 },
-    selectorNombreActivo: { color: '#FFFFFF' },
-    onlineDotSelector: {
-        position: 'absolute', bottom: -1, right: -1,
-        width: 9, height: 9, borderRadius: 5,
-        backgroundColor: '#34D399', borderWidth: 1.5, borderColor: '#0A0F1E',
-    },
-
-    // Lista
+    // Lista de mensajes
     lista: { paddingHorizontal: 14, paddingTop: 16, paddingBottom: 8 },
 
-    // Vacío
-    vacio: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10, padding: 32 },
-    vacioTitulo: { color: '#4A6FA5', fontSize: 15, fontWeight: '700', textAlign: 'center' },
-    vacioSub: { color: '#2A4A70', fontSize: 13, fontWeight: '500', textAlign: 'center', lineHeight: 20 },
-
-    // Separador de fecha
-    separadorFechaWrapper: {
-        flexDirection: 'row', alignItems: 'center',
-        marginVertical: 12, paddingHorizontal: 8,
-    },
-    separadorFechaLinea: { flex: 1, height: 1, backgroundColor: '#0D1A2E' },
-    separadorFechaTexto: {
-        fontSize: 11, color: '#2A4A70', fontWeight: '600',
-        marginHorizontal: 10, textTransform: 'uppercase', letterSpacing: 0.5,
-    },
+    // Separador fecha
+    separadorWrapper: { flexDirection: 'row', alignItems: 'center', marginVertical: 12, paddingHorizontal: 8 },
+    separadorLinea: { flex: 1, height: 1, backgroundColor: '#0D1A2E' },
+    separadorTexto: { fontSize: 11, color: '#2A4A70', fontWeight: '600', marginHorizontal: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
 
     // Burbujas
     burbujaWrapper: { marginBottom: 3, maxWidth: '80%' },
-    burbujaWrapperDerecha: { alignSelf: 'flex-end', alignItems: 'flex-end' },
-    burbujaWrapperIzquierda: { alignSelf: 'flex-start', alignItems: 'flex-start' },
+    burbujaRight: { alignSelf: 'flex-end', alignItems: 'flex-end' },
+    burbujaLeft: { alignSelf: 'flex-start', alignItems: 'flex-start' },
     remitente: { fontSize: 11, fontWeight: '700', color: '#4F8EF7', marginBottom: 3, marginLeft: 4 },
     burbuja: { borderRadius: 18, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8 },
     burbujaPropia: { backgroundColor: '#1E4DB7', borderBottomRightRadius: 4 },
     burbujaAjena: { backgroundColor: '#0D1526', borderWidth: 1, borderColor: '#1A2540', borderBottomLeftRadius: 4 },
     burbujaTexto: { fontSize: 15, lineHeight: 20 },
-    burbujaTextoPropio: { color: '#FFFFFF' },
-    burbujaTextoAjeno: { color: '#D1D9E6' },
-
-    // Footer de burbuja (hora + ticks)
+    textoPropio: { color: '#FFFFFF' },
+    textoAjeno: { color: '#D1D9E6' },
     burbujaFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 },
-    burbujaHora: { fontSize: 10, fontWeight: '600' },
-    burbujaHoraPropia: { color: 'rgba(255,255,255,0.45)' },
-    burbujaHoraAjena: { color: '#2A4A70' },
-    ticksWrapper: { flexDirection: 'row', alignItems: 'center' },
+    hora: { fontSize: 10, fontWeight: '600' },
+    horaPropia: { color: 'rgba(255,255,255,0.45)' },
+    horaAjena: { color: '#2A4A70' },
+    ticks: { flexDirection: 'row', alignItems: 'center' },
 
-    // Mensajes de sistema
+    // Sistema
     sistemaWrapper: { alignItems: 'center', marginVertical: 8 },
     sistemaBurbuja: {
         flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -829,27 +779,24 @@ const S = StyleSheet.create({
     sistemaTexto: { flex: 1, fontSize: 12, color: '#34D399', fontWeight: '600', textAlign: 'center' },
     sistemaHora: { fontSize: 10, color: '#1A3050', fontWeight: '600' },
 
-    // Typing indicator
+    // Typing
     typingWrapper: { paddingHorizontal: 14, paddingBottom: 6 },
     typingBurbuja: {
         flexDirection: 'row', alignItems: 'center', gap: 8,
-        backgroundColor: '#0D1526',
-        borderWidth: 1, borderColor: '#1A2540',
+        backgroundColor: '#0D1526', borderWidth: 1, borderColor: '#1A2540',
         borderRadius: 18, borderBottomLeftRadius: 4,
-        paddingHorizontal: 14, paddingVertical: 10,
-        alignSelf: 'flex-start',
+        paddingHorizontal: 14, paddingVertical: 10, alignSelf: 'flex-start',
     },
     typingNombre: { fontSize: 12, color: '#4A6FA5', fontWeight: '500' },
     typingDots: { flexDirection: 'row', alignItems: 'center', gap: 3 },
     typingDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#4F8EF7' },
 
-    // Input bar
+    // Input
     inputBar: {
         flexDirection: 'row', alignItems: 'flex-end', gap: 10,
         paddingHorizontal: 14, paddingVertical: 12,
         paddingBottom: Platform.OS === 'ios' ? 28 : 12,
-        backgroundColor: '#0A0F1E',
-        borderTopWidth: 1, borderTopColor: '#0D1A2E',
+        backgroundColor: '#0A0F1E', borderTopWidth: 1, borderTopColor: '#0D1A2E',
     },
     input: {
         flex: 1, backgroundColor: '#0D1526',
@@ -863,5 +810,5 @@ const S = StyleSheet.create({
         shadowColor: '#4F8EF7', shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
     },
-    btnEnviarDeshabilitado: { backgroundColor: '#111D35', shadowOpacity: 0, elevation: 0 },
+    btnEnviarOff: { backgroundColor: '#111D35', shadowOpacity: 0, elevation: 0 },
 });
