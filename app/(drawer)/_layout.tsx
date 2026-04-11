@@ -14,26 +14,21 @@ import { useRouter } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
 import React, { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ADMIN_EMAIL } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
-
-const ADMIN_EMAIL = 'maxirusso20@gmail.com';
 
 // ─────────────────────────────────────────────
 // HOOK: useEsAdmin
-// Detecta el rol leyendo primero la sesión en caché (instantáneo)
-// y luego verificando con el servidor si hace falta.
 // ─────────────────────────────────────────────
 
 function useEsAdmin(): boolean | null {
   const [esAdmin, setEsAdmin] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // getSession() lee AsyncStorage — sin network, resultado inmediato
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user?.email) {
         setEsAdmin(session.user.email === ADMIN_EMAIL);
       } else {
-        // Sin sesión en caché, verificar con servidor
         supabase.auth.getUser().then(({ data }) => {
           setEsAdmin((data.user?.email ?? '') === ADMIN_EMAIL);
         });
@@ -119,7 +114,6 @@ function DrawerContent(props: any) {
   const router = useRouter();
   const esAdmin = useEsAdmin();
 
-  // Mientras detectamos el rol mostramos el container vacío (sin flash)
   if (esAdmin === null) return <View style={styles.drawerContainer} />;
 
   const items = esAdmin ? ITEMS_ADMIN : ITEMS_CHOFER;
@@ -127,7 +121,6 @@ function DrawerContent(props: any) {
 
   return (
     <View style={styles.drawerContainer}>
-      {/* Header */}
       <View style={styles.drawerHeader}>
         <View style={styles.drawerLogoBox}>
           <Ionicons name="bus" size={28} color="#4F8EF7" />
@@ -149,7 +142,6 @@ function DrawerContent(props: any) {
 
       <View style={styles.divider} />
 
-      {/* Ítems de navegación */}
       <View style={styles.drawerItems}>
         {items.map((item) => {
           const isActive = currentRoute === item.name;
@@ -172,7 +164,6 @@ function DrawerContent(props: any) {
         })}
       </View>
 
-      {/* Footer */}
       <View style={styles.drawerFooter}>
         <View style={styles.divider} />
         <Text style={styles.drawerFooterText}>v1.0.0 · © 2026</Text>
@@ -187,10 +178,6 @@ function DrawerContent(props: any) {
 
 export default function DrawerLayout() {
   const esAdmin = useEsAdmin();
-
-  // Mientras no sabemos el rol, usamos 'colectas' como fallback seguro.
-  // El root _layout.tsx ya hizo el redirect correcto antes de llegar acá,
-  // así que el usuario ya está en la pantalla correcta.
   const rutaInicial = esAdmin === true ? 'index' : 'colectas';
 
   return (

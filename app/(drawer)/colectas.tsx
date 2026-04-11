@@ -15,6 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { ADMIN_EMAIL, getSaludo } from '../../lib/constants';
 import { startTracking, stopTracking } from '../../lib/locationTracker';
 import { supabase } from '../../lib/supabase';
 
@@ -22,7 +23,6 @@ import { supabase } from '../../lib/supabase';
 // CONSTANTE: email del administrador
 // ─────────────────────────────────────────────
 
-const ADMIN_EMAIL = 'maxirusso20@gmail.com';
 
 // ─────────────────────────────────────────────
 // CACHÉ GLOBAL — fuera del componente React
@@ -100,15 +100,17 @@ async function notificarCambioDesdecentral(payload: {
 // ─────────────────────────────────────────────
 
 async function enviarMensajeAutoChatColecta(
-  userId: string,
+  emailChofer: string,
   nombreColecta: string,
 ): Promise<void> {
   try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
     const { error } = await supabase.from('mensajes').insert([{
-      user_id: userId,
+      user_id: user.id,
       remitente: 'Sistema',
       texto: `🔔 Colecta recogida: ${nombreColecta}`,
-      chofer_id: userId,
+      chofer_email: emailChofer,
     }]);
     if (error) console.warn('[Chat auto] Error Supabase:', error.message);
   } catch (err) {
@@ -143,12 +145,7 @@ type FiltroColecta = 'todas' | 'pendientes' | 'completadas';
 // HELPERS
 // ─────────────────────────────────────────────
 
-const getSaludo = (): string => {
-  const hora = new Date().getHours();
-  if (hora < 12) return 'Buenos días';
-  if (hora < 19) return 'Buenas tardes';
-  return 'Buenas noches';
-};
+
 
 const abrirMapa = (direccion: string) => {
   if (!direccion) return;
@@ -767,7 +764,7 @@ export default function ColectasScreen() {
       }
 
       if (nuevoEstado === true && userIdRef.current) {
-        void enviarMensajeAutoChatColecta(userIdRef.current, nombreCliente || 'Sin nombre');
+        void enviarMensajeAutoChatColecta(emailUsuarioRef.current!, nombreCliente || 'Sin nombre');
       }
 
     } finally {

@@ -22,13 +22,13 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { ADMIN_EMAIL } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
 
 // ─────────────────────────────────────────────
 // CONSTANTES
 // ─────────────────────────────────────────────
 
-const ADMIN_EMAIL = 'maxirusso20@gmail.com';
 const TYPING_TIMEOUT_MS = 2500; // cuánto esperar sin tipear para dejar de mostrar "escribiendo"
 
 // ─────────────────────────────────────────────

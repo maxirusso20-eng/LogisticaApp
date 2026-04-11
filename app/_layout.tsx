@@ -6,13 +6,13 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
+import { ADMIN_EMAIL } from '../lib/constants';
 import { supabase } from '../lib/supabase';
 
 export const unstable_settings = {
   initialRouteName: '(drawer)',
 };
 
-const ADMIN_EMAIL = 'maxirusso20@gmail.com';
 
 function SplashLoader() {
   const pulse = useRef(new Animated.Value(0.4)).current;

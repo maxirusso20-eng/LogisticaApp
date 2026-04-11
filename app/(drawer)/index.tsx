@@ -1,4 +1,3 @@
-
 /**
  * app/(drawer)/index.tsx — Pantalla principal: Recorridos
  *
@@ -83,7 +82,7 @@ async function registerForPushNotificationsAsync(): Promise<Notifications.ExpoPu
     if (!projectId) {
       throw new Error('Project ID no existe en expoConfig. Pasando en modo desarrollo o Expo Go.');
     }
-    
+
     const token = await Notifications.getExpoPushTokenAsync({ projectId });
     return token;
   } catch (err) {
@@ -160,6 +159,9 @@ const calcularPorcentaje = (r: Recorrido): string => {
   if (suma === 0) return '0%';
   return (((r.entregados || 0) / suma) * 100).toFixed(1) + '%';
 };
+
+const calcularTotal = (r: Recorrido): number => (r.pqteDia || 0) + (r.porFuera || 0);
+const calcularRestante = (r: Recorrido): number => Math.max(0, calcularTotal(r) - (r.entregados || 0));
 
 const formatearFecha = (texto: string): string => {
   const nums = texto.replace(/\D/g, '');
@@ -264,7 +266,7 @@ const TablaZona: React.FC<TablaZonaProps> = ({ zona, datos, choferes, visible, o
           <View>
             {/* Header */}
             <View style={[S.filaTabla, S.filaHeader]}>
-              {['LOCALIDAD', 'ID', 'CHOFER', 'PQTE DÍA', 'POR FUERA', 'ENTREGADOS', '% DEL DÍA'].map(h => (
+              {['LOCALIDAD', 'ID', 'CHOFER', 'PQTE DÍA', 'POR FUERA', 'TOTAL', 'ENTREGADOS', 'RESTANTE', '% DEL DÍA'].map(h => (
                 <View key={h} style={S.celdaHeader}>
                   <Text style={S.textoHeader}>{h}</Text>
                 </View>
@@ -307,6 +309,12 @@ const TablaZona: React.FC<TablaZonaProps> = ({ zona, datos, choferes, visible, o
                     selectTextOnFocus
                   />
                 </View>
+                {/* TOTAL = pqteDia + porFuera — solo lectura, calculado */}
+                <View style={S.celda}>
+                  <Text style={[S.textoCelda, { color: '#a78bfa', fontWeight: '800' }]}>
+                    {calcularTotal(rec)}
+                  </Text>
+                </View>
                 <View style={S.celda}>
                   <TextInput
                     style={S.inputTabla}
@@ -315,6 +323,15 @@ const TablaZona: React.FC<TablaZonaProps> = ({ zona, datos, choferes, visible, o
                     onChangeText={v => onActualizar(zona, i, 'entregados', v)}
                     selectTextOnFocus
                   />
+                </View>
+                {/* RESTANTE = total - entregados — solo lectura, se actualiza en tiempo real */}
+                <View style={S.celda}>
+                  <Text style={[S.textoCelda, {
+                    fontWeight: '800',
+                    color: calcularRestante(rec) === 0 ? '#34D399' : calcularRestante(rec) <= 10 ? '#f59e0b' : '#f87171',
+                  }]}>
+                    {calcularRestante(rec)}
+                  </Text>
                 </View>
                 <View style={S.celda}>
                   <Text style={[S.porcentaje, { color }]}>{calcularPorcentaje(rec)}</Text>
@@ -543,7 +560,7 @@ export default function RecorridosScreen() {
       try {
         // Obtenemos la info primero para no pedir permisos innecesariamente si no hay sesión
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user?.email) return; 
+        if (!user?.email) return;
 
         // Una vez asegurado de que es un chofer, procedemos a solicitar el token
         const token = await registerForPushNotificationsAsync();
