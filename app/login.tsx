@@ -26,7 +26,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
-import { COLORS } from '../lib/constants';
+import { APP_NAME, APP_TAGLINE, COLORS } from '../lib/constants';
 import { supabase } from '../lib/supabase';
 
 export default function LoginScreen() {
@@ -122,8 +122,8 @@ export default function LoginScreen() {
                 <View style={styles.logoBox}>
                   <Ionicons name="bus" size={38} color={COLORS.blue} />
                 </View>
-                <Text style={styles.brand}>Logística Hogareño</Text>
-                <Text style={styles.tagline}>Panel de Control · Área Logística</Text>
+                <Text style={styles.brand}>{APP_NAME}</Text>
+                <Text style={styles.tagline}>{APP_TAGLINE}</Text>
               </View>
             )}
 
@@ -232,7 +232,7 @@ export default function LoginScreen() {
             </Animated.View>
 
             {!isKeyboardVisible && (
-              <Text style={styles.footer}>© 2026 Logística Hogareño · Todos los derechos reservados</Text>
+              <Text style={styles.footer}>© {new Date().getFullYear()} {APP_NAME} · Todos los derechos reservados</Text>
             )}
           </Animated.View>
         </KeyboardAvoidingView>

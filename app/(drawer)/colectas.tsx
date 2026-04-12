@@ -1,10 +1,13 @@
 // app/(drawer)/colectas.tsx
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
+  Image,
   Linking,
   Platform,
   RefreshControl,
@@ -129,6 +132,8 @@ interface Cliente {
   horario: string;
   chofer: string;
   completado: boolean;
+  foto_url?: string | null;
+  email_chofer?: string;
 }
 
 // Grupo de colectas por nombre de chofer — usado exclusivamente en la vista admin
@@ -146,6 +151,82 @@ type FiltroColecta = 'todas' | 'pendientes' | 'completadas';
 // ─────────────────────────────────────────────
 
 
+
+// ─────────────────────────────────────────────
+// HELPERS DE HORARIO Y FOTO
+// ─────────────────────────────────────────────
+
+/**
+ * Parsea "HH:MM" y devuelve minutos desde medianoche.
+ */
+const parsearHorario = (horario: string): number | null => {
+  if (!horario) return null;
+  const match = horario.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  return parseInt(match[1]) * 60 + parseInt(match[2]);
+};
+
+/**
+ * Retorna true si ya pasaron 15 minutos desde el horario
+ * asignado y la colecta no fue completada.
+ */
+const colectaVencida = (horario: string, completado: boolean): boolean => {
+  if (completado) return false;
+  const minutosHorario = parsearHorario(horario);
+  if (minutosHorario === null) return false;
+  const ahora = new Date();
+  const minutosAhora = ahora.getHours() * 60 + ahora.getMinutes();
+  return minutosAhora >= minutosHorario + 15;
+};
+
+/**
+ * Envía push notification de colecta vencida al chofer y al admin.
+ * Se llama una sola vez por colecta (controlado con un Set en memoria).
+ */
+const notificacionesVencidasEnviadas = new Set<string>();
+
+async function notificarColectaVencida(
+  clienteNombre: string,
+  emailChofer: string,
+): Promise<void> {
+  const key = `${clienteNombre}-${new Date().toDateString()}`;
+  if (notificacionesVencidasEnviadas.has(key)) return;
+  notificacionesVencidasEnviadas.add(key);
+
+  const titulo = '⚠️ Colecta no realizada';
+  const cuerpo = `${clienteNombre} no fue marcada como completada a tiempo.`;
+
+  try {
+    // Obtener tokens del chofer y del admin
+    const [{ data: choferData }, { data: adminData }] = await Promise.all([
+      supabase.from('Choferes').select('push_token').eq('email', emailChofer).maybeSingle(),
+      supabase.from('Admins').select('push_token').eq('email', ADMIN_EMAIL).maybeSingle(),
+    ]);
+
+    const tokens = [
+      choferData?.push_token,
+      adminData?.push_token,
+    ].filter(Boolean) as string[];
+
+    if (tokens.length === 0) return;
+
+    await Promise.all(tokens.map(token =>
+      fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: token,
+          title: titulo,
+          body: cuerpo,
+          sound: 'default',
+          data: { tipo: 'COLECTA_VENCIDA' },
+        }),
+      })
+    ));
+  } catch (err) {
+    console.warn('[Push] Error notificando colecta vencida:', err);
+  }
+}
 
 const abrirMapa = (direccion: string) => {
   if (!direccion) return;
@@ -186,6 +267,137 @@ const agruparPorChofer = (lista: Cliente[]): GrupoChofer[] => {
 };
 
 // ─────────────────────────────────────────────
+// COMPONENTE: FotoColecta
+// Permite subir/ver la foto de justificación
+// Aparece cuando la colecta está vencida o completada
+// ─────────────────────────────────────────────
+
+function FotoColecta({
+  clienteId, fotoUrl, vencida, done, emailChofer, clienteNombre,
+}: {
+  clienteId: number | string;
+  fotoUrl: string | null;
+  vencida: boolean;
+  done: boolean;
+  emailChofer: string;
+  clienteNombre: string;
+}) {
+  const [subiendo, setSubiendo] = React.useState(false);
+  const [fotoLocal, setFotoLocal] = React.useState<string | null>(fotoUrl);
+
+  React.useEffect(() => { setFotoLocal(fotoUrl); }, [fotoUrl]);
+
+  const sacarFoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Sin permiso', 'Necesitás permitir el acceso a la cámara.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      allowsEditing: false,
+    });
+
+    if (result.canceled || !result.assets[0]) return;
+
+    const asset = result.assets[0];
+    setSubiendo(true);
+
+    try {
+      // Convertir URI a blob
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+
+      // Nombre del archivo: clienteId + timestamp
+      const fileName = `${String(clienteId)}_${Date.now()}.jpg`;
+      const filePath = `colectas/${fileName}`;
+
+      // Subir a Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('fotos-colectas')
+        .upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      // Obtener URL pública
+      const { data: urlData } = supabase.storage
+        .from('fotos-colectas')
+        .getPublicUrl(filePath);
+
+      const publicUrl = urlData.publicUrl;
+
+      // Guardar URL en la tabla Clientes
+      const { error: updateError } = await supabase
+        .from('Clientes')
+        .update({ foto_url: publicUrl })
+        .eq('id', clienteId);
+
+      if (updateError) throw updateError;
+
+      setFotoLocal(publicUrl);
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'No se pudo subir la foto.');
+    } finally {
+      setSubiendo(false);
+    }
+  };
+
+  return (
+    <View style={styles.fotoContainer}>
+      {fotoLocal ? (
+        // Mostrar foto existente
+        <View>
+          <Text style={styles.fotoLabel}>
+            {done ? '📸 Foto de entrega' : '📸 Justificación'}
+          </Text>
+          <Image
+            source={{ uri: fotoLocal }}
+            style={styles.fotoPreview}
+            resizeMode="cover"
+          />
+          {/* Permitir reemplazar la foto */}
+          <TouchableOpacity
+            style={styles.fotoBtnReemplazar}
+            onPress={sacarFoto}
+            disabled={subiendo}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="camera-outline" size={13} color="#4A6FA5" />
+            <Text style={styles.fotoBtnReemplazarText}>Reemplazar foto</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        // Botón para sacar foto
+        <TouchableOpacity
+          style={[
+            styles.fotoBtnSacar,
+            vencida && !done && styles.fotoBtnSacarVencida,
+          ]}
+          onPress={sacarFoto}
+          disabled={subiendo}
+          activeOpacity={0.8}
+        >
+          {subiendo ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <>
+              <Ionicons name="camera" size={16} color="#FFFFFF" />
+              <Text style={styles.fotoBtnText}>
+                {vencida && !done
+                  ? 'Justificar colecta no realizada'
+                  : 'Foto de entrega'}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────
 // COMPONENTE: ColectaCard (vista CHOFER — sin cambios)
 // ─────────────────────────────────────────────
 
@@ -213,10 +425,16 @@ function ColectaCard({
   };
 
   const done = item.completado;
+  const vencida = colectaVencida(item.horario, done);
 
   return (
-    <Animated.View style={[styles.card, done && styles.cardDone, { opacity: fade, transform: [{ scale }] }]}>
-      <View style={[styles.accent, done && styles.accentDone]} />
+    <Animated.View style={[
+      styles.card,
+      done && styles.cardDone,
+      vencida && styles.cardVencida,
+      { opacity: fade, transform: [{ scale }] }
+    ]}>
+      <View style={[styles.accent, done && styles.accentDone, vencida && styles.accentVencida]} />
 
       <View style={styles.cardBody}>
         <View style={styles.cardTop}>
@@ -225,17 +443,20 @@ function ColectaCard({
               {item.cliente || '—'}
             </Text>
             <View style={styles.horarioRow}>
-              <Ionicons name="time-outline" size={13} color={done ? '#1A3050' : '#4F8EF7'} />
-              <Text style={[styles.horarioText, done && { color: '#1A3050' }]}>
+              <Ionicons name="time-outline" size={13} color={done ? '#1A3050' : vencida ? '#EF4444' : '#4F8EF7'} />
+              <Text style={[styles.horarioText, done && { color: '#1A3050' }, vencida && { color: '#EF4444' }]}>
                 {item.horario || 'Sin horario'}
+                {vencida && !done ? ' · Vencida' : ''}
               </Text>
             </View>
           </View>
 
-          <TouchableOpacity onPress={handlePress} disabled={toggling} activeOpacity={0.7} style={styles.checkWrap}>
+          <TouchableOpacity onPress={handlePress} disabled={toggling || vencida} activeOpacity={0.7} style={styles.checkWrap}>
             {toggling
               ? <ActivityIndicator size="small" color="#4F8EF7" />
-              : <Ionicons name={done ? 'checkmark-circle' : 'ellipse-outline'} size={30} color={done ? '#34D399' : '#1A3050'} />
+              : vencida && !done
+                ? <Ionicons name="alert-circle" size={30} color="#EF4444" />
+                : <Ionicons name={done ? 'checkmark-circle' : 'ellipse-outline'} size={30} color={done ? '#34D399' : '#1A3050'} />
             }
           </TouchableOpacity>
         </View>
@@ -262,6 +483,18 @@ function ColectaCard({
             <Ionicons name="checkmark-done" size={11} color="#34D399" />
             <Text style={styles.doneBadgeText}>Completada</Text>
           </View>
+        )}
+
+        {/* Foto de justificación — aparece cuando está vencida o completada */}
+        {(vencida || done) && (
+          <FotoColecta
+            clienteId={item.id}
+            fotoUrl={item.foto_url ?? null}
+            vencida={vencida}
+            done={done}
+            emailChofer={item.email_chofer ?? ''}
+            clienteNombre={item.cliente}
+          />
         )}
       </View>
     </Animated.View>
@@ -582,16 +815,34 @@ export default function ColectasScreen() {
       esAdminRef.current = user.email === ADMIN_EMAIL;
       setEsAdmin(user.email === ADMIN_EMAIL);
 
-      const displayName: string =
-        user.user_metadata?.full_name ||
-        user.user_metadata?.name ||
-        user.email.split('@')[0];
-      setNombre(displayName.split(' ')[0]);
+      // Leer nombre desde tabla Choferes — así muestra el nombre real
+      // y no el email ni el metadata de auth
+      try {
+        const { data: choferData } = await supabase
+          .from('Choferes')
+          .select('nombre')
+          .eq('email', user.email)
+          .maybeSingle();
+
+        if (choferData?.nombre) {
+          setNombre(choferData.nombre.split(' ')[0]);
+        } else {
+          // Fallback: metadata de auth o primera parte del email
+          const fallback: string =
+            user.user_metadata?.full_name ||
+            user.user_metadata?.name ||
+            user.email.split('@')[0];
+          setNombre(fallback.split(' ')[0]);
+        }
+      } catch {
+        const fallback = user.user_metadata?.full_name || user.email.split('@')[0];
+        setNombre(fallback.split(' ')[0]);
+      }
 
       // ── Consulta diferente según rol ───────────────────────────────────
       let query = supabase
         .from('Clientes')
-        .select('id, cliente, direccion, horario, chofer, completado')
+        .select('id, cliente, direccion, horario, chofer, completado, foto_url, email_chofer')
         .order('horario', { ascending: true });
 
       if (!esAdminRef.current) {
@@ -617,7 +868,7 @@ export default function ColectasScreen() {
     fetchClientes(true);
 
     const channel = supabase
-      .channel('colectas-sync')
+      .channel(`colectas-sync-${Date.now()}`)
 
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'Clientes' }, (payload) => {
         const registro = payload.new as Cliente & { email_chofer?: string };
@@ -740,6 +991,23 @@ export default function ColectasScreen() {
   const handleRefresh = () => { setRefrescando(true); fetchClientes(); };
 
   // ── 4. Toggle — solo disponible para el chofer (no para admin) ─────────
+
+  // ── Detectar colectas vencidas y notificar cada minuto ──────────────
+  React.useEffect(() => {
+    if (esAdmin) return; // el admin no necesita este efecto
+
+    const chequear = () => {
+      clientes.forEach(c => {
+        if (!c.completado && c.email_chofer && colectaVencida(c.horario, c.completado)) {
+          void notificarColectaVencida(c.cliente, c.email_chofer);
+        }
+      });
+    };
+
+    chequear(); // chequear al cargar
+    const interval = setInterval(chequear, 60_000); // y cada 1 minuto
+    return () => clearInterval(interval);
+  }, [clientes, esAdmin]);
 
   const handleToggle = async (id: number | string, actual: boolean, nombreCliente: string) => {
     const idStr = String(id);
@@ -1038,6 +1306,31 @@ const styles = StyleSheet.create({
     borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4,
   },
   doneBadgeText: { fontSize: 11, color: '#34D399', fontWeight: '700' },
+
+  // Colecta vencida
+  cardVencida: { borderColor: 'rgba(239,68,68,0.25)', backgroundColor: '#0A0810' },
+  accentVencida: { backgroundColor: '#EF4444' },
+
+  // Foto de colecta
+  fotoContainer: { marginTop: 12 },
+  fotoLabel: { fontSize: 11, color: '#4A6FA5', fontWeight: '600', marginBottom: 6 },
+  fotoPreview: {
+    width: '100%', height: 160, borderRadius: 12,
+    backgroundColor: '#0D1526',
+    borderWidth: 1, borderColor: '#1A2540',
+  },
+  fotoBtnSacar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#4F8EF7', borderRadius: 12,
+    paddingVertical: 10, paddingHorizontal: 16, marginTop: 4,
+  },
+  fotoBtnSacarVencida: { backgroundColor: '#EF4444' },
+  fotoBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  fotoBtnReemplazar: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    marginTop: 6, alignSelf: 'flex-end',
+  },
+  fotoBtnReemplazarText: { fontSize: 11, color: '#4A6FA5', fontWeight: '600' },
 });
 
 // ─────────────────────────────────────────────

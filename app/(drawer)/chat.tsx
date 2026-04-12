@@ -12,6 +12,10 @@
 // La separación total elimina los bugs de esPropio/userId/timing.
 
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
+import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -26,8 +30,86 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { ADMIN_EMAIL } from '../../lib/constants';
+import { ADMIN_EMAIL, APP_NAME } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
+
+// ─────────────────────────────────────────────
+// CONFIGURACIÓN DE NOTIFICACIONES
+// ─────────────────────────────────────────────
+
+Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+    }),
+});
+
+// ─────────────────────────────────────────────
+// HELPERS DE PUSH NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+async function registrarPushToken(): Promise<string | null> {
+    if (!Device.isDevice) return null;
+    const { status: existente } = await Notifications.getPermissionsAsync();
+    let finalStatus = existente;
+    if (existente !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+    }
+    if (finalStatus !== 'granted') return null;
+    if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('chat', {
+            name: 'Mensajes de Chat',
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: '#4F8EF7',
+            sound: 'default',
+        });
+    }
+    try {
+        const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+        if (!projectId) return null;
+        const token = await Notifications.getExpoPushTokenAsync({ projectId });
+        return token.data;
+    } catch (err) {
+        console.warn('[Push] Error obteniendo token:', err);
+        return null;
+    }
+}
+
+async function guardarTokenEnBD(email: string, token: string, esAdmin: boolean): Promise<void> {
+    try {
+        if (esAdmin) {
+            await supabase.from('Admins').upsert({ email, push_token: token }, { onConflict: 'email' });
+        } else {
+            await supabase.from('Choferes').update({ push_token: token }).eq('email', email);
+        }
+    } catch (err) {
+        console.warn('[Push] Error guardando token:', err);
+    }
+}
+
+async function enviarPush(tokenDestinatario: string, titulo: string, cuerpo: string, data: object): Promise<void> {
+    try {
+        await fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({
+                to: tokenDestinatario,
+                title: titulo,
+                body: cuerpo.length > 100 ? cuerpo.slice(0, 97) + '...' : cuerpo,
+                sound: 'default',
+                data,
+                channelId: 'chat',
+            }),
+        });
+    } catch (err) {
+        console.warn('[Push] Error enviando:', err);
+    }
+}
 
 // ─────────────────────────────────────────────
 // CONSTANTES
@@ -239,13 +321,16 @@ const ListaConversaciones: React.FC<{
                 })
             );
 
+            // Solo mostrar choferes que tienen al menos 1 mensaje
+            const conMensajes = lista.filter(c => c.ultimaHora !== '');
+
             // Ordenar: con no leídos primero, luego por hora del último mensaje
-            lista.sort((a, b) => {
+            conMensajes.sort((a, b) => {
                 if (b.noLeidos !== a.noLeidos) return b.noLeidos - a.noLeidos;
                 return b.ultimaHora.localeCompare(a.ultimaHora);
             });
 
-            setConversaciones(lista);
+            setConversaciones(conMensajes);
         } catch (err) {
             console.error('[Chat Admin] Error cargando conversaciones:', err);
         } finally {
@@ -258,7 +343,7 @@ const ListaConversaciones: React.FC<{
 
         // Realtime: actualizar lista cuando llegan mensajes nuevos
         const canal = supabase
-            .channel('admin-chat-lista')
+            .channel(`admin-chat-lista-${Date.now()}`)
             .on('postgres_changes',
                 { event: 'INSERT', schema: 'public', table: 'mensajes' },
                 () => cargar() // re-cargar para actualizar último mensaje y no leídos
@@ -319,7 +404,7 @@ const ListaConversaciones: React.FC<{
                 >
                     {/* Avatar con punto online */}
                     <View style={S.convAvatarWrap}>
-                        <View style={S.convAvatar}>
+                        <View style={[S.convAvatar, item.noLeidos > 0 && S.convAvatarUnread]}>
                             <Text style={S.convAvatarText}>{iniciales(item.nombre)}</Text>
                         </View>
                         {item.online && <View style={S.onlineDot} />}
@@ -328,7 +413,7 @@ const ListaConversaciones: React.FC<{
                     {/* Contenido */}
                     <View style={S.convInfo}>
                         <View style={S.convTopRow}>
-                            <Text style={S.convNombreItem} numberOfLines={1}>{item.nombre}</Text>
+                            <Text style={[S.convNombreItem, item.noLeidos > 0 && { color: '#FFFFFF', fontWeight: '700' }]} numberOfLines={1}>{item.nombre}</Text>
                             <Text style={[S.convHora, item.noLeidos > 0 && { color: '#4F8EF7' }]}>
                                 {item.ultimaHora ? formatHora(item.ultimaHora) : ''}
                             </Text>
@@ -497,11 +582,34 @@ const Conversacion: React.FC<{
         try {
             const { error } = await supabase.from('mensajes').insert([{
                 user_id: miUserId,
-                remitente: esAdmin ? 'Maxi (Admin)' : miNombre,
+                remitente: esAdmin ? 'Admin' : miNombre,
                 texto: txt,
                 chofer_email: choferEmail,
             }]);
-            if (error) { setTexto(txt); console.error('[Chat] Error:', error.message); }
+            if (error) {
+                setTexto(txt);
+                console.error('[Chat] Error:', error.message);
+            } else {
+                // Push notification al destinatario en background
+                void (async () => {
+                    try {
+                        let tokenDest: string | null = null;
+                        let nombreRemit = esAdmin ? 'Admin' : miNombre;
+                        if (esAdmin) {
+                            const { data } = await supabase.from('Choferes').select('push_token').eq('email', choferEmail).maybeSingle();
+                            tokenDest = data?.push_token ?? null;
+                        } else {
+                            const { data } = await supabase.from('Admins').select('push_token').eq('email', ADMIN_EMAIL).maybeSingle();
+                            tokenDest = data?.push_token ?? null;
+                        }
+                        if (tokenDest) {
+                            await enviarPush(tokenDest, `💬 ${nombreRemit}`, txt, { tipo: 'CHAT', chofer_email: choferEmail, chofer_nombre: esAdmin ? choferNombre : miNombre });
+                        }
+                    } catch (err) {
+                        console.warn('[Push] Error enviando notificación:', err);
+                    }
+                })();
+            }
         } catch { setTexto(txt); }
         finally { setEnviando(false); inputRef.current?.focus(); }
     };
@@ -531,7 +639,7 @@ const Conversacion: React.FC<{
                 <View style={{ flex: 1 }}>
                     <Text style={S.chatNombre}>{esAdmin ? choferNombre : 'Maxi (Admin)'}</Text>
                     <Text style={S.chatSub}>
-                        {otroEscribiendo ? '✏️ escribiendo...' : online ? 'En línea' : 'Logística Hogareño'}
+                        {otroEscribiendo ? '✏️ escribiendo...' : online ? 'En línea' : APP_NAME}
                     </Text>
                 </View>
             </View>
@@ -610,6 +718,7 @@ const Conversacion: React.FC<{
 // ═════════════════════════════════════════════
 
 export default function ChatScreen() {
+    const router = useRouter();
     const [cargando, setCargando] = useState(true);
     const [authError, setAuthError] = useState(false);
 
@@ -618,20 +727,52 @@ export default function ChatScreen() {
     const [miNombre, setMiNombre] = useState('Chofer');
     const [esAdmin, setEsAdmin] = useState(false);
 
-    // Admin: qué conversación tiene abierta (null = lista)
     const [convAbierta, setConvAbierta] = useState<Conversacion | null>(null);
 
+    // ── Inicializar usuario + registrar push token ────────────────────────
     useEffect(() => {
-        supabase.auth.getUser().then(({ data: { user }, error }) => {
+        const init = async () => {
+            const { data: { user }, error } = await supabase.auth.getUser();
             if (error || !user) { setAuthError(true); setCargando(false); return; }
+            const email = user.email ?? '';
+            const nombre = user.user_metadata?.full_name || user.user_metadata?.name || email.split('@')[0] || 'Chofer';
+            const admin = email === ADMIN_EMAIL;
             setMiUserId(user.id);
-            setMiEmail(user.email ?? '');
-            const nombre = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Chofer';
+            setMiEmail(email);
             setMiNombre(nombre.split(' ')[0]);
-            setEsAdmin(user.email === ADMIN_EMAIL);
+            setEsAdmin(admin);
             setCargando(false);
-        });
+            // Registrar token en background — no bloquea la UI
+            try {
+                const token = await registrarPushToken();
+                if (token) await guardarTokenEnBD(email, token, admin);
+            } catch (err) {
+                console.warn('[Push] Error en registro:', err);
+            }
+        };
+        init();
     }, []);
+
+    // ── Listener: tap en notificación → navegar al chat ──────────────────
+    useEffect(() => {
+        const sub = Notifications.addNotificationResponseReceivedListener(response => {
+            const data = response.notification.request.content.data as any;
+            if (data?.tipo === 'CHAT') {
+                if (data.chofer_email && esAdmin) {
+                    setConvAbierta({
+                        email: data.chofer_email,
+                        nombre: data.chofer_nombre || data.chofer_email,
+                        ultimoMensaje: '',
+                        ultimaHora: '',
+                        noLeidos: 0,
+                        online: false,
+                    });
+                }
+                router.push('/(drawer)/chat' as any);
+            }
+        });
+        return () => sub.remove();
+    }, [esAdmin, router]);
 
     if (authError) {
         return (
@@ -815,4 +956,9 @@ const S = StyleSheet.create({
         shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
     },
     btnEnviarOff: { backgroundColor: '#111D35', shadowOpacity: 0, elevation: 0 },
+    convAvatarUnread: {
+        borderColor: '#4F8EF7',
+        borderWidth: 2,
+        backgroundColor: 'rgba(79,142,247,0.1)',
+    },
 });

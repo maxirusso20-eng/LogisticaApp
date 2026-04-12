@@ -5,10 +5,18 @@
 // Así un solo cambio aquí se propaga a toda la app.
 
 // ─────────────────────────────────────────────
-// ROLES
+// ENTORNO — variables configurables por cliente
+// En producción estas vienen de .env:
+//   EXPO_PUBLIC_ADMIN_EMAIL=admin@empresa.com
+//   EXPO_PUBLIC_APP_NAME=Mi Logística
+//   EXPO_PUBLIC_APP_TAGLINE=Panel de Control · Área Logística
+//   EXPO_PUBLIC_APP_VERSION=1.0.0
 // ─────────────────────────────────────────────
 
-export const ADMIN_EMAIL = 'maxirusso20@gmail.com';
+export const ADMIN_EMAIL = process.env.EXPO_PUBLIC_ADMIN_EMAIL ?? 'maxirusso20@gmail.com';
+export const APP_NAME = process.env.EXPO_PUBLIC_APP_NAME ?? 'Logística Hogareño';
+export const APP_TAGLINE = process.env.EXPO_PUBLIC_APP_TAGLINE ?? 'Panel de Control · Área Logística';
+export const APP_VERSION = process.env.EXPO_PUBLIC_APP_VERSION ?? '1.0.0';
 
 // ─────────────────────────────────────────────
 // PALETA DE COLORES

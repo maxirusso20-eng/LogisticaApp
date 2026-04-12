@@ -12,10 +12,69 @@ import { Ionicons } from '@expo/vector-icons';
 import { DrawerActions, useNavigation } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { ADMIN_EMAIL } from '../../lib/constants';
+import { ADMIN_EMAIL, APP_NAME, APP_VERSION } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
+
+// ─────────────────────────────────────────────
+// HOOK: useMensajesNoLeidos
+// Cuenta los mensajes sin leer para mostrar el badge en Chat.
+// Admin: total de visto_admin=false en todos los chats
+// Chofer: mensajes del admin hacia él que no leyó (visto_admin=true
+//         significa que el admin lo vio, pero el chofer necesita
+//         saber si hay mensajes nuevos del admin — usamos user_id distinto)
+// ─────────────────────────────────────────────
+
+function useMensajesNoLeidos(miEmail: string, esAdmin: boolean | null): number {
+  const [noLeidos, setNoLeidos] = useState(0);
+
+  const fetchCount = useCallback(async () => {
+    if (!miEmail || esAdmin === null) return;
+    try {
+      if (esAdmin) {
+        // Admin: mensajes del chofer que no leyó (visto_admin=false)
+        const { count } = await supabase
+          .from('mensajes')
+          .select('id', { count: 'exact', head: true })
+          .eq('visto_admin', false)
+          .neq('remitente', 'Admin'); // no contar los propios
+        setNoLeidos(count ?? 0);
+      } else {
+        // Chofer: mensajes del admin hacia su conversación que no vio
+        // Usamos remitente = 'Admin' como indicador
+        const { count } = await supabase
+          .from('mensajes')
+          .select('id', { count: 'exact', head: true })
+          .eq('chofer_email', miEmail)
+          .eq('remitente', 'Admin')
+          .eq('visto_admin', true); // estos ya los marcó el admin pero el chofer no los "vio"
+        // En realidad para el chofer usamos un campo separado si existe,
+        // o simplemente no leídos = mensajes del admin sin visto_chofer.
+        // Con el esquema actual mostramos solo si hay mensajes del admin.
+        setNoLeidos(count ?? 0);
+      }
+    } catch (err) {
+      console.warn('[Badge] Error contando no leídos:', err);
+    }
+  }, [miEmail, esAdmin]);
+
+  useEffect(() => {
+    fetchCount();
+
+    const canal = supabase
+      .channel('badge-mensajes-noLeidos')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'mensajes' },
+        () => fetchCount()
+      )
+      .subscribe();
+
+    return () => { void supabase.removeChannel(canal); };
+  }, [fetchCount]);
+
+  return noLeidos;
+}
 
 // ─────────────────────────────────────────────
 // HOOK: useEsAdmin
@@ -113,6 +172,15 @@ const ITEMS_CHOFER = [
 function DrawerContent(props: any) {
   const router = useRouter();
   const esAdmin = useEsAdmin();
+  const [miEmail, setMiEmail] = useState('');
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setMiEmail(session?.user?.email ?? '');
+    });
+  }, []);
+
+  const noLeidosChat = useMensajesNoLeidos(miEmail, esAdmin);
 
   if (esAdmin === null) return <View style={styles.drawerContainer} />;
 
@@ -125,7 +193,7 @@ function DrawerContent(props: any) {
         <View style={styles.drawerLogoBox}>
           <Ionicons name="bus" size={28} color="#4F8EF7" />
         </View>
-        <Text style={styles.drawerBrand}>Logística Hogareño</Text>
+        <Text style={styles.drawerBrand}>{APP_NAME}</Text>
         <View style={styles.rolBadgeRow}>
           <View style={[styles.rolBadge, esAdmin ? styles.rolBadgeAdmin : styles.rolBadgeChofer]}>
             <Ionicons
@@ -154,10 +222,26 @@ function DrawerContent(props: any) {
             >
               <View style={[styles.drawerIconBox, isActive && styles.drawerIconBoxActive]}>
                 <Ionicons name={item.icon as any} size={20} color={isActive ? '#4F8EF7' : '#4A6FA5'} />
+                {/* Badge rojo sobre el icono de chat */}
+                {item.name === 'chat' && noLeidosChat > 0 && (
+                  <View style={styles.iconBadge}>
+                    <Text style={styles.iconBadgeText}>
+                      {noLeidosChat > 99 ? '99+' : noLeidosChat}
+                    </Text>
+                  </View>
+                )}
               </View>
               <Text style={[styles.drawerLabel, isActive && styles.drawerLabelActive]}>
                 {item.label}
               </Text>
+              {/* Badge inline junto al label */}
+              {item.name === 'chat' && noLeidosChat > 0 && !isActive && (
+                <View style={styles.labelBadge}>
+                  <Text style={styles.labelBadgeText}>
+                    {noLeidosChat > 99 ? '99+' : noLeidosChat}
+                  </Text>
+                </View>
+              )}
               {isActive && <View style={styles.activeIndicator} />}
             </TouchableOpacity>
           );
@@ -166,7 +250,7 @@ function DrawerContent(props: any) {
 
       <View style={styles.drawerFooter}>
         <View style={styles.divider} />
-        <Text style={styles.drawerFooterText}>v1.0.0 · © 2026</Text>
+        <Text style={styles.drawerFooterText}>v{APP_VERSION} · © {new Date().getFullYear()}</Text>
       </View>
     </View>
   );
@@ -255,4 +339,24 @@ const styles = StyleSheet.create({
   },
   drawerFooter: { position: 'absolute', bottom: 40, left: 0, right: 0 },
   drawerFooterText: { textAlign: 'center', color: '#0D1A2E', fontSize: 11, fontWeight: '600', marginTop: 16 },
+
+  // Badge sobre el icono (punto rojo con número)
+  iconBadge: {
+    position: 'absolute', top: -4, right: -4,
+    backgroundColor: '#EF4444',
+    borderRadius: 8, minWidth: 16, height: 16,
+    justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5, borderColor: '#060B18',
+  },
+  iconBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
+
+  // Badge junto al label en el drawer
+  labelBadge: {
+    backgroundColor: '#EF4444',
+    borderRadius: 10, minWidth: 20, height: 20,
+    justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 5, marginRight: 12,
+  },
+  labelBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
 });
