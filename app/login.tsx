@@ -1,20 +1,11 @@
-// app/login.tsx — versión mejorada
-//
-// Cambios respecto al original:
-//   ✅ Feedback de error inline (sin Alert) — más moderno
-//   ✅ Shake animation en el card cuando las credenciales son incorrectas
-//   ✅ Botón de limpiar email con un toque
-//   ✅ "Iniciar sesión" ahora desactiva ambos inputs mientras carga
-//   ✅ Fondo con más profundidad (tres acentos en lugar de dos)
-//   ✅ accessibilityLabel en inputs y botón
-//   ✅ Importa ADMIN_EMAIL y COLORS desde constants
-
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
+  Dimensions,
+  Easing,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -26,9 +17,114 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
-import { APP_NAME, APP_TAGLINE, COLORS } from '../lib/constants';
 import { supabase } from '../lib/supabase';
 
+const { width: SW, height: SH } = Dimensions.get('window');
+
+// ─── Camión dibujado con Views ────────────────────────────────────────────────
+function TruckShape({ size = 40, color = '#4F8EF7' }: { size?: number; color?: string }) {
+  const s = size;
+  return (
+    <View style={{ width: s * 2.4, height: s }}>
+      {/* Caja de carga */}
+      <View style={{
+        position: 'absolute', left: 0, top: s * 0.1,
+        width: s * 1.5, height: s * 0.65,
+        backgroundColor: color, borderRadius: s * 0.08,
+      }} />
+      {/* Cabina */}
+      <View style={{
+        position: 'absolute', left: s * 1.5, top: s * 0.25,
+        width: s * 0.7, height: s * 0.5,
+        backgroundColor: color, borderRadius: s * 0.1,
+      }} />
+      {/* Parabrisas */}
+      <View style={{
+        position: 'absolute', left: s * 1.78, top: s * 0.28,
+        width: s * 0.26, height: s * 0.28,
+        backgroundColor: 'rgba(6,11,24,0.55)', borderRadius: s * 0.05,
+      }} />
+      {/* Rueda trasera */}
+      <View style={{
+        position: 'absolute', left: s * 0.3, top: s * 0.7,
+        width: s * 0.32, height: s * 0.32, borderRadius: s * 0.16,
+        backgroundColor: '#060B18', borderWidth: s * 0.06, borderColor: color,
+      }} />
+      {/* Rueda delantera */}
+      <View style={{
+        position: 'absolute', left: s * 1.65, top: s * 0.7,
+        width: s * 0.28, height: s * 0.28, borderRadius: s * 0.14,
+        backgroundColor: '#060B18', borderWidth: s * 0.05, borderColor: color,
+      }} />
+    </View>
+  );
+}
+
+// ─── Configuración de carriles ────────────────────────────────────────────────
+const LANES = [
+  { y: SH * 0.07, size: 18, opacity: 0.06, duration: 18000, delay: 0, rtl: false },
+  { y: SH * 0.17, size: 12, opacity: 0.04, duration: 26000, delay: 3200, rtl: true },
+  { y: SH * 0.30, size: 24, opacity: 0.08, duration: 14000, delay: 7000, rtl: false },
+  { y: SH * 0.44, size: 14, opacity: 0.04, duration: 31000, delay: 1500, rtl: true },
+  { y: SH * 0.56, size: 28, opacity: 0.10, duration: 12000, delay: 5500, rtl: false },
+  { y: SH * 0.67, size: 16, opacity: 0.05, duration: 23000, delay: 9200, rtl: true },
+  { y: SH * 0.78, size: 20, opacity: 0.06, duration: 16500, delay: 2000, rtl: false },
+  { y: SH * 0.88, size: 13, opacity: 0.04, duration: 29000, delay: 6000, rtl: true },
+];
+
+function AnimatedTruck({ lane }: { lane: typeof LANES[0] }) {
+  const truckW = lane.size * 2.4;
+  const startX = lane.rtl ? SW + truckW : -truckW;
+  const endX = lane.rtl ? -truckW * 2 : SW + truckW;
+  const posX = useRef(new Animated.Value(startX)).current;
+
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.delay(lane.delay),
+        Animated.timing(posX, {
+          toValue: endX,
+          duration: lane.duration,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.timing(posX, { toValue: startX, duration: 0, useNativeDriver: true }),
+      ])
+    );
+    anim.start();
+    return () => anim.stop();
+  }, []);
+
+  return (
+    <Animated.View
+      style={{
+        position: 'absolute',
+        top: lane.y,
+        opacity: lane.opacity,
+        transform: [{ translateX: posX }, { scaleX: lane.rtl ? -1 : 1 }],
+      }}
+    >
+      <TruckShape size={lane.size} color="#4F8EF7" />
+    </Animated.View>
+  );
+}
+
+function RoadLines() {
+  return (
+    <>
+      {LANES.map((lane, i) => (
+        <View key={i} style={{
+          position: 'absolute',
+          top: lane.y + lane.size * 1.08,
+          left: 0, right: 0, height: 1,
+          backgroundColor: 'rgba(79,142,247,0.04)',
+        }} />
+      ))}
+    </>
+  );
+}
+
+// ─── Pantalla ─────────────────────────────────────────────────────────────────
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,14 +132,9 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
-  // Mensaje de error inline — reemplaza el Alert
-  const [errorMsg, setErrorMsg] = useState('');
-  const router = useRouter();
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(40)).current;
-  // Shake animation para el card de error
-  const shakeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.parallel([
@@ -58,23 +149,9 @@ export default function LoginScreen() {
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
-  /** Sacude el formulario para señalar error */
-  const triggerShake = () => {
-    shakeAnim.setValue(0);
-    Animated.sequence([
-      Animated.timing(shakeAnim, { toValue: 10, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -10, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 8, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -8, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 0, duration: 60, useNativeDriver: true }),
-    ]).start();
-  };
-
   const handleLogin = async () => {
-    setErrorMsg('');
-    if (!email.trim() || !password) {
-      setErrorMsg('Por favor ingresá tu email y contraseña.');
-      triggerShake();
+    if (!email || !password) {
+      Alert.alert('Campos vacíos', 'Por favor ingresá email y contraseña.');
       return;
     }
     setLoading(true);
@@ -84,14 +161,17 @@ export default function LoginScreen() {
         password,
       });
       if (error) {
-        setErrorMsg('Credenciales incorrectas. Verificá tus datos.');
-        triggerShake();
-      } else {
-        router.replace('/(drawer)' as any);
+        const isNetworkError = error.message.toLowerCase().includes('network');
+        Alert.alert(
+          'Acceso denegado',
+          isNetworkError
+            ? 'Sin conexión. Revisá tu red e intentá de nuevo.'
+            : 'Email o contraseña incorrectos.'
+        );
       }
+      // Sin router.replace — _layout.tsx reacciona al onAuthStateChange
     } catch {
-      setErrorMsg('Error de conexión. Intentá nuevamente.');
-      triggerShake();
+      Alert.alert('Error', 'Ocurrió un error inesperado.');
     } finally {
       setLoading(false);
     }
@@ -102,124 +182,83 @@ export default function LoginScreen() {
       <View style={styles.root}>
         <StatusBar barStyle="light-content" />
 
-        {/* Fondos decorativos */}
-        <View style={styles.bgAccent1} />
-        <View style={styles.bgAccent2} />
-        <View style={styles.bgAccent3} />
+        {/* Camiones animados de fondo */}
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <RoadLines />
+          {LANES.map((lane, i) => <AnimatedTruck key={i} lane={lane} />)}
+        </View>
+
+        {/* Acentos de color */}
+        <View style={styles.bgAccent1} pointerEvents="none" />
+        <View style={styles.bgAccent2} pointerEvents="none" />
 
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.kav}
         >
-          <Animated.View style={[
-            styles.content,
-            { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
-          ]}>
+          <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
 
-            {/* Logo + título */}
             {!isKeyboardVisible && (
               <View style={styles.header}>
                 <View style={styles.logoBox}>
-                  <Ionicons name="bus" size={38} color={COLORS.blue} />
+                  <Ionicons name="bus" size={38} color="#4F8EF7" />
                 </View>
-                <Text style={styles.brand}>{APP_NAME}</Text>
-                <Text style={styles.tagline}>{APP_TAGLINE}</Text>
+                <Text style={styles.brand}>Logística Hogareño</Text>
+                <Text style={styles.tagline}>Panel de Control · Área Logística</Text>
               </View>
             )}
 
-            {/* Card del formulario con shake */}
-            <Animated.View style={[
-              styles.card,
-              { transform: [{ translateX: shakeAnim }] },
-            ]}>
+            <View style={styles.card}>
               <Text style={styles.cardTitle}>Iniciar Sesión</Text>
 
-              {/* Error inline */}
-              {errorMsg ? (
-                <View style={styles.errorRow}>
-                  <Ionicons name="alert-circle-outline" size={15} color={COLORS.danger} />
-                  <Text style={styles.errorText}>{errorMsg}</Text>
-                </View>
-              ) : null}
-
-              {/* Email */}
               <View style={styles.fieldGroup}>
                 <Text style={styles.label}>Email</Text>
                 <View style={[styles.inputRow, focusedField === 'email' && styles.inputRowFocused]}>
-                  <Ionicons
-                    name="mail-outline" size={18}
-                    color={focusedField === 'email' ? COLORS.blue : '#4A5568'}
-                    style={styles.icon}
-                  />
+                  <Ionicons name="mail-outline" size={18}
+                    color={focusedField === 'email' ? '#4F8EF7' : '#4A5568'} style={styles.icon} />
                   <TextInput
                     style={styles.input}
                     placeholder="usuario@empresa.com"
                     placeholderTextColor="#3A4A5E"
-                    value={email}
-                    onChangeText={v => { setEmail(v); setErrorMsg(''); }}
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    editable={!loading}
+                    value={email} onChangeText={setEmail}
+                    autoCapitalize="none" keyboardType="email-address"
+                    textContentType="emailAddress" autoComplete="email"
+                    returnKeyType="next"
                     onFocus={() => setFocusedField('email')}
                     onBlur={() => setFocusedField(null)}
-                    accessibilityLabel="Campo email"
-                    returnKeyType="next"
                   />
-                  {email.length > 0 && !loading && (
-                    <TouchableOpacity
-                      onPress={() => setEmail('')}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      <Ionicons name="close-circle" size={16} color="#2A4A70" />
-                    </TouchableOpacity>
-                  )}
                 </View>
               </View>
 
-              {/* Contraseña */}
               <View style={styles.fieldGroup}>
                 <Text style={styles.label}>Contraseña</Text>
                 <View style={[styles.inputRow, focusedField === 'pass' && styles.inputRowFocused]}>
-                  <Ionicons
-                    name="lock-closed-outline" size={18}
-                    color={focusedField === 'pass' ? COLORS.blue : '#4A5568'}
-                    style={styles.icon}
-                  />
+                  <Ionicons name="lock-closed-outline" size={18}
+                    color={focusedField === 'pass' ? '#4F8EF7' : '#4A5568'} style={styles.icon} />
                   <TextInput
                     style={styles.input}
-                    placeholder="••••••••"
-                    placeholderTextColor="#3A4A5E"
-                    value={password}
-                    onChangeText={v => { setPassword(v); setErrorMsg(''); }}
+                    placeholder="••••••••" placeholderTextColor="#3A4A5E"
+                    value={password} onChangeText={setPassword}
                     secureTextEntry={!showPassword}
-                    editable={!loading}
+                    textContentType="password" autoComplete="password"
+                    returnKeyType="done" onSubmitEditing={handleLogin}
                     onFocus={() => setFocusedField('pass')}
                     onBlur={() => setFocusedField(null)}
-                    accessibilityLabel="Campo contraseña"
-                    returnKeyType="done"
-                    onSubmitEditing={handleLogin}
                   />
                   <TouchableOpacity
                     onPress={() => setShowPassword(v => !v)}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     accessibilityLabel={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                   >
-                    <Ionicons
-                      name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                      size={18} color="#4A5568"
-                    />
+                    <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={18} color="#4A5568" />
                   </TouchableOpacity>
                 </View>
               </View>
 
-              {/* Botón */}
               <TouchableOpacity
                 style={[styles.btn, loading && styles.btnDisabled]}
-                onPress={handleLogin}
-                disabled={loading}
-                activeOpacity={0.85}
-                accessibilityLabel="Ingresar al sistema"
-                accessibilityRole="button"
+                onPress={handleLogin} disabled={loading} activeOpacity={0.85}
+                accessibilityLabel="Ingresar al sistema" accessibilityRole="button"
               >
                 {loading
                   ? <ActivityIndicator color="#FFFFFF" />
@@ -229,10 +268,10 @@ export default function LoginScreen() {
                   </>
                 }
               </TouchableOpacity>
-            </Animated.View>
+            </View>
 
             {!isKeyboardVisible && (
-              <Text style={styles.footer}>© {new Date().getFullYear()} {APP_NAME} · Todos los derechos reservados</Text>
+              <Text style={styles.footer}>© 2026 Logística Hogareño · Todos los derechos reservados</Text>
             )}
           </Animated.View>
         </KeyboardAvoidingView>
@@ -242,9 +281,7 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: COLORS.bg },
-
-  // Tres acentos de fondo para más profundidad
+  root: { flex: 1, backgroundColor: '#060B18' },
   bgAccent1: {
     position: 'absolute', top: -120, right: -80,
     width: 320, height: 320, borderRadius: 160,
@@ -255,15 +292,8 @@ const styles = StyleSheet.create({
     width: 260, height: 260, borderRadius: 130,
     backgroundColor: 'rgba(79,142,247,0.05)',
   },
-  bgAccent3: {
-    position: 'absolute', top: '45%', left: '30%',
-    width: 180, height: 180, borderRadius: 90,
-    backgroundColor: 'rgba(52,211,153,0.03)',
-  },
-
   kav: { flex: 1 },
   content: { flex: 1, padding: 28, justifyContent: 'center' },
-
   header: { alignItems: 'center', marginBottom: 36 },
   logoBox: {
     width: 76, height: 76, borderRadius: 22,
@@ -271,26 +301,14 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(79,142,247,0.25)',
     justifyContent: 'center', alignItems: 'center', marginBottom: 18,
   },
-  brand: { fontSize: 26, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -0.3 },
+  brand: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.3 },
   tagline: { fontSize: 13, color: '#4A6FA5', marginTop: 6, fontWeight: '500' },
-
   card: {
-    backgroundColor: COLORS.bgCard,
+    backgroundColor: '#0D1526',
     borderRadius: 24, padding: 28,
-    borderWidth: 1, borderColor: COLORS.border,
+    borderWidth: 1, borderColor: '#1A2540',
   },
-  cardTitle: { fontSize: 20, fontWeight: '700', color: COLORS.textPrimary, marginBottom: 20 },
-
-  // Error inline — reemplaza el Alert
-  errorRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'rgba(255,107,107,0.08)',
-    borderWidth: 1, borderColor: 'rgba(255,107,107,0.2)',
-    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
-    marginBottom: 16,
-  },
-  errorText: { flex: 1, fontSize: 13, color: COLORS.danger, fontWeight: '500' },
-
+  cardTitle: { fontSize: 20, fontWeight: '700', color: '#FFFFFF', marginBottom: 24 },
   fieldGroup: { marginBottom: 18 },
   label: {
     fontSize: 12, fontWeight: '600', color: '#4A6FA5',
@@ -298,28 +316,23 @@ const styles = StyleSheet.create({
   },
   inputRow: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: COLORS.bgInput, borderRadius: 14,
+    backgroundColor: '#111D35', borderRadius: 14,
     borderWidth: 1.5, borderColor: '#1A2D4A',
     paddingHorizontal: 16, height: 56,
   },
-  inputRowFocused: { borderColor: COLORS.blue, backgroundColor: '#0F1A30' },
+  inputRowFocused: { borderColor: '#4F8EF7', backgroundColor: '#0F1A30' },
   icon: { marginRight: 12 },
-  input: { flex: 1, color: COLORS.textPrimary, fontSize: 15 },
-
+  input: { flex: 1, color: '#FFFFFF', fontSize: 15 },
   btn: {
-    backgroundColor: COLORS.blue,
+    backgroundColor: '#4F8EF7',
     height: 58, borderRadius: 14,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     marginTop: 8,
-    shadowColor: COLORS.blue,
+    shadowColor: '#4F8EF7',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4, shadowRadius: 16, elevation: 8,
   },
   btnDisabled: { opacity: 0.6 },
-  btnText: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '700' },
-
-  footer: {
-    textAlign: 'center', color: '#1E2D45',
-    fontSize: 11, marginTop: 32, fontWeight: '500',
-  },
+  btnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  footer: { textAlign: 'center', color: '#1E2D45', fontSize: 11, marginTop: 32, fontWeight: '500' },
 });

@@ -12,6 +12,7 @@
 // La separación total elimina los bugs de esPropio/userId/timing.
 
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
@@ -752,6 +753,16 @@ export default function ChatScreen() {
         };
         init();
     }, []);
+
+
+    // ── Guardar timestamp "ultima vez que abri el chat" ──────────────────
+    // El drawer lee este valor para calcular mensajes nuevos desde entonces.
+    // Al volver a abrir el chat el badge se resetea a 0 automaticamente.
+    useEffect(() => {
+        if (!miEmail) return;
+        AsyncStorage.setItem(`chat_last_seen_${miEmail}`, new Date().toISOString())
+            .catch(err => console.warn('[Chat] Error guardando lastSeen:', err));
+    }, [miEmail]);
 
     // ── Listener: tap en notificación → navegar al chat ──────────────────
     useEffect(() => {
