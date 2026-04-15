@@ -2,7 +2,21 @@ import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  TouchableWithoutFeedback,
+  Keyboard,
+  useWindowDimensions
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 
 // URL y Header para la API de OpenRouteService
@@ -17,6 +31,10 @@ export default function EscanerPantalla() {
   const [userEmail, setUserEmail] = useState('');
   const router = useRouter();
 
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const frameSize = width * 0.7; // 70% del ancho de pantalla manteniendo ratio 1:1
+
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       if (data?.user?.email) setUserEmail(data.user.email);
@@ -24,12 +42,10 @@ export default function EscanerPantalla() {
   }, []);
 
   if (!permission) {
-    // Aún cargando los permisos
     return <View style={styles.container} />;
   }
 
   if (!permission.granted) {
-    // Permisos denegados
     return (
       <View style={styles.container}>
         <View style={styles.errorContainer}>
@@ -53,7 +69,6 @@ export default function EscanerPantalla() {
 
       console.log("Llave ORS:", ORS_API_KEY);
 
-      // 1. Geocodificar la dirección con OpenRouteService
       if (!ORS_API_KEY) {
         throw new Error("No hay API Key configurada para OpenRouteService (EXPO_PUBLIC_ORS_KEY).");
       }
@@ -73,17 +88,14 @@ export default function EscanerPantalla() {
         throw new Error("No se pudo localizar la dirección especificada.");
       }
 
-      // Las coordenadas en GeoJSON son [longitud, latitud]
       const [longitud, latitud] = features[0].geometry.coordinates;
 
-      // 2. Obtener el chofer actual
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData.user) {
         throw new Error("Usuario no autenticado o no se pudo obtener.");
       }
       const choferId = userData.user.id;
 
-      // 3. Guardar en Supabase tabla rutas_activas
       const { error: insertError } = await supabase.from('rutas_activas').insert([
         {
           chofer_id: choferId,
@@ -99,7 +111,6 @@ export default function EscanerPantalla() {
         throw new Error("Ocurrió un error guardando el paquete en la base de datos.");
       }
 
-      // 4. Mostrar mensaje de éxito
       Alert.alert(
         "¡Paquete Asignado!",
         `Dirección: ${data}\nAgregada a tu ruta exitosamente.`,
@@ -144,11 +155,8 @@ export default function EscanerPantalla() {
   const esAdministrador = userEmail === 'maxirusso20@gmail.com';
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
-    >
+    <View style={styles.container}>
+      {/* CAPA 1: Fondo (Cámara Fija) */}
       <CameraView
         style={StyleSheet.absoluteFillObject}
         facing="back"
@@ -157,62 +165,94 @@ export default function EscanerPantalla() {
         }}
         onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
       />
-      <View style={styles.overlayContainer}>
-        <View style={styles.overlayHeader}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#FFF" />
-          </TouchableOpacity>
-          <Text style={styles.headerText}>Escanear Paquete</Text>
-          <View style={styles.spacer} />
-        </View>
 
-        <View style={styles.focusContainer}>
-          <View style={styles.focusFrame}>
-            {procesando && (
-              <View style={styles.loaderContainer}>
-                <ActivityIndicator size="large" color="#4F8EF7" />
-                <Text style={styles.loaderText}>Procesando...</Text>
-              </View>
-            )}
+      {/* CAPA 2: Overlay Oscuro con Hueco Central Transparente (FIJO, IGNORA TOUCHES) */}
+      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+        <View style={styles.maskRow} />
+        <View style={styles.maskCenterRow}>
+          <View style={styles.maskSide} />
+          <View style={{ width: frameSize, height: frameSize }}>
+            {/* Esquinas fijas del escáner - Capa 2 */}
+            <View style={[styles.cornerMark, styles.cornerTopLeft]} />
+            <View style={[styles.cornerMark, styles.cornerTopRight]} />
+            <View style={[styles.cornerMark, styles.cornerBottomLeft]} />
+            <View style={[styles.cornerMark, styles.cornerBottomRight]} />
           </View>
-          <Text style={styles.instructionText}>
-            Apunta la cámara hacia el código QR de la etiqueta
-          </Text>
+          <View style={styles.maskSide} />
         </View>
+        <View style={styles.maskRow} />
+      </View>
 
-        <View style={styles.overlayFooter}>
-          {!esAdministrador && (
-            <View style={styles.manualEntryContainer}>
-              <TextInput
-                style={styles.manualInput}
-                placeholder="O ingresa dirección manualmente"
-                placeholderTextColor="rgba(255,255,255,0.6)"
-                value={manualAddress}
-                onChangeText={setManualAddress}
-              />
-              <TouchableOpacity
-                style={[styles.btnGuardarManual, !manualAddress.trim() && styles.btnGuardarManualDisabled]}
-                onPress={() => processAddress(manualAddress.trim())}
-                disabled={!manualAddress.trim() || procesando || scanned}
-              >
-                <Text style={styles.btnGuardarManualText}>Guardar</Text>
+      {/* CAPA 3: UI Interactiva y Teclado (SE MUEVE CON EL TECLADO) */}
+      <KeyboardAvoidingView
+        style={StyleSheet.absoluteFillObject}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.uiContainer}>
+            {/* Header: Usa safe-area para iOS/Android Notch */}
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) + 10 }]}>
+              <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+                <Ionicons name="arrow-back" size={24} color="#FFF" />
+              </TouchableOpacity>
+              <Text style={styles.headerText}>Escanear Paquete</Text>
+              <View style={styles.spacer} />
+            </View>
+
+            {/* Centro: Layout flexible, se comprime al abrir teclado */}
+            <View style={styles.centerSpace}>
+              {procesando ? (
+                <View style={[styles.loaderContainer, { transform: [{ translateY: frameSize / 2 + 40 }] }]}>
+                  <ActivityIndicator size="large" color="#4F8EF7" />
+                  <Text style={styles.loaderText}>Procesando...</Text>
+                </View>
+              ) : (
+                <Text style={[styles.instructionText, { transform: [{ translateY: frameSize / 2 + 40 }] }]}>
+                  Apunta la cámara hacia el código QR de la etiqueta
+                </Text>
+              )}
+            </View>
+
+            {/* Footer: Inputs pegados abajo, con insets seguros */}
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+              {!esAdministrador && (
+                <View style={styles.manualEntryContainer}>
+                  <TextInput
+                    style={styles.manualInput}
+                    placeholder="O ingresa dirección manualmente..."
+                    placeholderTextColor="rgba(255,255,255,0.6)"
+                    value={manualAddress}
+                    onChangeText={setManualAddress}
+                    onSubmitEditing={() => processAddress(manualAddress.trim())}
+                    returnKeyType="send"
+                  />
+                  <TouchableOpacity
+                    style={[styles.btnGuardarManual, !manualAddress.trim() && styles.btnGuardarManualDisabled]}
+                    onPress={() => processAddress(manualAddress.trim())}
+                    disabled={!manualAddress.trim() || procesando || scanned}
+                  >
+                    <Text style={styles.btnGuardarManualText}>Guardar</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              <TouchableOpacity style={styles.btnCerrar} onPress={() => router.back()}>
+                <Text style={styles.btnCerrarText}>Cancelar</Text>
               </TouchableOpacity>
             </View>
-          )}
-
-          <TouchableOpacity style={styles.btnCerrar} onPress={() => router.back()}>
-            <Text style={styles.btnCerrarText}>Cancelar</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </KeyboardAvoidingView>
+          </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
+
+const OVERLAY_COLOR = 'rgba(0,0,0,0.65)';
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#060B18',
+    backgroundColor: '#000',
   },
   errorContainer: {
     flex: 1,
@@ -238,24 +278,71 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
-  overlayContainer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 10,
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(0,0,0,0.4)',
+  
+  /* --- ESTILOS CAPA 2 (Máscara fija) --- */
+  maskRow: {
+    flex: 1,
+    backgroundColor: OVERLAY_COLOR,
   },
-  overlayHeader: {
+  maskCenterRow: {
+    flexDirection: 'row',
+  },
+  maskSide: {
+    flex: 1,
+    backgroundColor: OVERLAY_COLOR,
+  },
+  cornerMark: {
+    position: 'absolute',
+    width: 40,
+    height: 40,
+    borderColor: '#4F8EF7',
+    borderWidth: 4,
+  },
+  cornerTopLeft: {
+    top: -2,
+    left: -2,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    borderTopLeftRadius: 20,
+  },
+  cornerTopRight: {
+    top: -2,
+    right: -2,
+    borderLeftWidth: 0,
+    borderBottomWidth: 0,
+    borderTopRightRadius: 20,
+  },
+  cornerBottomLeft: {
+    bottom: -2,
+    left: -2,
+    borderRightWidth: 0,
+    borderTopWidth: 0,
+    borderBottomLeftRadius: 20,
+  },
+  cornerBottomRight: {
+    bottom: -2,
+    right: -2,
+    borderLeftWidth: 0,
+    borderTopWidth: 0,
+    borderBottomRightRadius: 20,
+  },
+
+  /* --- ESTILOS CAPA 3 (UI Flexible) --- */
+  uiContainer: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 20,
-    backgroundColor: 'rgba(6, 11, 24, 0.7)',
+    backgroundColor: 'transparent',
   },
   backButton: {
     padding: 8,
     borderRadius: 50,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(0,0,0,0.4)',
   },
   spacer: {
     width: 40,
@@ -266,47 +353,54 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 18,
     fontWeight: 'bold',
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
-  focusContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  centerSpace: {
     flex: 1,
-  },
-  focusFrame: {
-    width: 250,
-    height: 250,
-    borderWidth: 2,
-    borderColor: '#4F8EF7',
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   loaderContainer: {
-    backgroundColor: 'rgba(6, 11, 24, 0.8)',
-    padding: 20,
-    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    paddingHorizontal: 30,
+    paddingVertical: 20,
+    borderRadius: 20,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   loaderText: {
     color: '#FFF',
     marginTop: 12,
     fontWeight: '600',
+    fontSize: 15,
   },
   instructionText: {
-    color: '#FFF',
-    fontSize: 16,
+    color: '#E0E7FF',
+    fontSize: 15,
     textAlign: 'center',
-    marginTop: 40,
-    paddingHorizontal: 40,
+    fontWeight: '500',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
   },
-  overlayFooter: {
-    padding: 20,
-    paddingBottom: 40,
-    alignItems: 'center',
-    backgroundColor: 'rgba(6, 11, 24, 0.8)',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    backgroundColor: 'rgba(6, 11, 24, 0.95)',
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 15,
   },
   manualEntryContainer: {
     flexDirection: 'row',
@@ -316,33 +410,34 @@ const styles = StyleSheet.create({
   },
   manualInput: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     color: '#FFF',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginRight: 10,
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginRight: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: 'rgba(255,255,255,0.15)',
+    fontSize: 15,
   },
   btnGuardarManual: {
     backgroundColor: '#4F8EF7',
     paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 12,
+    paddingHorizontal: 22,
+    borderRadius: 14,
   },
   btnGuardarManualDisabled: {
-    backgroundColor: '#3A5A80',
-    opacity: 0.6,
+    backgroundColor: '#2A3C5A',
+    opacity: 0.7,
   },
   btnGuardarManualText: {
     color: '#FFF',
-    fontWeight: 'bold',
-    fontSize: 14,
+    fontWeight: '700',
+    fontSize: 15,
   },
   btnCerrar: {
     backgroundColor: '#EF4444',
-    paddingVertical: 14,
+    paddingVertical: 16,
     paddingHorizontal: 40,
     borderRadius: 30,
     width: '100%',
@@ -350,7 +445,7 @@ const styles = StyleSheet.create({
   },
   btnCerrarText: {
     color: '#FFF',
-    fontWeight: 'bold',
+    fontWeight: '700',
     fontSize: 16,
   },
 });
