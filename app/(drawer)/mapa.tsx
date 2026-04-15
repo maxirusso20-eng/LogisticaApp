@@ -111,6 +111,37 @@ export default function MapaScreen() {
     return () => { void supabase.removeChannel(channel); };
   }, [fetchVehiculos, handleRealtimeUpdate, handleRealtimeDelete]);
 
+  // -- 2.5 Fetch paradas (para Admin)
+  const [paradas, setParadas] = useState<any[]>([]);
+  const [esAdmin, setEsAdmin] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user?.email === 'maxirusso20@gmail.com') {
+        setEsAdmin(true);
+        // Si es admin, cargar paradas
+        supabase.from('paradas_ruta').select('*').then(({ data: paradasData }) => {
+          if (paradasData) setParadas(paradasData);
+        });
+
+        const paradasChannel = supabase
+          .channel('mapa-paradas-sync')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'paradas_ruta' }, (payload) => {
+            if (payload.eventType === 'INSERT') {
+              setParadas(prev => [...prev, payload.new]);
+            } else if (payload.eventType === 'DELETE') {
+              setParadas(prev => prev.filter(p => p.id !== payload.old.id));
+            }
+          })
+          .subscribe();
+
+        return () => {
+          supabase.removeChannel(paradasChannel);
+        };
+      }
+    });
+  }, []);
+
   // ── 3. GPS en foreground — sin background tasks
   useEffect(() => {
     let active = true;
@@ -258,6 +289,19 @@ export default function MapaScreen() {
             onPress={() => setChoferSeleccionado(v)}
           />
         ))}
+
+        {esAdmin && paradas.map(p => {
+          if (!p.lat || !p.lng) return null;
+          return (
+            <Marker
+              key={`parada-${p.id}`}
+              coordinate={{ latitude: Number(p.lat), longitude: Number(p.lng) }}
+              title={`Dirección: ${p.direccion}`}
+              description={`Escaneado por: ${p.creado_por_email || 'ID: ' + p.chofer_id}`}
+              pinColor="purple"
+            />
+          );
+        })}
       </MapView>
 
       {/* ── BARRA SUPERIOR: estadísticas ── */}

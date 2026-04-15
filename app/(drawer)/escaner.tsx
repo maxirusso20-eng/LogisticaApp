@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, Alert, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -13,7 +13,15 @@ export default function EscanerPantalla() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [procesando, setProcesando] = useState(false);
+  const [manualAddress, setManualAddress] = useState('');
+  const [userEmail, setUserEmail] = useState('');
   const router = useRouter();
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user?.email) setUserEmail(data.user.email);
+    });
+  }, []);
 
   if (!permission) {
     // Aún cargando los permisos
@@ -35,15 +43,13 @@ export default function EscanerPantalla() {
     );
   }
 
-  const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
+  const processAddress = async (data: string) => {
     if (scanned || procesando) return;
     setScanned(true);
     setProcesando(true);
 
     try {
-      if (!data) throw new Error("Código QR vacío.");
-
-      console.log(`[QR Escaneado] Tipo: ${type}, Datos: ${data}`);
+      if (!data) throw new Error("Dirección vacía.");
 
       // 1. Geocodificar la dirección con OpenRouteService
       if (!ORS_API_KEY) {
@@ -59,7 +65,7 @@ export default function EscanerPantalla() {
       const features = featureCollection.features;
 
       if (!features || features.length === 0) {
-        throw new Error("No se pudo localizar la dirección escaneada.");
+        throw new Error("No se pudo localizar la dirección especificada.");
       }
 
       // Las coordenadas en GeoJSON son [longitud, latitud]
@@ -71,6 +77,7 @@ export default function EscanerPantalla() {
         throw new Error("Usuario no autenticado o no se pudo obtener.");
       }
       const choferId = userData.user.id;
+      const creadoPorEmail = userData.user.email;
 
       // 3. Guardar en Supabase tabla paradas_ruta
       const { error: insertError } = await supabase.from('paradas_ruta').insert([
@@ -79,7 +86,8 @@ export default function EscanerPantalla() {
           direccion: data,
           lat: latitud,
           lng: longitud,
-          estado: 'pendiente'
+          estado: 'pendiente',
+          creado_por_email: creadoPorEmail
         }
       ]);
 
@@ -98,6 +106,7 @@ export default function EscanerPantalla() {
             onPress: () => {
               setScanned(false);
               setProcesando(false);
+              setManualAddress('');
             }
           },
           {
@@ -112,7 +121,7 @@ export default function EscanerPantalla() {
       
     } catch (error: any) {
       console.error(error);
-      Alert.alert("Error", error.message || "No se pudo procesar el código.", [
+      Alert.alert("Error", error.message || "No se pudo procesar la dirección.", [
         {
           text: "Reintentar",
           onPress: () => {
@@ -124,8 +133,18 @@ export default function EscanerPantalla() {
     }
   };
 
+  const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
+    console.log(`[QR Escaneado] Tipo: ${type}, Datos: ${data}`);
+    processAddress(data);
+  };
+
+  const esAdministrador = userEmail === 'maxirusso20@gmail.com';
+
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <CameraView
         style={StyleSheet.absoluteFillObject}
         facing="back"
@@ -158,13 +177,32 @@ export default function EscanerPantalla() {
           </View>
 
           <View style={styles.overlayFooter}>
+            {!esAdministrador && (
+              <View style={styles.manualEntryContainer}>
+                <TextInput
+                  style={styles.manualInput}
+                  placeholder="O ingresa dirección manualmente"
+                  placeholderTextColor="rgba(255,255,255,0.6)"
+                  value={manualAddress}
+                  onChangeText={setManualAddress}
+                />
+                <TouchableOpacity 
+                  style={[styles.btnGuardarManual, !manualAddress.trim() && styles.btnGuardarManualDisabled]}
+                  onPress={() => processAddress(manualAddress.trim())}
+                  disabled={!manualAddress.trim() || procesando || scanned}
+                >
+                  <Text style={styles.btnGuardarManualText}>Guardar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
              <TouchableOpacity style={styles.btnCerrar} onPress={() => router.back()}>
                 <Text style={styles.btnCerrarText}>Cancelar</Text>
              </TouchableOpacity>
           </View>
         </View>
       </CameraView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -259,15 +297,52 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   overlayFooter: {
-    padding: 30,
-    paddingBottom: 50,
+    padding: 20,
+    paddingBottom: 40,
     alignItems: 'center',
+    backgroundColor: 'rgba(6, 11, 24, 0.8)',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  manualEntryContainer: {
+    flexDirection: 'row',
+    width: '100%',
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  manualInput: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    color: '#FFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  btnGuardarManual: {
+    backgroundColor: '#4F8EF7',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+  },
+  btnGuardarManualDisabled: {
+    backgroundColor: '#3A5A80',
+    opacity: 0.6,
+  },
+  btnGuardarManualText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
   btnCerrar: {
     backgroundColor: '#EF4444',
     paddingVertical: 14,
     paddingHorizontal: 40,
     borderRadius: 30,
+    width: '100%',
+    alignItems: 'center',
   },
   btnCerrarText: {
     color: '#FFF',
