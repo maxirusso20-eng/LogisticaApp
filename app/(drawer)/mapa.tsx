@@ -120,13 +120,13 @@ export default function MapaScreen() {
       if (data?.user?.email === 'maxirusso20@gmail.com') {
         setEsAdmin(true);
         // Si es admin, cargar paradas
-        supabase.from('paradas_ruta').select('*').then(({ data: paradasData }) => {
+        supabase.from('rutas_activas').select('*').then(({ data: paradasData }) => {
           if (paradasData) setParadas(paradasData);
         });
 
         const paradasChannel = supabase
           .channel('mapa-paradas-sync')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'paradas_ruta' }, (payload) => {
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'rutas_activas' }, (payload) => {
             if (payload.eventType === 'INSERT') {
               setParadas(prev => [...prev, payload.new]);
             } else if (payload.eventType === 'DELETE') {
@@ -297,7 +297,7 @@ export default function MapaScreen() {
               key={`parada-${p.id}`}
               coordinate={{ latitude: Number(p.lat), longitude: Number(p.lng) }}
               title={`Dirección: ${p.direccion}`}
-              description={`Escaneado por: ${p.creado_por_email || 'ID: ' + p.chofer_id}`}
+              description={`Estado: ${p.estado || 'pendiente'} · Chofer: ${p.chofer_id}`}
               pinColor="purple"
             />
           );

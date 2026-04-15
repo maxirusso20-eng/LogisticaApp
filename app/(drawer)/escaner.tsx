@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Alert, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 
 // URL y Header para la API de OpenRouteService
@@ -51,14 +51,19 @@ export default function EscanerPantalla() {
     try {
       if (!data) throw new Error("Dirección vacía.");
 
+      console.log("Llave ORS:", ORS_API_KEY);
+
       // 1. Geocodificar la dirección con OpenRouteService
       if (!ORS_API_KEY) {
         throw new Error("No hay API Key configurada para OpenRouteService (EXPO_PUBLIC_ORS_KEY).");
       }
 
-      const response = await fetch(`${ORS_URL}?api_key=${ORS_API_KEY}&text=${encodeURIComponent(data)}`);
+      const response = await fetch(`${ORS_URL}?api_key=${ORS_API_KEY}&text=${encodeURIComponent(data)}&boundary.country=AR`);
+      
       if (!response.ok) {
-        throw new Error("Error al consultar OpenRouteService.");
+        const errorText = await response.text();
+        console.error(`Error ORS: ${response.status} - ${errorText}`);
+        throw new Error(`ORS devolvió status ${response.status}`);
       }
 
       const featureCollection = await response.json();
@@ -77,17 +82,15 @@ export default function EscanerPantalla() {
         throw new Error("Usuario no autenticado o no se pudo obtener.");
       }
       const choferId = userData.user.id;
-      const creadoPorEmail = userData.user.email;
 
-      // 3. Guardar en Supabase tabla paradas_ruta
-      const { error: insertError } = await supabase.from('paradas_ruta').insert([
+      // 3. Guardar en Supabase tabla rutas_activas
+      const { error: insertError } = await supabase.from('rutas_activas').insert([
         {
           chofer_id: choferId,
           direccion: data,
           lat: latitud,
           lng: longitud,
           estado: 'pendiente',
-          creado_por_email: creadoPorEmail
         }
       ]);
 
@@ -118,15 +121,15 @@ export default function EscanerPantalla() {
           }
         ]
       );
-      
+
     } catch (error: any) {
       console.error(error);
       Alert.alert("Error", error.message || "No se pudo procesar la dirección.", [
         {
           text: "Reintentar",
           onPress: () => {
-             setScanned(false);
-             setProcesando(false);
+            setScanned(false);
+            setProcesando(false);
           }
         }
       ]);
@@ -141,9 +144,10 @@ export default function EscanerPantalla() {
   const esAdministrador = userEmail === 'maxirusso20@gmail.com';
 
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
     >
       <CameraView
         style={StyleSheet.absoluteFillObject}
@@ -152,56 +156,55 @@ export default function EscanerPantalla() {
           barcodeTypes: ["qr"],
         }}
         onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-      >
-        <View style={styles.overlayContainer}>
-          <View style={styles.overlayHeader}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-              <Ionicons name="arrow-back" size={24} color="#FFF" />
-            </TouchableOpacity>
-            <Text style={styles.headerText}>Escanear Paquete</Text>
-            <View style={styles.spacer} />
-          </View>
+      />
+      <View style={styles.overlayContainer}>
+        <View style={styles.overlayHeader}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerText}>Escanear Paquete</Text>
+          <View style={styles.spacer} />
+        </View>
 
-          <View style={styles.focusContainer}>
-            <View style={styles.focusFrame}>
-              {procesando && (
-                <View style={styles.loaderContainer}>
-                  <ActivityIndicator size="large" color="#4F8EF7" />
-                  <Text style={styles.loaderText}>Procesando...</Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.instructionText}>
-              Apunta la cámara hacia el código QR de la etiqueta
-            </Text>
-          </View>
-
-          <View style={styles.overlayFooter}>
-            {!esAdministrador && (
-              <View style={styles.manualEntryContainer}>
-                <TextInput
-                  style={styles.manualInput}
-                  placeholder="O ingresa dirección manualmente"
-                  placeholderTextColor="rgba(255,255,255,0.6)"
-                  value={manualAddress}
-                  onChangeText={setManualAddress}
-                />
-                <TouchableOpacity 
-                  style={[styles.btnGuardarManual, !manualAddress.trim() && styles.btnGuardarManualDisabled]}
-                  onPress={() => processAddress(manualAddress.trim())}
-                  disabled={!manualAddress.trim() || procesando || scanned}
-                >
-                  <Text style={styles.btnGuardarManualText}>Guardar</Text>
-                </TouchableOpacity>
+        <View style={styles.focusContainer}>
+          <View style={styles.focusFrame}>
+            {procesando && (
+              <View style={styles.loaderContainer}>
+                <ActivityIndicator size="large" color="#4F8EF7" />
+                <Text style={styles.loaderText}>Procesando...</Text>
               </View>
             )}
-
-             <TouchableOpacity style={styles.btnCerrar} onPress={() => router.back()}>
-                <Text style={styles.btnCerrarText}>Cancelar</Text>
-             </TouchableOpacity>
           </View>
+          <Text style={styles.instructionText}>
+            Apunta la cámara hacia el código QR de la etiqueta
+          </Text>
         </View>
-      </CameraView>
+
+        <View style={styles.overlayFooter}>
+          {!esAdministrador && (
+            <View style={styles.manualEntryContainer}>
+              <TextInput
+                style={styles.manualInput}
+                placeholder="O ingresa dirección manualmente"
+                placeholderTextColor="rgba(255,255,255,0.6)"
+                value={manualAddress}
+                onChangeText={setManualAddress}
+              />
+              <TouchableOpacity
+                style={[styles.btnGuardarManual, !manualAddress.trim() && styles.btnGuardarManualDisabled]}
+                onPress={() => processAddress(manualAddress.trim())}
+                disabled={!manualAddress.trim() || procesando || scanned}
+              >
+                <Text style={styles.btnGuardarManualText}>Guardar</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <TouchableOpacity style={styles.btnCerrar} onPress={() => router.back()}>
+            <Text style={styles.btnCerrarText}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -236,9 +239,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   overlayContainer: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10,
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(0,0,0,0.4)', 
+    backgroundColor: 'rgba(0,0,0,0.4)',
   },
   overlayHeader: {
     flexDirection: 'row',
