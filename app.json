@@ -54,6 +54,12 @@
           "locationAlwaysPermission": "Permitir que la app acceda a tu ubicación en todo momento para el seguimiento de logística y optimización de rutas.",
           "isAndroidBackgroundLocationEnabled": true
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "La aplicación necesita acceso a la cámara para escanear los códigos QR de los paquetes."
+        }
       ]
     ],
     "experiments": {
