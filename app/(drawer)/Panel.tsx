@@ -1,18 +1,4 @@
 // app/(drawer)/Panel.tsx
-//
-// Panel del Día — exclusivo para choferes.
-//
-// LÓGICA:
-//   Admin carga en index.tsx:  pqteDia + porFuera
-//   Chofer ve y modifica acá:  entregados (ligado a pqteDia)
-//                              entregadosFuera (ligado a porFuera)
-//
-//   Restante día   = pqteDia - entregados
-//   Restante fuera = porFuera - entregadosFuera
-//
-// ⚠️  REQUIERE columna nueva en Supabase:
-//     ALTER TABLE "Recorridos" ADD COLUMN "entregadosFuera" integer DEFAULT 0;
-
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -26,8 +12,17 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { COLORS, getCondicionCfg, getSaludo, getZonaColor } from '../../lib/constants';
+import { getCondicionCfg, getSaludo, getZonaColor } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../lib/ThemeContext';
+
+// Colores semánticos que NO dependen del tema (siempre iguales)
+const SEM = {
+    blue: '#4F8EF7',
+    amber: '#F59E0B',
+    green: '#34D399',
+    red: '#EF4444',
+};
 
 interface Recorrido {
     id: number;
@@ -53,25 +48,19 @@ interface ChoferInfo {
 const porcentajeDia = (r: Recorrido) => !r.pqteDia ? 0 : Math.min(100, ((r.entregados || 0) / r.pqteDia) * 100);
 const porcentajeFuera = (r: Recorrido) => !r.porFuera ? 0 : Math.min(100, ((r.entregadosFuera || 0) / r.porFuera) * 100);
 
-// ─────────────────────────────────────────────
-// COMPONENTE: ContadorEntregados
-// ─────────────────────────────────────────────
+// ─── ContadorEntregados ───────────────────────────────────────────────────────
 
 interface ContadorEntregadosProps {
-    label: string;
-    total: number;
-    entregados: number;
-    color: string;
-    guardando: boolean;
-    onIncrement: () => void;
-    onDecrement: () => void;
+    label: string; total: number; entregados: number; color: string;
+    guardando: boolean; onIncrement: () => void; onDecrement: () => void;
 }
 
 function ContadorEntregados({ label, total, entregados, color, guardando, onIncrement, onDecrement }: ContadorEntregadosProps) {
+    const { colors } = useTheme();
     const scaleAnim = useRef(new Animated.Value(1)).current;
     const restante = Math.max(0, total - entregados);
     const completo = total > 0 && entregados >= total;
-    const colorEf = completo ? COLORS.green : color;
+    const colorEf = completo ? SEM.green : color;
 
     const pulse = () => {
         Animated.sequence([
@@ -82,20 +71,18 @@ function ContadorEntregados({ label, total, entregados, color, guardando, onIncr
 
     return (
         <View style={C.box}>
-            {/* Label + total del admin */}
             <View style={C.header}>
                 <Text style={[C.label, { color: colorEf }]}>{label}</Text>
                 {total > 0
                     ? <View style={[C.totalBadge, { backgroundColor: color + '18', borderColor: color + '35' }]}>
                         <Text style={[C.totalText, { color }]}>de {total}</Text>
                     </View>
-                    : <View style={C.sinBadge}>
-                        <Text style={C.sinText}>sin asignar</Text>
+                    : <View style={[C.sinBadge, { backgroundColor: colors.bgInput, borderColor: colors.borderSubtle }]}>
+                        <Text style={[C.sinText, { color: colors.textMuted }]}>sin asignar</Text>
                     </View>
                 }
             </View>
 
-            {/* Número grande */}
             <Animated.View style={[C.numWrap, { transform: [{ scale: scaleAnim }] }]}>
                 {guardando
                     ? <ActivityIndicator color={colorEf} size="small" />
@@ -104,39 +91,39 @@ function ContadorEntregados({ label, total, entregados, color, guardando, onIncr
                 <Text style={[C.numSub, { color: colorEf + '99' }]}>entregados</Text>
             </Animated.View>
 
-            {/* Restante badge */}
             {total > 0 && (
                 <View style={[C.restBadge, {
-                    backgroundColor: completo ? 'rgba(52,211,153,0.1)' : 'rgba(42,74,112,0.15)',
-                    borderColor: completo ? 'rgba(52,211,153,0.3)' : COLORS.borderSubtle,
+                    backgroundColor: completo ? 'rgba(52,211,153,0.1)' : colors.bgInput,
+                    borderColor: completo ? 'rgba(52,211,153,0.3)' : colors.borderSubtle,
                 }]}>
                     <Ionicons
                         name={completo ? 'checkmark-circle' : 'time-outline'}
                         size={11}
-                        color={completo ? COLORS.green : COLORS.textMuted}
+                        color={completo ? SEM.green : colors.textMuted}
                     />
-                    <Text style={[C.restText, { color: completo ? COLORS.green : COLORS.textMuted }]}>
+                    <Text style={[C.restText, { color: completo ? SEM.green : colors.textMuted }]}>
                         {completo ? 'Completo' : `${restante} restante${restante !== 1 ? 's' : ''}`}
                     </Text>
                 </View>
             )}
 
-            {/* Botones +/- */}
             {total > 0 && (
                 <View style={C.botonesRow}>
                     <TouchableOpacity
-                        style={[C.btn, (entregados <= 0 || guardando) && C.btnDis]}
+                        style={[C.btn, { backgroundColor: colors.bgInput, borderColor: colors.borderSubtle },
+                        (entregados <= 0 || guardando) && C.btnDis]}
                         onPress={() => { if (!guardando && entregados > 0) onDecrement(); }}
                         disabled={entregados <= 0 || guardando}
                         activeOpacity={0.7}
                     >
                         <Ionicons name="remove" size={20}
-                            color={(entregados <= 0 || guardando) ? COLORS.textMuted : colorEf}
+                            color={(entregados <= 0 || guardando) ? colors.textMuted : colorEf}
                         />
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        style={[C.btn, C.btnAdd, { borderColor: colorEf + '50', backgroundColor: colorEf + '15' },
+                        style={[C.btn, C.btnAdd,
+                        { borderColor: colorEf + '50', backgroundColor: colorEf + '15' },
                         (completo || guardando) && C.btnDis,
                         ]}
                         onPress={() => { if (!guardando && !completo) { pulse(); onIncrement(); } }}
@@ -144,31 +131,29 @@ function ContadorEntregados({ label, total, entregados, color, guardando, onIncr
                         activeOpacity={0.7}
                     >
                         <Ionicons name="add" size={20}
-                            color={(completo || guardando) ? COLORS.textMuted : colorEf}
+                            color={(completo || guardando) ? colors.textMuted : colorEf}
                         />
                     </TouchableOpacity>
                 </View>
             )}
 
             {total === 0 && (
-                <Text style={C.sinMsg}>El admin no cargó este valor aún.</Text>
+                <Text style={[C.sinMsg, { color: colors.textMuted }]}>El admin no cargó este valor aún.</Text>
             )}
         </View>
     );
 }
 
-// ─────────────────────────────────────────────
-// COMPONENTE: FilaRecorrido
-// ─────────────────────────────────────────────
+// ─── FilaRecorrido ────────────────────────────────────────────────────────────
 
 interface FilaRecorridoProps {
-    recorrido: Recorrido;
-    index: number;
+    recorrido: Recorrido; index: number;
     onGuardar: (id: number, campo: 'entregados' | 'entregadosFuera', valor: number) => Promise<void>;
     guardandoCampo: { id: number; campo: string } | null;
 }
 
 function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaRecorridoProps) {
+    const { colors } = useTheme();
     const fade = useRef(new Animated.Value(0)).current;
     const colorZona = getZonaColor(recorrido.zona);
 
@@ -194,70 +179,76 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
     };
 
     return (
-        <Animated.View style={[S.filaCard, todoCompleto && S.filaCardCompleta, { opacity: fade }]}>
-            <View style={[S.filaAccent, { backgroundColor: todoCompleto ? COLORS.green : colorZona }]} />
+        <Animated.View style={[
+            S.filaCard,
+            { backgroundColor: colors.bgCard, borderColor: colors.border },
+            todoCompleto && { borderColor: 'rgba(52,211,153,0.3)', backgroundColor: colors.bgCard },
+            { opacity: fade },
+        ]}>
+            <View style={[S.filaAccent, { backgroundColor: todoCompleto ? SEM.green : colorZona }]} />
 
             <View style={S.filaBody}>
-
-                {/* Header */}
                 <View style={S.filaHeader}>
                     <View style={{ flex: 1 }}>
-                        <Text style={S.filaLocalidad} numberOfLines={1}>{recorrido.localidad}</Text>
+                        <Text style={[S.filaLocalidad, { color: colors.textPrimary }]} numberOfLines={1}>
+                            {recorrido.localidad}
+                        </Text>
                         <View style={[S.zonaBadge, { backgroundColor: colorZona + '20', borderColor: colorZona + '40' }]}>
                             <Text style={[S.zonaText, { color: colorZona }]}>{recorrido.zona}</Text>
                         </View>
                     </View>
                     {todoCompleto && (
                         <View style={S.todoCompletoBadge}>
-                            <Ionicons name="checkmark-circle" size={13} color={COLORS.green} />
+                            <Ionicons name="checkmark-circle" size={13} color={SEM.green} />
                             <Text style={S.todoCompletoBadgeText}>Todo completo</Text>
                         </View>
                     )}
                 </View>
 
-                {/* Barras de progreso */}
                 {recorrido.pqteDia > 0 && (
                     <View style={S.progressRow}>
-                        <Text style={S.progressRowLabel}>Día</Text>
-                        <View style={S.progressBg}>
+                        <Text style={[S.progressRowLabel, { color: colors.textMuted }]}>Día</Text>
+                        <View style={[S.progressBg, { backgroundColor: colors.bg, borderColor: colors.borderSubtle }]}>
                             <View style={[S.progressFill, {
                                 width: `${pctDia}%` as any,
-                                backgroundColor: completoDia ? COLORS.green : COLORS.blue,
+                                backgroundColor: completoDia ? SEM.green : SEM.blue,
                             }]} />
                         </View>
-                        <Text style={S.progressPct}>{pctDia.toFixed(0)}%</Text>
+                        <Text style={[S.progressPct, { color: colors.textMuted }]}>{pctDia.toFixed(0)}%</Text>
                     </View>
                 )}
                 {recorrido.porFuera > 0 && (
                     <View style={[S.progressRow, { marginTop: 5 }]}>
-                        <Text style={S.progressRowLabel}>Fuera</Text>
-                        <View style={S.progressBg}>
+                        <Text style={[S.progressRowLabel, { color: colors.textMuted }]}>Fuera</Text>
+                        <View style={[S.progressBg, { backgroundColor: colors.bg, borderColor: colors.borderSubtle }]}>
                             <View style={[S.progressFill, {
                                 width: `${pctFuera}%` as any,
-                                backgroundColor: completoFuera ? COLORS.green : COLORS.amber,
+                                backgroundColor: completoFuera ? SEM.green : SEM.amber,
                             }]} />
                         </View>
-                        <Text style={S.progressPct}>{pctFuera.toFixed(0)}%</Text>
+                        <Text style={[S.progressPct, { color: colors.textMuted }]}>{pctFuera.toFixed(0)}%</Text>
                     </View>
                 )}
 
-                {/* Dos contadores */}
-                <View style={S.contadoresRow}>
+                <View style={[S.contadoresRow, {
+                    backgroundColor: colors.bg,
+                    borderColor: colors.borderSubtle,
+                }]}>
                     <ContadorEntregados
                         label="DEL DÍA"
                         total={recorrido.pqteDia || 0}
                         entregados={recorrido.entregados || 0}
-                        color={COLORS.blue}
+                        color={SEM.blue}
                         guardando={isGuardando('entregados')}
                         onIncrement={() => cambiar('entregados', +1)}
                         onDecrement={() => cambiar('entregados', -1)}
                     />
-                    <View style={S.contadoresDivisor} />
+                    <View style={[S.contadoresDivisor, { backgroundColor: colors.borderSubtle }]} />
                     <ContadorEntregados
                         label="POR FUERA"
                         total={recorrido.porFuera || 0}
                         entregados={recorrido.entregadosFuera || 0}
-                        color={COLORS.amber}
+                        color={SEM.amber}
                         guardando={isGuardando('entregadosFuera')}
                         onIncrement={() => cambiar('entregadosFuera', +1)}
                         onDecrement={() => cambiar('entregadosFuera', -1)}
@@ -268,11 +259,10 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
     );
 }
 
-// ─────────────────────────────────────────────
-// PANTALLA PRINCIPAL
-// ─────────────────────────────────────────────
+// ─── Pantalla principal ───────────────────────────────────────────────────────
 
 export default function PanelScreen() {
+    const { colors } = useTheme();
     const [recorridos, setRecorridos] = useState<Recorrido[]>([]);
     const [choferInfo, setChoferInfo] = useState<ChoferInfo | null>(null);
     const [cargando, setCargando] = useState(true);
@@ -294,7 +284,6 @@ export default function PanelScreen() {
 
             if (choferError) throw choferError;
             if (!choferData) { setCargando(false); setRefrescando(false); return; }
-
             setChoferInfo(choferData as ChoferInfo);
 
             const { data: recData, error: recError } = await supabase
@@ -304,11 +293,7 @@ export default function PanelScreen() {
                 .order('orden', { ascending: true, nullsFirst: false });
 
             if (recError) throw recError;
-            setRecorridos((recData || []).map(r => ({
-                ...r,
-                entregadosFuera: r.entregadosFuera ?? 0,
-            })));
-
+            setRecorridos((recData || []).map(r => ({ ...r, entregadosFuera: r.entregadosFuera ?? 0 })));
         } catch (err) {
             console.error('[Panel] Error:', err);
         } finally {
@@ -334,11 +319,7 @@ export default function PanelScreen() {
         return () => { void supabase.removeChannel(channel); };
     }, [cargarDatos]);
 
-    const handleGuardar = useCallback(async (
-        id: number,
-        campo: 'entregados' | 'entregadosFuera',
-        valor: number,
-    ) => {
+    const handleGuardar = useCallback(async (id: number, campo: 'entregados' | 'entregadosFuera', valor: number) => {
         setRecorridos(prev => prev.map(r => r.id === id ? { ...r, [campo]: valor } : r));
         setGuardandoCampo({ id, campo });
         try {
@@ -360,41 +341,45 @@ export default function PanelScreen() {
 
     if (cargando) {
         return (
-            <View style={S.loader}>
-                <ActivityIndicator size="large" color={COLORS.blue} />
-                <Text style={S.loaderText}>Cargando tu panel...</Text>
+            <View style={[S.loader, { backgroundColor: colors.bg }]}>
+                <ActivityIndicator size="large" color={SEM.blue} />
+                <Text style={[S.loaderText, { color: colors.textSecondary }]}>Cargando tu panel...</Text>
             </View>
         );
     }
 
     if (!choferInfo) {
         return (
-            <View style={S.sinAsignar}>
-                <Ionicons name="person-remove-outline" size={56} color="#1A2540" />
-                <Text style={S.sinAsignarTitulo}>Tu cuenta no está asignada</Text>
-                <Text style={S.sinAsignarSub}>Pedile al administrador que vincule tu email a un chofer en el sistema.</Text>
+            <View style={[S.sinAsignar, { backgroundColor: colors.bg }]}>
+                <Ionicons name="person-remove-outline" size={56} color={colors.borderSubtle} />
+                <Text style={[S.sinAsignarTitulo, { color: colors.textSecondary }]}>Tu cuenta no está asignada</Text>
+                <Text style={[S.sinAsignarSub, { color: colors.textMuted }]}>
+                    Pedile al administrador que vincule tu email a un chofer en el sistema.
+                </Text>
             </View>
         );
     }
 
     if (recorridos.length === 0) {
         return (
-            <ScrollView style={S.container} contentContainerStyle={S.content}
-                refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={COLORS.blue} colors={[COLORS.blue]} />}>
+            <ScrollView style={[S.container, { backgroundColor: colors.bg }]} contentContainerStyle={S.content}
+                refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={SEM.blue} colors={[SEM.blue]} />}>
                 <GreetingBox saludo={saludo} choferInfo={choferInfo} totalPaquetes={0} totalEntregados={0} progreso={0} />
                 <View style={S.sinRutas}>
-                    <Ionicons name="map-outline" size={52} color="#1A2540" />
-                    <Text style={S.sinRutasTitulo}>Sin rutas asignadas hoy</Text>
-                    <Text style={S.sinRutasSub}>El administrador todavía no te asignó recorridos para hoy.</Text>
+                    <Ionicons name="map-outline" size={52} color={colors.borderSubtle} />
+                    <Text style={[S.sinRutasTitulo, { color: colors.textSecondary }]}>Sin rutas asignadas hoy</Text>
+                    <Text style={[S.sinRutasSub, { color: colors.textMuted }]}>
+                        El administrador todavía no te asignó recorridos para hoy.
+                    </Text>
                 </View>
             </ScrollView>
         );
     }
 
     return (
-        <ScrollView style={S.container} contentContainerStyle={S.content}
+        <ScrollView style={[S.container, { backgroundColor: colors.bg }]} contentContainerStyle={S.content}
             showsVerticalScrollIndicator={false}
-            refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={COLORS.blue} colors={[COLORS.blue]} />}>
+            refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={SEM.blue} colors={[SEM.blue]} />}>
             <GreetingBox saludo={saludo} choferInfo={choferInfo}
                 totalPaquetes={totalPaquetes} totalEntregados={totalEntregadosTodo} progreso={progresoGlobal} />
             {recorridos.map((rec, i) => (
@@ -406,53 +391,56 @@ export default function PanelScreen() {
     );
 }
 
-// ─────────────────────────────────────────────
-// GREETING BOX
-// ─────────────────────────────────────────────
+// ─── GreetingBox ──────────────────────────────────────────────────────────────
 
 function GreetingBox({ saludo, choferInfo, totalPaquetes, totalEntregados, progreso }:
     { saludo: string; choferInfo: ChoferInfo; totalPaquetes: number; totalEntregados: number; progreso: number }) {
+    const { colors } = useTheme();
     const condicionCfg = getCondicionCfg(choferInfo.condicion);
+    const restante = totalPaquetes - totalEntregados;
+
     return (
-        <View style={S.greetingBox}>
+        <View style={[S.greetingBox, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             <View style={S.greetingTop}>
                 <View style={{ flex: 1 }}>
-                    <Text style={S.greetingEyebrow}>PANEL DEL DÍA</Text>
-                    <Text style={S.greetingNombre}>{saludo}, {choferInfo.nombre.split(' ')[0]} 👋</Text>
+                    <Text style={[S.greetingEyebrow, { color: SEM.blue }]}>PANEL DEL DÍA</Text>
+                    <Text style={[S.greetingNombre, { color: colors.textPrimary }]}>
+                        {saludo}, {choferInfo.nombre.split(' ')[0]} 👋
+                    </Text>
                 </View>
                 <View style={[S.condicionBadge, { backgroundColor: condicionCfg.bg }]}>
                     <Text style={[S.condicionText, { color: condicionCfg.color }]}>{condicionCfg.label}</Text>
                 </View>
             </View>
-            <View style={S.statsRow}>
+            <View style={[S.statsRow, { backgroundColor: colors.bg, borderColor: colors.borderSubtle }]}>
                 <View style={S.statBox}>
-                    <Text style={S.statNum}>{totalPaquetes}</Text>
-                    <Text style={S.statLabel}>Total</Text>
+                    <Text style={[S.statNum, { color: colors.textPrimary }]}>{totalPaquetes}</Text>
+                    <Text style={[S.statLabel, { color: colors.textMuted }]}>Total</Text>
                 </View>
-                <View style={[S.statBox, S.statBoxMid]}>
-                    <Text style={[S.statNum, { color: COLORS.green }]}>{totalEntregados}</Text>
-                    <Text style={S.statLabel}>Entregados</Text>
+                <View style={[S.statBox, { borderLeftWidth: 1, borderRightWidth: 1, borderColor: colors.borderSubtle }]}>
+                    <Text style={[S.statNum, { color: SEM.green }]}>{totalEntregados}</Text>
+                    <Text style={[S.statLabel, { color: colors.textMuted }]}>Entregados</Text>
                 </View>
                 <View style={S.statBox}>
-                    <Text style={[S.statNum, { color: totalPaquetes - totalEntregados > 0 ? COLORS.amber : '#6B7280' }]}>
-                        {totalPaquetes - totalEntregados}
-                    </Text>
-                    <Text style={S.statLabel}>Restantes</Text>
+                    <Text style={[S.statNum, { color: restante > 0 ? SEM.amber : '#6B7280' }]}>{restante}</Text>
+                    <Text style={[S.statLabel, { color: colors.textMuted }]}>Restantes</Text>
                 </View>
             </View>
             {totalPaquetes > 0 && (
                 <View style={{ marginTop: 14 }}>
-                    <View style={[S.progressBg, { flex: undefined }]}>
+                    <View style={[S.progressBg, { flex: undefined, backgroundColor: colors.bg, borderColor: colors.borderSubtle }]}>
                         <View style={[S.progressFill, {
                             width: `${progreso * 100}%` as any,
-                            backgroundColor: progreso >= 1 ? COLORS.green : COLORS.blue,
+                            backgroundColor: progreso >= 1 ? SEM.green : SEM.blue,
                         }]} />
                     </View>
                     <View style={S.progressFooter}>
-                        <Text style={S.progressLabel}>{Math.round(progreso * 100)}% completado</Text>
+                        <Text style={[S.progressLabel, { color: colors.textMuted }]}>
+                            {Math.round(progreso * 100)}% completado
+                        </Text>
                         {progreso >= 1 && (
                             <View style={S.completadoBadge}>
-                                <Ionicons name="checkmark-circle" size={11} color={COLORS.green} />
+                                <Ionicons name="checkmark-circle" size={11} color={SEM.green} />
                                 <Text style={S.completadoText}>¡Día completo!</Text>
                             </View>
                         )}
@@ -463,9 +451,7 @@ function GreetingBox({ saludo, choferInfo, totalPaquetes, totalEntregados, progr
     );
 }
 
-// ─────────────────────────────────────────────
-// ESTILOS — CONTADOR
-// ─────────────────────────────────────────────
+// ─── Estilos estáticos (sin colores de tema) ──────────────────────────────────
 
 const C = StyleSheet.create({
     box: { flex: 1, alignItems: 'center', paddingVertical: 16, paddingHorizontal: 6, gap: 8 },
@@ -473,8 +459,8 @@ const C = StyleSheet.create({
     label: { fontSize: 9, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase' },
     totalBadge: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2, borderWidth: 1 },
     totalText: { fontSize: 10, fontWeight: '700' },
-    sinBadge: { backgroundColor: 'rgba(42,74,112,0.15)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2, borderWidth: 1, borderColor: COLORS.borderSubtle },
-    sinText: { fontSize: 10, fontWeight: '600', color: COLORS.textMuted },
+    sinBadge: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2, borderWidth: 1 },
+    sinText: { fontSize: 10, fontWeight: '600' },
     numWrap: { alignItems: 'center', minHeight: 52, justifyContent: 'center' },
     num: { fontSize: 34, fontWeight: '800', lineHeight: 38 },
     numSub: { fontSize: 9, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 2 },
@@ -483,67 +469,53 @@ const C = StyleSheet.create({
     botonesRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
     btn: {
         width: 42, height: 42, borderRadius: 12,
-        backgroundColor: 'rgba(42,74,112,0.15)',
-        borderWidth: 1.5, borderColor: COLORS.borderSubtle,
+        borderWidth: 1.5,
         justifyContent: 'center', alignItems: 'center',
     },
     btnAdd: {},
     btnDis: { opacity: 0.25 },
-    sinMsg: { fontSize: 10, color: COLORS.textMuted, textAlign: 'center', lineHeight: 14 },
+    sinMsg: { fontSize: 10, textAlign: 'center', lineHeight: 14 },
 });
 
-// ─────────────────────────────────────────────
-// ESTILOS — PANTALLA
-// ─────────────────────────────────────────────
-
 const S = StyleSheet.create({
-    container: { flex: 1, backgroundColor: COLORS.bg },
+    container: { flex: 1 },
     content: { padding: 16 },
-    loader: { flex: 1, backgroundColor: COLORS.bg, justifyContent: 'center', alignItems: 'center', gap: 14 },
-    loaderText: { color: COLORS.textSecondary, fontSize: 13, fontWeight: '500' },
-
-    sinAsignar: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 14, padding: 40, backgroundColor: COLORS.bg },
-    sinAsignarTitulo: { color: COLORS.textSecondary, fontSize: 16, fontWeight: '700', textAlign: 'center' },
-    sinAsignarSub: { color: COLORS.textMuted, fontSize: 13, fontWeight: '500', textAlign: 'center', lineHeight: 20 },
+    loader: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 14 },
+    loaderText: { fontSize: 13, fontWeight: '500' },
+    sinAsignar: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 14, padding: 40 },
+    sinAsignarTitulo: { fontSize: 16, fontWeight: '700', textAlign: 'center' },
+    sinAsignarSub: { fontSize: 13, fontWeight: '500', textAlign: 'center', lineHeight: 20 },
     sinRutas: { alignItems: 'center', paddingVertical: 48, gap: 10 },
-    sinRutasTitulo: { color: COLORS.textSecondary, fontSize: 15, fontWeight: '700', textAlign: 'center' },
-    sinRutasSub: { color: COLORS.textMuted, fontSize: 13, fontWeight: '500', textAlign: 'center', lineHeight: 20, paddingHorizontal: 20 },
-
-    greetingBox: { backgroundColor: COLORS.bgCard, borderRadius: 20, padding: 20, marginBottom: 14, borderWidth: 1, borderColor: COLORS.border },
+    sinRutasTitulo: { fontSize: 15, fontWeight: '700', textAlign: 'center' },
+    sinRutasSub: { fontSize: 13, fontWeight: '500', textAlign: 'center', lineHeight: 20, paddingHorizontal: 20 },
+    greetingBox: { borderRadius: 20, padding: 20, marginBottom: 14, borderWidth: 1 },
     greetingTop: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
-    greetingEyebrow: { fontSize: 10, fontWeight: '800', color: COLORS.blue, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4 },
-    greetingNombre: { fontSize: 22, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -0.3 },
+    greetingEyebrow: { fontSize: 10, fontWeight: '800', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4 },
+    greetingNombre: { fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
     condicionBadge: { borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
     condicionText: { fontSize: 11, fontWeight: '700' },
-
-    statsRow: { flexDirection: 'row', backgroundColor: COLORS.bg, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.borderSubtle },
+    statsRow: { flexDirection: 'row', borderRadius: 14, overflow: 'hidden', borderWidth: 1 },
     statBox: { flex: 1, alignItems: 'center', paddingVertical: 12 },
-    statBoxMid: { borderLeftWidth: 1, borderRightWidth: 1, borderColor: COLORS.borderSubtle },
-    statNum: { fontSize: 20, fontWeight: '800', color: COLORS.textPrimary },
-    statLabel: { fontSize: 9, color: COLORS.textMuted, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.3, marginTop: 2 },
-
-    progressBg: { height: 6, flex: 1, backgroundColor: COLORS.bg, borderRadius: 3, borderWidth: 1, borderColor: COLORS.borderSubtle, overflow: 'hidden' },
+    statNum: { fontSize: 20, fontWeight: '800' },
+    statLabel: { fontSize: 9, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.3, marginTop: 2 },
+    progressBg: { height: 6, borderRadius: 3, borderWidth: 1, overflow: 'hidden' },
     progressFill: { height: '100%', borderRadius: 3 },
     progressFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
-    progressLabel: { fontSize: 10, color: COLORS.textMuted, fontWeight: '600' },
+    progressLabel: { fontSize: 10, fontWeight: '600' },
     completadoBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(52,211,153,0.1)', borderWidth: 1, borderColor: 'rgba(52,211,153,0.2)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
-    completadoText: { fontSize: 10, color: COLORS.green, fontWeight: '700' },
-
-    filaCard: { flexDirection: 'row', backgroundColor: COLORS.bgCard, borderRadius: 18, marginBottom: 12, borderWidth: 1, borderColor: COLORS.border, overflow: 'hidden' },
-    filaCardCompleta: { borderColor: 'rgba(52,211,153,0.3)', backgroundColor: '#080F1C' },
+    completadoText: { fontSize: 10, color: '#34D399', fontWeight: '700' },
+    filaCard: { flexDirection: 'row', borderRadius: 18, marginBottom: 12, borderWidth: 1, overflow: 'hidden' },
     filaAccent: { width: 4 },
     filaBody: { flex: 1, padding: 16 },
     filaHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 },
-    filaLocalidad: { fontSize: 16, fontWeight: '700', color: COLORS.textPrimary, marginBottom: 6 },
+    filaLocalidad: { fontSize: 16, fontWeight: '700', marginBottom: 6 },
     zonaBadge: { alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1 },
     zonaText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
     todoCompletoBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(52,211,153,0.1)', borderWidth: 1, borderColor: 'rgba(52,211,153,0.25)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
-    todoCompletoBadgeText: { fontSize: 11, color: COLORS.green, fontWeight: '700' },
-
+    todoCompletoBadgeText: { fontSize: 11, color: '#34D399', fontWeight: '700' },
     progressRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-    progressRowLabel: { fontSize: 9, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, width: 30 },
-    progressPct: { fontSize: 9, fontWeight: '700', color: COLORS.textMuted, width: 28, textAlign: 'right' },
-
-    contadoresRow: { flexDirection: 'row', backgroundColor: COLORS.bg, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.borderSubtle, marginTop: 12 },
-    contadoresDivisor: { width: 1, backgroundColor: COLORS.borderSubtle },
+    progressRowLabel: { fontSize: 9, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, width: 30 },
+    progressPct: { fontSize: 9, fontWeight: '700', width: 28, textAlign: 'right' },
+    contadoresRow: { flexDirection: 'row', borderRadius: 14, overflow: 'hidden', borderWidth: 1, marginTop: 12 },
+    contadoresDivisor: { width: 1 },
 });

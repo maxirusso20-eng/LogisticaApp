@@ -1,15 +1,20 @@
-import { DarkTheme, ThemeProvider } from '@react-navigation/native';
+// app/_layout.tsx
+import { DarkTheme, DefaultTheme, ThemeProvider as NavThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
+import { ThemeProvider, useTheme } from '../lib/ThemeContext';
 import { supabase } from '../lib/supabase';
+import { ADMIN_EMAIL } from '../lib/constants';
 
 export const unstable_settings = {
   initialRouteName: '(drawer)',
 };
+
+// ─── Splash ───────────────────────────────────────────────────────────────────
 
 function SplashLoader() {
   const pulse = useRef(new Animated.Value(0.4)).current;
@@ -36,86 +41,94 @@ function SplashLoader() {
 
 const splash = StyleSheet.create({
   container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#060B18',
+    flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#060B18',
   },
   logoRing: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
-    borderWidth: 2,
-    borderColor: '#4F8EF7',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
+    width: 80, height: 80, borderRadius: 24,
+    borderWidth: 2, borderColor: '#4F8EF7',
+    justifyContent: 'center', alignItems: 'center', marginBottom: 20,
   },
-  logoDot: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#4F8EF7',
-  },
-  brand: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.5,
-  },
+  logoDot: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#4F8EF7' },
+  brand: { fontSize: 20, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.5 },
 });
 
-export default function RootLayout() {
+// ─── Inner layout (necesita acceso al tema para StatusBar) ────────────────────
+
+function InnerLayout() {
+  const { isDark } = useTheme();
   const [isLoading, setIsLoading] = useState(true);
-  // ✅ FIX: estado real en lugar de ref → los cambios de sesión provocan re-render
   const [hasSession, setHasSession] = useState<boolean | null>(null);
   const segments = useSegments();
   const router = useRouter();
 
   useEffect(() => {
-    // ✅ Un solo listener que cubre la sesión inicial (INITIAL_SESSION)
-    // y todos los cambios posteriores (SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED, etc.)
-    // Elimina la necesidad de getSession() y evita condiciones de carrera.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    // Check initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
       setHasSession(!!session);
-
-      if (event === 'INITIAL_SESSION') {
-        // La sesión inicial ya fue evaluada → podemos mostrar la app
-        setIsLoading(false);
-      }
+      if (!session) setIsLoading(false);
     });
 
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setHasSession(!!session);
+    });
+    
     return () => subscription.unsubscribe();
   }, []);
 
-  // ✅ Routing reactivo: se ejecuta ante cualquier cambio de sesión o segmento
-  const handleRouting = useCallback(() => {
-    if (isLoading || hasSession === null) return;
-
+  const handleRouting = useCallback(async () => {
+    if (hasSession === null) return;
+    
     const inAuthGroup = segments[0] === 'login';
 
     if (!hasSession && !inAuthGroup) {
-      router.replace('/login' as any);
-    } else if (hasSession && inAuthGroup) {
-      router.replace('/(drawer)' as any);
-    }
-  }, [isLoading, hasSession, segments, router]);
+      // If no session and not in login, redirect to login
+      router.replace('/login' as never);
+    } else if (hasSession) {
+      // Wait to verify user role
+      const { data: { user } } = await supabase.auth.getUser();
+      const isAdmin = user?.email === ADMIN_EMAIL;
 
-  useEffect(() => {
-    handleRouting();
+      if (inAuthGroup) {
+        // Just logged in, route to default home for their role
+        router.replace(isAdmin ? '/(drawer)' : '/(drawer)/Panel' as never);
+      } else if (!isAdmin) {
+        // If driver (not admin), ensure they are not on the admin default root screen
+        const isIndex = segments.length === 1 && segments[0] === '(drawer)';
+        if (isIndex) {
+          router.replace('/(drawer)/Panel' as never);
+        }
+      }
+    }
+    
+    // routing checks complete
+    setIsLoading(false);
+  }, [hasSession, segments]);
+
+  useEffect(() => { 
+    handleRouting(); 
   }, [handleRouting]);
 
   if (isLoading) return <SplashLoader />;
 
   return (
+    <NavThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
+      <Stack>
+        <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
+        <Stack.Screen name="login" options={{ headerShown: false }} />
+      </Stack>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+    </NavThemeProvider>
+  );
+}
+
+// ─── Root ─────────────────────────────────────────────────────────────────────
+
+export default function RootLayout() {
+  return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider value={DarkTheme}>
-        <Stack>
-          <Stack.Screen name="(drawer)" options={{ headerShown: false }} />
-          <Stack.Screen name="login" options={{ headerShown: false }} />
-          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-        </Stack>
-        <StatusBar style="light" />
+      <ThemeProvider>
+        <InnerLayout />
       </ThemeProvider>
     </GestureHandlerRootView>
   );

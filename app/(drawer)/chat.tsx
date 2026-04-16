@@ -1,16 +1,4 @@
 // app/(drawer)/chat.tsx
-//
-// DOS VISTAS COMPLETAMENTE SEPARADAS:
-//
-//  ADMIN  → Lista de conversaciones estilo WhatsApp
-//           (último mensaje, hora, badge de no leídos, online)
-//           Al tocar una → abre la conversación
-//
-//  CHOFER → Entra directo a su chat con el admin
-//           (sin selector, sin bugs de "chat consigo mismo")
-//
-// La separación total elimina los bugs de esPropio/userId/timing.
-
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
@@ -33,24 +21,14 @@ import {
 } from 'react-native';
 import { ADMIN_EMAIL, APP_NAME } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
-
-// ─────────────────────────────────────────────
-// CONFIGURACIÓN DE NOTIFICACIONES
-// ─────────────────────────────────────────────
+import { useTheme } from '../../lib/ThemeContext';
 
 Notifications.setNotificationHandler({
     handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
+        shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: true,
+        shouldShowBanner: true, shouldShowList: true,
     }),
 });
-
-// ─────────────────────────────────────────────
-// HELPERS DE PUSH NOTIFICATIONS
-// ─────────────────────────────────────────────
 
 async function registrarPushToken(): Promise<string | null> {
     if (!Device.isDevice) return null;
@@ -63,11 +41,8 @@ async function registrarPushToken(): Promise<string | null> {
     if (finalStatus !== 'granted') return null;
     if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('chat', {
-            name: 'Mensajes de Chat',
-            importance: Notifications.AndroidImportance.MAX,
-            vibrationPattern: [0, 250, 250, 250],
-            lightColor: '#4F8EF7',
-            sound: 'default',
+            name: 'Mensajes de Chat', importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 250, 250, 250], lightColor: '#4F8EF7', sound: 'default',
         });
     }
     try {
@@ -88,9 +63,7 @@ async function guardarTokenEnBD(email: string, token: string, esAdmin: boolean):
         } else {
             await supabase.from('Choferes').update({ push_token: token }).eq('email', email);
         }
-    } catch (err) {
-        console.warn('[Push] Error guardando token:', err);
-    }
+    } catch (err) { console.warn('[Push] Error guardando token:', err); }
 }
 
 async function enviarPush(tokenDestinatario: string, titulo: string, cuerpo: string, data: object): Promise<void> {
@@ -99,59 +72,32 @@ async function enviarPush(tokenDestinatario: string, titulo: string, cuerpo: str
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({
-                to: tokenDestinatario,
-                title: titulo,
+                to: tokenDestinatario, title: titulo,
                 body: cuerpo.length > 100 ? cuerpo.slice(0, 97) + '...' : cuerpo,
-                sound: 'default',
-                data,
-                channelId: 'chat',
+                sound: 'default', data, channelId: 'chat',
             }),
         });
-    } catch (err) {
-        console.warn('[Push] Error enviando:', err);
-    }
+    } catch (err) { console.warn('[Push] Error enviando:', err); }
 }
 
-// ─────────────────────────────────────────────
-// CONSTANTES
-// ─────────────────────────────────────────────
-
-const TYPING_TIMEOUT_MS = 2500; // cuánto esperar sin tipear para dejar de mostrar "escribiendo"
-
-// ─────────────────────────────────────────────
-// TIPOS
-// ─────────────────────────────────────────────
+const TYPING_TIMEOUT_MS = 2500;
 
 interface Mensaje {
-    id: number;
-    created_at: string;
-    user_id: string;
-    remitente: string;
-    texto: string;
-    chofer_email: string;
-    visto_admin: boolean;
+    id: number; created_at: string; user_id: string; remitente: string;
+    texto: string; chofer_email: string; visto_admin: boolean;
 }
 
 interface Conversacion {
-    email: string;
-    nombre: string;
-    ultimoMensaje: string;
-    ultimaHora: string;
-    noLeidos: number;
-    online: boolean;
+    email: string; nombre: string; ultimoMensaje: string;
+    ultimaHora: string; noLeidos: number; online: boolean;
 }
-
-// ─────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────
 
 const formatHora = (iso: string): string => {
     try {
         const d = new Date(iso);
         const hoy = new Date();
-        if (d.toDateString() === hoy.toDateString()) {
+        if (d.toDateString() === hoy.toDateString())
             return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-        }
         return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
     } catch { return ''; }
 };
@@ -176,19 +122,23 @@ const necesitaSeparador = (msgs: Mensaje[], index: number): boolean => {
 const iniciales = (nombre: string): string =>
     nombre.split(' ').map(p => p[0] || '').slice(0, 2).join('').toUpperCase();
 
-// ─────────────────────────────────────────────
-// COMPONENTES REUTILIZABLES
-// ─────────────────────────────────────────────
+// ─── SeparadorFecha ───────────────────────────────────────────────────────────
 
-const SeparadorFecha: React.FC<{ fecha: string }> = ({ fecha }) => (
-    <View style={S.separadorWrapper}>
-        <View style={S.separadorLinea} />
-        <Text style={S.separadorTexto}>{fecha}</Text>
-        <View style={S.separadorLinea} />
-    </View>
-);
+const SeparadorFecha: React.FC<{ fecha: string }> = ({ fecha }) => {
+    const { colors } = useTheme();
+    return (
+        <View style={SS.separadorWrapper}>
+            <View style={[SS.separadorLinea, { backgroundColor: colors.borderSubtle }]} />
+            <Text style={[SS.separadorTexto, { color: colors.textMuted }]}>{fecha}</Text>
+            <View style={[SS.separadorLinea, { backgroundColor: colors.borderSubtle }]} />
+        </View>
+    );
+};
+
+// ─── IndicadorEscribiendo ─────────────────────────────────────────────────────
 
 const IndicadorEscribiendo: React.FC<{ nombre: string }> = ({ nombre }) => {
+    const { colors } = useTheme();
     const dot1 = useRef(new Animated.Value(0.3)).current;
     const dot2 = useRef(new Animated.Value(0.3)).current;
     const dot3 = useRef(new Animated.Value(0.3)).current;
@@ -205,12 +155,12 @@ const IndicadorEscribiendo: React.FC<{ nombre: string }> = ({ nombre }) => {
     }, []);
 
     return (
-        <View style={S.typingWrapper}>
-            <View style={S.typingBurbuja}>
-                <Text style={S.typingNombre}>{nombre} está escribiendo</Text>
-                <View style={S.typingDots}>
+        <View style={SS.typingWrapper}>
+            <View style={[SS.typingBurbuja, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+                <Text style={[SS.typingNombre, { color: colors.textMuted }]}>{nombre} está escribiendo</Text>
+                <View style={SS.typingDots}>
                     {[dot1, dot2, dot3].map((dot, i) => (
-                        <Animated.View key={i} style={[S.typingDot, { opacity: dot }]} />
+                        <Animated.View key={i} style={[SS.typingDot, { backgroundColor: colors.blue, opacity: dot }]} />
                     ))}
                 </View>
             </View>
@@ -218,37 +168,42 @@ const IndicadorEscribiendo: React.FC<{ nombre: string }> = ({ nombre }) => {
     );
 };
 
-// Burbuja — solo usada en la vista de conversación (chofer y admin dentro de un chat)
+// ─── Burbuja ──────────────────────────────────────────────────────────────────
+
 const Burbuja: React.FC<{
-    mensaje: Mensaje;
-    esPropio: boolean;    // ← calculado por el padre con ref, nunca null
-    mostrarRemitente: boolean;
+    mensaje: Mensaje; esPropio: boolean; mostrarRemitente: boolean;
 }> = ({ mensaje, esPropio, mostrarRemitente }) => {
+    const { colors, isDark } = useTheme();
+
     if (mensaje.texto.startsWith('🔔') || mensaje.remitente === 'Sistema') {
         return (
-            <View style={S.sistemaWrapper}>
-                <View style={S.sistemaBurbuja}>
-                    <Text style={S.sistemaTexto}>{mensaje.texto}</Text>
-                    <Text style={S.sistemaHora}>{formatHora(mensaje.created_at)}</Text>
+            <View style={SS.sistemaWrapper}>
+                <View style={SS.sistemaBurbuja}>
+                    <Text style={SS.sistemaTexto}>{mensaje.texto}</Text>
+                    <Text style={[SS.sistemaHora, { color: colors.textMuted }]}>{formatHora(mensaje.created_at)}</Text>
                 </View>
             </View>
         );
     }
+
+    const burbujaAjenaColor = isDark ? '#0D1526' : '#FFFFFF';
+    const burbujaAjenaBorder = colors.border;
+
     return (
-        <View style={[S.burbujaWrapper, esPropio ? S.burbujaRight : S.burbujaLeft]}>
+        <View style={[SS.burbujaWrapper, esPropio ? SS.burbujaRight : SS.burbujaLeft]}>
             {!esPropio && mostrarRemitente && (
-                <Text style={S.remitente}>{mensaje.remitente}</Text>
+                <Text style={[SS.remitente, { color: colors.blue }]}>{mensaje.remitente}</Text>
             )}
-            <View style={[S.burbuja, esPropio ? S.burbujaPropia : S.burbujaAjena]}>
-                <Text style={[S.burbujaTexto, esPropio ? S.textoPropio : S.textoAjeno]}>
+            <View style={[SS.burbuja, esPropio ? SS.burbujaPropia : { backgroundColor: burbujaAjenaColor, borderColor: burbujaAjenaBorder, borderWidth: 1, borderBottomLeftRadius: 4 }]}>
+                <Text style={[SS.burbujaTexto, esPropio ? SS.textoPropio : { color: colors.textPrimary }]}>
                     {mensaje.texto}
                 </Text>
-                <View style={S.burbujaFooter}>
-                    <Text style={[S.hora, esPropio ? S.horaPropia : S.horaAjena]}>
+                <View style={SS.burbujaFooter}>
+                    <Text style={[SS.hora, esPropio ? SS.horaPropia : { color: colors.textMuted }]}>
                         {formatHora(mensaje.created_at)}
                     </Text>
                     {esPropio && (
-                        <View style={S.ticks}>
+                        <View style={SS.ticks}>
                             {mensaje.visto_admin ? (
                                 <>
                                     <Ionicons name="checkmark" size={12} color="#60AEFF" style={{ marginRight: -5 }} />
@@ -265,272 +220,191 @@ const Burbuja: React.FC<{
     );
 };
 
-// ═════════════════════════════════════════════
-// VISTA ADMIN: Lista de conversaciones
-// ═════════════════════════════════════════════
+// ─── ListaConversaciones (Admin) ──────────────────────────────────────────────
 
-const ListaConversaciones: React.FC<{
-    onAbrir: (conv: Conversacion) => void;
-}> = ({ onAbrir }) => {
+const ListaConversaciones: React.FC<{ onAbrir: (conv: Conversacion) => void }> = ({ onAbrir }) => {
+    const { colors } = useTheme();
     const [conversaciones, setConversaciones] = useState<Conversacion[]>([]);
     const [cargando, setCargando] = useState(true);
-    const [onlineEmails, setOnlineEmails] = useState<Set<string>>(new Set());
     const presenceRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
     const cargar = useCallback(async () => {
         try {
-            // 1. Traer todos los choferes con email
             const { data: chofData } = await supabase
-                .from('Choferes')
-                .select('email, nombre')
-                .not('email', 'is', null)
-                .neq('email', '')
-                .order('nombre', { ascending: true });
+                .from('Choferes').select('email, nombre')
+                .not('email', 'is', null).neq('email', '').order('nombre', { ascending: true });
+            if (!chofData || chofData.length === 0) { setCargando(false); return; }
 
-            if (!chofData || chofData.length === 0) {
-                setCargando(false);
-                return;
-            }
-
-            // 2. Para cada chofer, traer el último mensaje y no leídos
             const lista: Conversacion[] = await Promise.all(
                 chofData.map(async (c: any) => {
                     const email = c.email.trim();
-
-                    const { data: ultMsg } = await supabase
-                        .from('mensajes')
-                        .select('texto, created_at')
-                        .eq('chofer_email', email)
-                        .order('created_at', { ascending: false })
-                        .limit(1)
-                        .maybeSingle();
-
-                    const { count: noLeidos } = await supabase
-                        .from('mensajes')
+                    const { data: ultMsg } = await supabase.from('mensajes')
+                        .select('texto, created_at').eq('chofer_email', email)
+                        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+                    const { count: noLeidos } = await supabase.from('mensajes')
                         .select('id', { count: 'exact', head: true })
-                        .eq('chofer_email', email)
-                        .eq('visto_admin', false);
-
-                    return {
-                        email,
-                        nombre: c.nombre || email,
-                        ultimoMensaje: ultMsg?.texto ?? 'Sin mensajes aún',
-                        ultimaHora: ultMsg?.created_at ?? '',
-                        noLeidos: noLeidos ?? 0,
-                        online: false,
-                    };
+                        .eq('chofer_email', email).eq('visto_admin', false);
+                    return { email, nombre: c.nombre || email, ultimoMensaje: ultMsg?.texto ?? 'Sin mensajes aún', ultimaHora: ultMsg?.created_at ?? '', noLeidos: noLeidos ?? 0, online: false };
                 })
             );
 
-            // Solo mostrar choferes que tienen al menos 1 mensaje
             const conMensajes = lista.filter(c => c.ultimaHora !== '');
-
-            // Ordenar: con no leídos primero, luego por hora del último mensaje
             conMensajes.sort((a, b) => {
                 if (b.noLeidos !== a.noLeidos) return b.noLeidos - a.noLeidos;
                 return b.ultimaHora.localeCompare(a.ultimaHora);
             });
-
             setConversaciones(conMensajes);
-        } catch (err) {
-            console.error('[Chat Admin] Error cargando conversaciones:', err);
-        } finally {
-            setCargando(false);
-        }
+        } catch (err) { console.error('[Chat Admin] Error:', err); }
+        finally { setCargando(false); }
     }, []);
 
     useEffect(() => {
         cargar();
-
-        // Realtime: actualizar lista cuando llegan mensajes nuevos
-        const canal = supabase
-            .channel(`admin-chat-lista-${Date.now()}`)
-            .on('postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'mensajes' },
-                () => cargar() // re-cargar para actualizar último mensaje y no leídos
-            )
+        const canal = supabase.channel(`admin-chat-lista-${Date.now()}`)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensajes' }, () => cargar())
             .subscribe();
-
-        // Presence global para saber quién está online
         const presence = supabase.channel('chat-global-presence');
-        presence
-            .on('presence', { event: 'sync' }, () => {
-                const emails = new Set(Object.keys(presence.presenceState()));
-                setOnlineEmails(emails);
-                setConversaciones(prev =>
-                    prev.map(c => ({ ...c, online: emails.has(c.email) }))
-                );
-            })
-            .subscribe();
-
+        presence.on('presence', { event: 'sync' }, () => {
+            const emails = new Set(Object.keys(presence.presenceState()));
+            setConversaciones(prev => prev.map(c => ({ ...c, online: emails.has(c.email) })));
+        }).subscribe();
         presenceRef.current = presence;
-
         return () => {
             void supabase.removeChannel(canal);
             if (presenceRef.current) void supabase.removeChannel(presenceRef.current);
         };
     }, [cargar]);
 
-    if (cargando) {
-        return (
-            <View style={S.loader}>
-                <ActivityIndicator size="large" color="#4F8EF7" />
-                <Text style={S.loaderText}>Cargando conversaciones...</Text>
-            </View>
-        );
-    }
+    if (cargando) return (
+        <View style={[SS.loader, { backgroundColor: colors.bg }]}>
+            <ActivityIndicator size="large" color={colors.blue} />
+            <Text style={[SS.loaderText, { color: colors.textMuted }]}>Cargando conversaciones...</Text>
+        </View>
+    );
 
-    if (conversaciones.length === 0) {
-        return (
-            <View style={S.vacio}>
-                <Ionicons name="chatbubbles-outline" size={52} color="#1A2540" />
-                <Text style={S.vacioTitulo}>Sin choferes disponibles</Text>
-                <Text style={S.vacioSub}>
-                    {'Para chatear con un chofer:\n1. Cargá su email en tabla Choferes\n2. Creá el usuario en Authentication'}
-                </Text>
-            </View>
-        );
-    }
+    if (conversaciones.length === 0) return (
+        <View style={[SS.vacio, { backgroundColor: colors.bg }]}>
+            <Ionicons name="chatbubbles-outline" size={52} color={colors.borderSubtle} />
+            <Text style={[SS.vacioTitulo, { color: colors.textMuted }]}>Sin choferes disponibles</Text>
+            <Text style={[SS.vacioSub, { color: colors.textMuted }]}>
+                {'Para chatear con un chofer:\n1. Cargá su email en tabla Choferes\n2. Creá el usuario en Authentication'}
+            </Text>
+        </View>
+    );
 
     return (
         <FlatList
             data={conversaciones}
             keyExtractor={c => c.email}
-            style={{ backgroundColor: '#060B18' }}
+            style={{ backgroundColor: colors.bg }}
             contentContainerStyle={{ paddingTop: 8 }}
             renderItem={({ item }) => (
                 <Pressable
-                    style={({ pressed }) => [S.convItem, pressed && { opacity: 0.75 }]}
+                    style={({ pressed }) => [
+                        SS.convItem,
+                        { backgroundColor: colors.bg },
+                        pressed && { opacity: 0.75 },
+                    ]}
                     onPress={() => onAbrir(item)}
                 >
-                    {/* Avatar con punto online */}
-                    <View style={S.convAvatarWrap}>
-                        <View style={[S.convAvatar, item.noLeidos > 0 && S.convAvatarUnread]}>
-                            <Text style={S.convAvatarText}>{iniciales(item.nombre)}</Text>
+                    <View style={SS.convAvatarWrap}>
+                        <View style={[
+                            SS.convAvatar,
+                            { backgroundColor: colors.bgCard, borderColor: colors.border },
+                            item.noLeidos > 0 && { borderColor: colors.blue, borderWidth: 2, backgroundColor: colors.blueSubtle },
+                        ]}>
+                            <Text style={[SS.convAvatarText, { color: colors.blue }]}>{iniciales(item.nombre)}</Text>
                         </View>
-                        {item.online && <View style={S.onlineDot} />}
+                        {item.online && <View style={[SS.onlineDot, { borderColor: colors.bg }]} />}
                     </View>
-
-                    {/* Contenido */}
-                    <View style={S.convInfo}>
-                        <View style={S.convTopRow}>
-                            <Text style={[S.convNombreItem, item.noLeidos > 0 && { color: '#FFFFFF', fontWeight: '700' }]} numberOfLines={1}>{item.nombre}</Text>
-                            <Text style={[S.convHora, item.noLeidos > 0 && { color: '#4F8EF7' }]}>
+                    <View style={SS.convInfo}>
+                        <View style={SS.convTopRow}>
+                            <Text style={[SS.convNombreItem, { color: item.noLeidos > 0 ? colors.textPrimary : colors.textSecondary }, item.noLeidos > 0 && { fontWeight: '700' }]} numberOfLines={1}>
+                                {item.nombre}
+                            </Text>
+                            <Text style={[SS.convHora, { color: item.noLeidos > 0 ? colors.blue : colors.textMuted }]}>
                                 {item.ultimaHora ? formatHora(item.ultimaHora) : ''}
                             </Text>
                         </View>
-                        <View style={S.convBottomRow}>
-                            <Text style={[S.convUltimoMsg, item.noLeidos > 0 && { color: '#FFFFFF', fontWeight: '600' }]}
-                                numberOfLines={1}>
+                        <View style={SS.convBottomRow}>
+                            <Text style={[SS.convUltimoMsg, { color: item.noLeidos > 0 ? colors.textPrimary : colors.textMuted }, item.noLeidos > 0 && { fontWeight: '600' }]} numberOfLines={1}>
                                 {item.ultimoMensaje.startsWith('🔔') ? '📦 ' + item.ultimoMensaje.slice(2) : item.ultimoMensaje}
                             </Text>
                             {item.noLeidos > 0 && (
-                                <View style={S.badge}>
-                                    <Text style={S.badgeText}>{item.noLeidos > 99 ? '99+' : item.noLeidos}</Text>
+                                <View style={[SS.badge, { backgroundColor: colors.blue }]}>
+                                    <Text style={SS.badgeText}>{item.noLeidos > 99 ? '99+' : item.noLeidos}</Text>
                                 </View>
                             )}
                         </View>
                     </View>
                 </Pressable>
             )}
-            ItemSeparatorComponent={() => <View style={S.convSeparador} />}
+            ItemSeparatorComponent={() => <View style={[SS.convSeparador, { backgroundColor: colors.borderSubtle }]} />}
         />
     );
 };
 
-// ═════════════════════════════════════════════
-// VISTA CONVERSACIÓN: usada por admin (al tocar) y chofer (directa)
-// ═════════════════════════════════════════════
+// ─── Conversacion ─────────────────────────────────────────────────────────────
 
-const Conversacion: React.FC<{
-    miUserId: string;
-    miEmail: string;
-    miNombre: string;
-    esAdmin: boolean;
-    choferEmail: string;      // email del chofer dueño de la conversación
-    choferNombre: string;     // nombre a mostrar en el header
-    onVolver?: () => void;    // solo admin tiene botón de volver
+const ConversacionView: React.FC<{
+    miUserId: string; miEmail: string; miNombre: string; esAdmin: boolean;
+    choferEmail: string; choferNombre: string; onVolver?: () => void;
 }> = ({ miUserId, miEmail, miNombre, esAdmin, choferEmail, choferNombre, onVolver }) => {
+    const { colors } = useTheme();
     const [mensajes, setMensajes] = useState<Mensaje[]>([]);
     const [texto, setTexto] = useState('');
     const [enviando, setEnviando] = useState(false);
     const [online, setOnline] = useState(false);
     const [otroEscribiendo, setOtroEscribiendo] = useState(false);
     const [nombreEscribiendo, setNombreEscribiendo] = useState('');
-
     const inputRef = useRef<TextInput>(null);
     const msgCanalRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
     const presenceCanalRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
     const typingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const estabaTypingRef = useRef(false);
 
-    // ── Fetch + Realtime mensajes ─────────────────────────────────────────
-
     const fetchMensajes = useCallback(async () => {
-        const { data } = await supabase
-            .from('mensajes')
+        const { data } = await supabase.from('mensajes')
             .select('id, created_at, user_id, remitente, texto, chofer_email, visto_admin')
-            .eq('chofer_email', choferEmail)
-            .order('created_at', { ascending: false })
-            .limit(50);
+            .eq('chofer_email', choferEmail).order('created_at', { ascending: false }).limit(50);
         setMensajes(data ?? []);
     }, [choferEmail]);
 
     const marcarVisto = useCallback(async () => {
         if (!esAdmin) return;
-        await supabase
-            .from('mensajes')
-            .update({ visto_admin: true })
-            .eq('chofer_email', choferEmail)
-            .eq('visto_admin', false);
+        await supabase.from('mensajes').update({ visto_admin: true })
+            .eq('chofer_email', choferEmail).eq('visto_admin', false);
     }, [esAdmin, choferEmail]);
 
     useEffect(() => {
         fetchMensajes();
         if (esAdmin) marcarVisto();
-
         if (msgCanalRef.current) void supabase.removeChannel(msgCanalRef.current);
-
-        const canal = supabase
-            .channel(`msgs-${choferEmail.replace(/[@.]/g, '-')}`)
-            .on('postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'mensajes', filter: `chofer_email=eq.${choferEmail}` },
+        const canal = supabase.channel(`msgs-${choferEmail.replace(/[@.]/g, '-')}`)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensajes', filter: `chofer_email=eq.${choferEmail}` },
                 (payload) => {
                     const nuevo = payload.new as Mensaje;
                     setMensajes(prev => prev.some(m => m.id === nuevo.id) ? prev : [nuevo, ...prev]);
                     if (esAdmin) marcarVisto();
-                }
-            )
-            .on('postgres_changes',
-                { event: 'UPDATE', schema: 'public', table: 'mensajes', filter: `chofer_email=eq.${choferEmail}` },
+                })
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'mensajes', filter: `chofer_email=eq.${choferEmail}` },
                 (payload) => {
                     const upd = payload.new as Mensaje;
                     setMensajes(prev => prev.map(m => m.id === upd.id ? { ...m, visto_admin: upd.visto_admin } : m));
-                }
-            )
+                })
             .subscribe();
-
         msgCanalRef.current = canal;
-        return () => {
-            if (msgCanalRef.current) { void supabase.removeChannel(msgCanalRef.current); msgCanalRef.current = null; }
-        };
+        return () => { if (msgCanalRef.current) { void supabase.removeChannel(msgCanalRef.current); msgCanalRef.current = null; } };
     }, [choferEmail, fetchMensajes, esAdmin, marcarVisto]);
-
-    // ── Presence: online + escribiendo ───────────────────────────────────
 
     useEffect(() => {
         if (presenceCanalRef.current) void supabase.removeChannel(presenceCanalRef.current);
-
         const canalId = `presence-${choferEmail.replace(/[@.]/g, '-')}`;
         const canal = supabase.channel(canalId, { config: { presence: { key: miEmail } } });
-
         canal
             .on('presence', { event: 'sync' }, () => {
-                const state = canal.presenceState();
-                const emails = Object.keys(state);
-                // El interlocutor está online si su email aparece en la presencia
-                const interlocutorEmail = esAdmin ? choferEmail : ADMIN_EMAIL;
-                setOnline(emails.includes(interlocutorEmail));
+                const emails = Object.keys(canal.presenceState());
+                setOnline(emails.includes(esAdmin ? choferEmail : ADMIN_EMAIL));
             })
             .on('broadcast', { event: 'typing' }, (payload) => {
                 const { email: emailEmisor, nombre: nomEmisor, escribiendo } = payload.payload as any;
@@ -539,11 +413,8 @@ const Conversacion: React.FC<{
                 setNombreEscribiendo(escribiendo ? nomEmisor : '');
             })
             .subscribe(async (status) => {
-                if (status === 'SUBSCRIBED') {
-                    await canal.track({ email: miEmail, nombre: miNombre, at: new Date().toISOString() });
-                }
+                if (status === 'SUBSCRIBED') await canal.track({ email: miEmail, nombre: miNombre, at: new Date().toISOString() });
             });
-
         presenceCanalRef.current = canal;
         return () => {
             if (presenceCanalRef.current) {
@@ -554,13 +425,8 @@ const Conversacion: React.FC<{
         };
     }, [choferEmail, miEmail, miNombre, esAdmin]);
 
-    // ── Typing broadcast ─────────────────────────────────────────────────
-
     const emitirTyping = (escribiendo: boolean) => {
-        presenceCanalRef.current?.send({
-            type: 'broadcast', event: 'typing',
-            payload: { email: miEmail, nombre: miNombre, escribiendo },
-        });
+        presenceCanalRef.current?.send({ type: 'broadcast', event: 'typing', payload: { email: miEmail, nombre: miNombre, escribiendo } });
     };
 
     const handleChangeText = (val: string) => {
@@ -569,8 +435,6 @@ const Conversacion: React.FC<{
         if (typingRef.current) clearTimeout(typingRef.current);
         typingRef.current = setTimeout(() => { estabaTypingRef.current = false; emitirTyping(false); }, TYPING_TIMEOUT_MS);
     };
-
-    // ── Enviar ────────────────────────────────────────────────────────────
 
     const handleEnviar = async () => {
         const txt = texto.trim();
@@ -582,20 +446,13 @@ const Conversacion: React.FC<{
         setTexto('');
         try {
             const { error } = await supabase.from('mensajes').insert([{
-                user_id: miUserId,
-                remitente: esAdmin ? 'Admin' : miNombre,
-                texto: txt,
-                chofer_email: choferEmail,
+                user_id: miUserId, remitente: esAdmin ? 'Admin' : miNombre, texto: txt, chofer_email: choferEmail,
             }]);
-            if (error) {
-                setTexto(txt);
-                console.error('[Chat] Error:', error.message);
-            } else {
-                // Push notification al destinatario en background
+            if (error) { setTexto(txt); console.error('[Chat] Error:', error.message); }
+            else {
                 void (async () => {
                     try {
                         let tokenDest: string | null = null;
-                        let nombreRemit = esAdmin ? 'Admin' : miNombre;
                         if (esAdmin) {
                             const { data } = await supabase.from('Choferes').select('push_token').eq('email', choferEmail).maybeSingle();
                             tokenDest = data?.push_token ?? null;
@@ -603,12 +460,8 @@ const Conversacion: React.FC<{
                             const { data } = await supabase.from('Admins').select('push_token').eq('email', ADMIN_EMAIL).maybeSingle();
                             tokenDest = data?.push_token ?? null;
                         }
-                        if (tokenDest) {
-                            await enviarPush(tokenDest, `💬 ${nombreRemit}`, txt, { tipo: 'CHAT', chofer_email: choferEmail, chofer_nombre: esAdmin ? choferNombre : miNombre });
-                        }
-                    } catch (err) {
-                        console.warn('[Push] Error enviando notificación:', err);
-                    }
+                        if (tokenDest) await enviarPush(tokenDest, `💬 ${esAdmin ? 'Admin' : miNombre}`, txt, { tipo: 'CHAT', chofer_email: choferEmail, chofer_nombre: esAdmin ? choferNombre : miNombre });
+                    } catch (err) { console.warn('[Push] Error:', err); }
                 })();
             }
         } catch { setTexto(txt); }
@@ -617,64 +470,61 @@ const Conversacion: React.FC<{
 
     return (
         <KeyboardAvoidingView
-            style={{ flex: 1, backgroundColor: '#060B18' }}
+            style={{ flex: 1, backgroundColor: colors.bg }}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-            {/* Header */}
-            <View style={S.chatHeader}>
+            <View style={[SS.chatHeader, { backgroundColor: colors.bgCard, borderBottomColor: colors.borderSubtle }]}>
                 {onVolver && (
-                    <TouchableOpacity onPress={onVolver} style={S.btnVolver} activeOpacity={0.7}>
-                        <Ionicons name="arrow-back" size={22} color="#4F8EF7" />
+                    <TouchableOpacity onPress={onVolver} style={SS.btnVolver} activeOpacity={0.7}>
+                        <Ionicons name="arrow-back" size={22} color={colors.blue} />
                     </TouchableOpacity>
                 )}
-                <View style={S.chatAvatarWrap}>
-                    <View style={S.chatAvatar}>
+                <View style={SS.chatAvatarWrap}>
+                    <View style={[SS.chatAvatar, { backgroundColor: colors.blueSubtle, borderColor: `${colors.blue}40` }]}>
                         {esAdmin
-                            ? <Text style={S.chatAvatarText}>{iniciales(choferNombre)}</Text>
-                            : <Ionicons name="person-outline" size={16} color="#4F8EF7" />
+                            ? <Text style={[SS.chatAvatarText, { color: colors.blue }]}>{iniciales(choferNombre)}</Text>
+                            : <Ionicons name="person-outline" size={16} color={colors.blue} />
                         }
                     </View>
-                    {online && <View style={S.onlineDot} />}
+                    {online && <View style={[SS.onlineDot, { borderColor: colors.bgCard }]} />}
                 </View>
                 <View style={{ flex: 1 }}>
-                    <Text style={S.chatNombre}>{esAdmin ? choferNombre : 'Maxi (Admin)'}</Text>
-                    <Text style={S.chatSub}>
+                    <Text style={[SS.chatNombre, { color: colors.textPrimary }]}>
+                        {esAdmin ? choferNombre : 'Maxi (Admin)'}
+                    </Text>
+                    <Text style={[SS.chatSub, { color: colors.textMuted }]}>
                         {otroEscribiendo ? '✏️ escribiendo...' : online ? 'En línea' : APP_NAME}
                     </Text>
                 </View>
             </View>
 
-            {/* Mensajes */}
             {mensajes.length === 0 ? (
-                <View style={S.vacio}>
-                    <Ionicons name="chatbubbles-outline" size={48} color="#1A2540" />
-                    <Text style={S.vacioTitulo}>Sin mensajes aún</Text>
-                    <Text style={S.vacioSub}>{esAdmin ? 'Escribí para iniciar.' : 'Escribile a la central.'}</Text>
+                <View style={[SS.vacio, { backgroundColor: colors.bg }]}>
+                    <Ionicons name="chatbubbles-outline" size={48} color={colors.borderSubtle} />
+                    <Text style={[SS.vacioTitulo, { color: colors.textMuted }]}>Sin mensajes aún</Text>
+                    <Text style={[SS.vacioSub, { color: colors.textMuted }]}>
+                        {esAdmin ? 'Escribí para iniciar.' : 'Escribile a la central.'}
+                    </Text>
                 </View>
             ) : (
                 <FlatList
                     data={mensajes}
                     keyExtractor={m => String(m.id)}
                     inverted
-                    contentContainerStyle={S.lista}
+                    contentContainerStyle={SS.lista}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                     removeClippedSubviews
                     maxToRenderPerBatch={15}
                     renderItem={({ item, index }) => {
-                        // esPropio se calcula con el miUserId pasado por prop — nunca null
                         const esPropio = item.user_id === miUserId;
                         return (
                             <View>
                                 {necesitaSeparador(mensajes, index) && (
                                     <SeparadorFecha fecha={formatFechaGrupo(item.created_at)} />
                                 )}
-                                <Burbuja
-                                    mensaje={item}
-                                    esPropio={esPropio}
-                                    mostrarRemitente={!esAdmin && !esPropio}
-                                />
+                                <Burbuja mensaje={item} esPropio={esPropio} mostrarRemitente={!esAdmin && !esPropio} />
                             </View>
                         );
                     }}
@@ -683,54 +533,45 @@ const Conversacion: React.FC<{
 
             {otroEscribiendo && <IndicadorEscribiendo nombre={nombreEscribiendo} />}
 
-            {/* Input */}
-            <View style={S.inputBar}>
+            <View style={[SS.inputBar, {
+                backgroundColor: colors.bgCard,
+                borderTopColor: colors.borderSubtle,
+                paddingBottom: Platform.OS === 'ios' ? 28 : 12,
+            }]}>
                 <TextInput
                     ref={inputRef}
-                    style={S.input}
+                    style={[SS.input, { backgroundColor: colors.bgInput, borderColor: colors.border, color: colors.textPrimary }]}
                     value={texto}
                     onChangeText={handleChangeText}
                     placeholder={esAdmin ? `Escribirle a ${choferNombre.split(' ')[0]}...` : 'Escribile a la central...'}
-                    placeholderTextColor="#2A4A70"
-                    multiline
-                    maxLength={500}
-                    returnKeyType="send"
-                    blurOnSubmit={false}
-                    onSubmitEditing={handleEnviar}
+                    placeholderTextColor={colors.textMuted}
+                    multiline maxLength={500} returnKeyType="send"
+                    blurOnSubmit={false} onSubmitEditing={handleEnviar}
                 />
                 <TouchableOpacity
-                    style={[S.btnEnviar, (!texto.trim() || enviando) && S.btnEnviarOff]}
-                    onPress={handleEnviar}
-                    disabled={!texto.trim() || enviando}
-                    activeOpacity={0.75}
+                    style={[SS.btnEnviar, { backgroundColor: colors.blue }, (!texto.trim() || enviando) && { backgroundColor: colors.bgInput, shadowOpacity: 0, elevation: 0 }]}
+                    onPress={handleEnviar} disabled={!texto.trim() || enviando} activeOpacity={0.75}
                 >
-                    {enviando
-                        ? <ActivityIndicator size="small" color="#FFF" />
-                        : <Ionicons name="send" size={18} color="#FFF" />
-                    }
+                    {enviando ? <ActivityIndicator size="small" color="#FFF" /> : <Ionicons name="send" size={18} color="#FFF" />}
                 </TouchableOpacity>
             </View>
         </KeyboardAvoidingView>
     );
 };
 
-// ═════════════════════════════════════════════
-// PANTALLA PRINCIPAL — router entre las dos vistas
-// ═════════════════════════════════════════════
+// ─── ChatScreen ───────────────────────────────────────────────────────────────
 
 export default function ChatScreen() {
+    const { colors } = useTheme();
     const router = useRouter();
     const [cargando, setCargando] = useState(true);
     const [authError, setAuthError] = useState(false);
-
     const [miUserId, setMiUserId] = useState('');
     const [miEmail, setMiEmail] = useState('');
     const [miNombre, setMiNombre] = useState('Chofer');
     const [esAdmin, setEsAdmin] = useState(false);
-
     const [convAbierta, setConvAbierta] = useState<Conversacion | null>(null);
 
-    // ── Inicializar usuario + registrar push token ────────────────────────
     useEffect(() => {
         const init = async () => {
             const { data: { user }, error } = await supabase.auth.getUser();
@@ -738,238 +579,118 @@ export default function ChatScreen() {
             const email = user.email ?? '';
             const nombre = user.user_metadata?.full_name || user.user_metadata?.name || email.split('@')[0] || 'Chofer';
             const admin = email === ADMIN_EMAIL;
-            setMiUserId(user.id);
-            setMiEmail(email);
-            setMiNombre(nombre.split(' ')[0]);
-            setEsAdmin(admin);
-            setCargando(false);
-            // Registrar token en background — no bloquea la UI
+            setMiUserId(user.id); setMiEmail(email);
+            setMiNombre(nombre.split(' ')[0]); setEsAdmin(admin); setCargando(false);
             try {
                 const token = await registrarPushToken();
                 if (token) await guardarTokenEnBD(email, token, admin);
-            } catch (err) {
-                console.warn('[Push] Error en registro:', err);
-            }
+            } catch (err) { console.warn('[Push] Error:', err); }
         };
         init();
     }, []);
 
-
-    // ── Guardar timestamp "ultima vez que abri el chat" ──────────────────
-    // El drawer lee este valor para calcular mensajes nuevos desde entonces.
-    // Al volver a abrir el chat el badge se resetea a 0 automaticamente.
     useEffect(() => {
         if (!miEmail) return;
-        AsyncStorage.setItem(`chat_last_seen_${miEmail}`, new Date().toISOString())
-            .catch(err => console.warn('[Chat] Error guardando lastSeen:', err));
+        AsyncStorage.setItem(`chat_last_seen_${miEmail}`, new Date().toISOString()).catch(console.warn);
     }, [miEmail]);
 
-    // ── Listener: tap en notificación → navegar al chat ──────────────────
     useEffect(() => {
         const sub = Notifications.addNotificationResponseReceivedListener(response => {
             const data = response.notification.request.content.data as any;
             if (data?.tipo === 'CHAT') {
-                if (data.chofer_email && esAdmin) {
-                    setConvAbierta({
-                        email: data.chofer_email,
-                        nombre: data.chofer_nombre || data.chofer_email,
-                        ultimoMensaje: '',
-                        ultimaHora: '',
-                        noLeidos: 0,
-                        online: false,
-                    });
-                }
+                if (data.chofer_email && esAdmin) setConvAbierta({ email: data.chofer_email, nombre: data.chofer_nombre || data.chofer_email, ultimoMensaje: '', ultimaHora: '', noLeidos: 0, online: false });
                 router.push('/(drawer)/chat' as any);
             }
         });
         return () => sub.remove();
     }, [esAdmin, router]);
 
-    if (authError) {
-        return (
-            <View style={S.vacio}>
-                <Ionicons name="lock-closed-outline" size={52} color="#1A2540" />
-                <Text style={S.vacioTitulo}>Sesión no disponible</Text>
-                <Text style={S.vacioSub}>Volvé a iniciar sesión.</Text>
-            </View>
-        );
-    }
+    if (authError) return (
+        <View style={[SS.vacio, { backgroundColor: colors.bg }]}>
+            <Ionicons name="lock-closed-outline" size={52} color={colors.borderSubtle} />
+            <Text style={[SS.vacioTitulo, { color: colors.textMuted }]}>Sesión no disponible</Text>
+            <Text style={[SS.vacioSub, { color: colors.textMuted }]}>Volvé a iniciar sesión.</Text>
+        </View>
+    );
 
-    if (cargando) {
-        return (
-            <View style={S.loader}>
-                <ActivityIndicator size="large" color="#4F8EF7" />
-                <Text style={S.loaderText}>{esAdmin ? 'Cargando conversaciones...' : 'Conectando...'}</Text>
-            </View>
-        );
-    }
+    if (cargando) return (
+        <View style={[SS.loader, { backgroundColor: colors.bg }]}>
+            <ActivityIndicator size="large" color={colors.blue} />
+            <Text style={[SS.loaderText, { color: colors.textMuted }]}>
+                {esAdmin ? 'Cargando conversaciones...' : 'Conectando...'}
+            </Text>
+        </View>
+    );
 
-    // ── CHOFER: entra directo a su conversación con el admin ──────────────
-    if (!esAdmin) {
-        return (
-            <Conversacion
-                miUserId={miUserId}
-                miEmail={miEmail}
-                miNombre={miNombre}
-                esAdmin={false}
-                choferEmail={miEmail}        // la conversación se identifica por el email del chofer
-                choferNombre="Maxi (Admin)"
-            />
-        );
-    }
+    if (!esAdmin) return (
+        <ConversacionView miUserId={miUserId} miEmail={miEmail} miNombre={miNombre}
+            esAdmin={false} choferEmail={miEmail} choferNombre="Maxi (Admin)" />
+    );
 
-    // ── ADMIN: si hay conversación abierta, mostrarla; si no, la lista ────
-    if (convAbierta) {
-        return (
-            <Conversacion
-                miUserId={miUserId}
-                miEmail={miEmail}
-                miNombre={miNombre}
-                esAdmin={true}
-                choferEmail={convAbierta.email}
-                choferNombre={convAbierta.nombre}
-                onVolver={() => setConvAbierta(null)}
-            />
-        );
-    }
+    if (convAbierta) return (
+        <ConversacionView miUserId={miUserId} miEmail={miEmail} miNombre={miNombre}
+            esAdmin={true} choferEmail={convAbierta.email} choferNombre={convAbierta.nombre}
+            onVolver={() => setConvAbierta(null)} />
+    );
 
     return <ListaConversaciones onAbrir={setConvAbierta} />;
 }
 
-// ─────────────────────────────────────────────
-// ESTILOS
-// ─────────────────────────────────────────────
+// ─── Estilos estáticos ────────────────────────────────────────────────────────
 
-const S = StyleSheet.create({
-    loader: { flex: 1, backgroundColor: '#060B18', justifyContent: 'center', alignItems: 'center', gap: 14 },
-    loaderText: { color: '#4A6FA5', fontSize: 13, fontWeight: '500' },
-    vacio: { flex: 1, backgroundColor: '#060B18', justifyContent: 'center', alignItems: 'center', gap: 10, padding: 32 },
-    vacioTitulo: { color: '#4A6FA5', fontSize: 15, fontWeight: '700', textAlign: 'center' },
-    vacioSub: { color: '#2A4A70', fontSize: 13, fontWeight: '500', textAlign: 'center', lineHeight: 20 },
-
-    // Lista de conversaciones (admin)
-    convItem: {
-        flexDirection: 'row', alignItems: 'center', gap: 14,
-        paddingHorizontal: 16, paddingVertical: 14,
-        backgroundColor: '#060B18',
-    },
-    convSeparador: { height: 1, backgroundColor: '#0A0F1E', marginLeft: 82 },
+const SS = StyleSheet.create({
+    loader: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 14 },
+    loaderText: { fontSize: 13, fontWeight: '500' },
+    vacio: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10, padding: 32 },
+    vacioTitulo: { fontSize: 15, fontWeight: '700', textAlign: 'center' },
+    vacioSub: { fontSize: 13, fontWeight: '500', textAlign: 'center', lineHeight: 20 },
+    convItem: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14 },
+    convSeparador: { height: 1, marginLeft: 82 },
     convAvatarWrap: { position: 'relative' },
-    convAvatar: {
-        width: 52, height: 52, borderRadius: 26,
-        backgroundColor: '#0D1526',
-        borderWidth: 1, borderColor: '#1A2540',
-        justifyContent: 'center', alignItems: 'center',
-    },
-    convAvatarText: { fontSize: 17, fontWeight: '800', color: '#4F8EF7' },
+    convAvatar: { width: 52, height: 52, borderRadius: 26, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
+    convAvatarText: { fontSize: 17, fontWeight: '800' },
     convInfo: { flex: 1 },
     convTopRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-    convNombreItem: { fontSize: 15, fontWeight: '700', color: '#FFFFFF', flex: 1, marginRight: 8 },
-    convHora: { fontSize: 11, color: '#2A4A70', fontWeight: '500' },
+    convNombreItem: { fontSize: 15, fontWeight: '600', flex: 1, marginRight: 8 },
+    convHora: { fontSize: 11, fontWeight: '500' },
     convBottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    convUltimoMsg: { flex: 1, fontSize: 13, color: '#4A6FA5', fontWeight: '400', marginRight: 8 },
-    badge: {
-        backgroundColor: '#4F8EF7', borderRadius: 10,
-        minWidth: 20, height: 20,
-        justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5,
-    },
+    convUltimoMsg: { flex: 1, fontSize: 13, fontWeight: '400', marginRight: 8 },
+    badge: { borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5 },
     badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
-
-    // Header de conversación
-    chatHeader: {
-        flexDirection: 'row', alignItems: 'center', gap: 12,
-        paddingHorizontal: 16, paddingVertical: 12,
-        backgroundColor: '#0A0F1E',
-        borderBottomWidth: 1, borderBottomColor: '#0D1A2E',
-    },
+    chatHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
     btnVolver: { padding: 4, marginRight: 4 },
     chatAvatarWrap: { position: 'relative' },
-    chatAvatar: {
-        width: 40, height: 40, borderRadius: 20,
-        backgroundColor: 'rgba(79,142,247,0.12)',
-        borderWidth: 1, borderColor: 'rgba(79,142,247,0.25)',
-        justifyContent: 'center', alignItems: 'center',
-    },
-    chatAvatarText: { fontSize: 14, fontWeight: '800', color: '#4F8EF7' },
-    chatNombre: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
-    chatSub: { fontSize: 11, color: '#4A6FA5', marginTop: 1 },
-    onlineDot: {
-        position: 'absolute', bottom: 0, right: 0,
-        width: 11, height: 11, borderRadius: 6,
-        backgroundColor: '#34D399', borderWidth: 2, borderColor: '#0A0F1E',
-    },
-
-    // Lista de mensajes
+    chatAvatar: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
+    chatAvatarText: { fontSize: 14, fontWeight: '800' },
+    chatNombre: { fontSize: 14, fontWeight: '700' },
+    chatSub: { fontSize: 11, marginTop: 1 },
+    onlineDot: { position: 'absolute', bottom: 0, right: 0, width: 11, height: 11, borderRadius: 6, backgroundColor: '#34D399', borderWidth: 2 },
     lista: { paddingHorizontal: 14, paddingTop: 16, paddingBottom: 8 },
-
-    // Separador fecha
     separadorWrapper: { flexDirection: 'row', alignItems: 'center', marginVertical: 12, paddingHorizontal: 8 },
-    separadorLinea: { flex: 1, height: 1, backgroundColor: '#0D1A2E' },
-    separadorTexto: { fontSize: 11, color: '#2A4A70', fontWeight: '600', marginHorizontal: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
-
-    // Burbujas
+    separadorLinea: { flex: 1, height: 1 },
+    separadorTexto: { fontSize: 11, fontWeight: '600', marginHorizontal: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
     burbujaWrapper: { marginBottom: 3, maxWidth: '80%' },
     burbujaRight: { alignSelf: 'flex-end', alignItems: 'flex-end' },
     burbujaLeft: { alignSelf: 'flex-start', alignItems: 'flex-start' },
-    remitente: { fontSize: 11, fontWeight: '700', color: '#4F8EF7', marginBottom: 3, marginLeft: 4 },
+    remitente: { fontSize: 11, fontWeight: '700', marginBottom: 3, marginLeft: 4 },
     burbuja: { borderRadius: 18, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8 },
     burbujaPropia: { backgroundColor: '#1E4DB7', borderBottomRightRadius: 4 },
-    burbujaAjena: { backgroundColor: '#0D1526', borderWidth: 1, borderColor: '#1A2540', borderBottomLeftRadius: 4 },
     burbujaTexto: { fontSize: 15, lineHeight: 20 },
     textoPropio: { color: '#FFFFFF' },
-    textoAjeno: { color: '#D1D9E6' },
     burbujaFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 },
     hora: { fontSize: 10, fontWeight: '600' },
     horaPropia: { color: 'rgba(255,255,255,0.45)' },
-    horaAjena: { color: '#2A4A70' },
     ticks: { flexDirection: 'row', alignItems: 'center' },
-
-    // Sistema
     sistemaWrapper: { alignItems: 'center', marginVertical: 8 },
-    sistemaBurbuja: {
-        flexDirection: 'row', alignItems: 'center', gap: 6,
-        backgroundColor: 'rgba(52,211,153,0.08)',
-        borderWidth: 1, borderColor: 'rgba(52,211,153,0.2)',
-        borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, maxWidth: '85%',
-    },
+    sistemaBurbuja: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(52,211,153,0.08)', borderWidth: 1, borderColor: 'rgba(52,211,153,0.2)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7, maxWidth: '85%' },
     sistemaTexto: { flex: 1, fontSize: 12, color: '#34D399', fontWeight: '600', textAlign: 'center' },
-    sistemaHora: { fontSize: 10, color: '#1A3050', fontWeight: '600' },
-
-    // Typing
+    sistemaHora: { fontSize: 10, fontWeight: '600' },
     typingWrapper: { paddingHorizontal: 14, paddingBottom: 6 },
-    typingBurbuja: {
-        flexDirection: 'row', alignItems: 'center', gap: 8,
-        backgroundColor: '#0D1526', borderWidth: 1, borderColor: '#1A2540',
-        borderRadius: 18, borderBottomLeftRadius: 4,
-        paddingHorizontal: 14, paddingVertical: 10, alignSelf: 'flex-start',
-    },
-    typingNombre: { fontSize: 12, color: '#4A6FA5', fontWeight: '500' },
+    typingBurbuja: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 18, borderBottomLeftRadius: 4, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 10, alignSelf: 'flex-start' },
+    typingNombre: { fontSize: 12, fontWeight: '500' },
     typingDots: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-    typingDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#4F8EF7' },
-
-    // Input
-    inputBar: {
-        flexDirection: 'row', alignItems: 'flex-end', gap: 10,
-        paddingHorizontal: 14, paddingVertical: 12,
-        paddingBottom: Platform.OS === 'ios' ? 28 : 12,
-        backgroundColor: '#0A0F1E', borderTopWidth: 1, borderTopColor: '#0D1A2E',
-    },
-    input: {
-        flex: 1, backgroundColor: '#0D1526',
-        borderRadius: 22, borderWidth: 1.5, borderColor: '#1A2540',
-        color: '#FFFFFF', fontSize: 15,
-        paddingHorizontal: 18, paddingTop: 11, paddingBottom: 11, maxHeight: 120,
-    },
-    btnEnviar: {
-        width: 44, height: 44, borderRadius: 22, backgroundColor: '#4F8EF7',
-        justifyContent: 'center', alignItems: 'center',
-        shadowColor: '#4F8EF7', shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
-    },
-    btnEnviarOff: { backgroundColor: '#111D35', shadowOpacity: 0, elevation: 0 },
-    convAvatarUnread: {
-        borderColor: '#4F8EF7',
-        borderWidth: 2,
-        backgroundColor: 'rgba(79,142,247,0.1)',
-    },
+    typingDot: { width: 5, height: 5, borderRadius: 3 },
+    inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 14, paddingVertical: 12, borderTopWidth: 1 },
+    input: { flex: 1, borderRadius: 22, borderWidth: 1.5, fontSize: 15, paddingHorizontal: 18, paddingTop: 11, paddingBottom: 11, maxHeight: 120 },
+    btnEnviar: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
 });

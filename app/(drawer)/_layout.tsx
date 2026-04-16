@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { ADMIN_EMAIL, APP_NAME, APP_VERSION } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../lib/ThemeContext';
 
 const lastSeenKey = (email: string) => `chat_last_seen_${email}`;
 
@@ -77,17 +78,26 @@ function useMensajesNoLeidos(miEmail: string, esAdmin: boolean | null, isChatAct
   return noLeidos;
 }
 
+// ─── Header Buttons ───────────────────────────────────────────────────────────
+
 function HeaderLeft() {
   const navigation = useNavigation();
+  const { colors } = useTheme();
   return (
-    <TouchableOpacity onPress={() => navigation.dispatch(DrawerActions.toggleDrawer())} style={styles.headerBtn} activeOpacity={0.6}>
-      <Ionicons name="menu-outline" size={26} color="#FFFFFF" />
+    <TouchableOpacity
+      onPress={() => navigation.dispatch(DrawerActions.toggleDrawer())}
+      style={styles.headerBtn}
+      activeOpacity={0.6}
+    >
+      <Ionicons name="menu-outline" size={26} color={colors.textPrimary} />
     </TouchableOpacity>
   );
 }
 
 function HeaderRight() {
   const router = useRouter();
+  const { isDark, toggleTheme, colors } = useTheme();
+
   const handleLogout = () => {
     Alert.alert('Cerrar Sesion', 'Estas seguro que deseas salir?', [
       { text: 'Cancelar', style: 'cancel' },
@@ -99,12 +109,30 @@ function HeaderRight() {
       },
     ]);
   };
+
   return (
-    <TouchableOpacity onPress={handleLogout} style={styles.headerBtn} activeOpacity={0.6}>
-      <Ionicons name="log-out-outline" size={24} color="#FF6B6B" />
-    </TouchableOpacity>
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      {/* Botón toggle tema */}
+      <TouchableOpacity
+        onPress={toggleTheme}
+        style={[styles.headerBtn, styles.themeBtn]}
+        activeOpacity={0.6}
+        accessibilityLabel={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+      >
+        <Ionicons
+          name={isDark ? 'sunny-outline' : 'moon-outline'}
+          size={20}
+          color={isDark ? '#F59E0B' : colors.blue}
+        />
+      </TouchableOpacity>
+      <TouchableOpacity onPress={handleLogout} style={styles.headerBtn} activeOpacity={0.6}>
+        <Ionicons name="log-out-outline" size={24} color={colors.red} />
+      </TouchableOpacity>
+    </View>
   );
 }
+
+// ─── Drawer items ─────────────────────────────────────────────────────────────
 
 const ITEMS_ADMIN = [
   { name: 'index', label: 'Recorridos', icon: 'bus-outline', route: '/(drawer)/' },
@@ -120,96 +148,174 @@ const ITEMS_CHOFER = [
   { name: 'escaner', label: 'Escanear QR', icon: 'qr-code-outline', route: '/(drawer)/escaner' },
 ];
 
+// ─── Drawer Content ───────────────────────────────────────────────────────────
+
 function DrawerContent(props: any) {
   const router = useRouter();
   const { esAdmin, miEmail } = useEsAdmin();
   const nombreChofer = useNombreChofer(miEmail, esAdmin);
+  const { colors, isDark, toggleTheme } = useTheme();
   const currentRoute = props.state?.routes[props.state?.index]?.name;
   const isChatActive = currentRoute === 'chat';
   const noLeidosChat = useMensajesNoLeidos(miEmail, esAdmin, isChatActive);
 
-  if (esAdmin === null) return <View style={styles.drawerContainer} />;
+  if (esAdmin === null) return <View style={[drawerStyles.container, { backgroundColor: colors.bgDrawer }]} />;
   const items = esAdmin ? ITEMS_ADMIN : ITEMS_CHOFER;
 
   return (
-    <View style={styles.drawerContainer}>
-      <View style={styles.drawerHeader}>
-        <View style={styles.drawerLogoBox}>
-          <Ionicons name="bus" size={28} color="#4F8EF7" />
-        </View>
-        <Text style={styles.drawerBrand}>{APP_NAME}</Text>
+    <View style={[drawerStyles.container, { backgroundColor: colors.bgDrawer }]}>
 
-        {/* Nombre del chofer buscado en Supabase */}
+      {/* Header del drawer */}
+      <View style={drawerStyles.header}>
+        <View style={[drawerStyles.logoBox, { backgroundColor: colors.blueSubtle, borderColor: `${colors.blue}33` }]}>
+          <Ionicons name="bus" size={28} color={colors.blue} />
+        </View>
+        <Text style={[drawerStyles.brand, { color: colors.textPrimary }]}>{APP_NAME}</Text>
+
         {!esAdmin && nombreChofer ? (
-          <Text style={styles.drawerNombreChofer}>{nombreChofer}</Text>
+          <Text style={[drawerStyles.nombreChofer, { color: colors.textMuted }]}>{nombreChofer}</Text>
         ) : null}
 
-        <View style={styles.rolBadgeRow}>
-          <View style={[styles.rolBadge, esAdmin ? styles.rolBadgeAdmin : styles.rolBadgeChofer]}>
-            <Ionicons name={esAdmin ? 'shield-checkmark-outline' : 'person-outline'} size={10} color={esAdmin ? '#F59E0B' : '#4F8EF7'} />
-            <Text style={[styles.rolBadgeText, esAdmin ? { color: '#F59E0B' } : { color: '#4F8EF7' }]}>
+        <View style={drawerStyles.rolBadgeRow}>
+          <View style={[
+            drawerStyles.rolBadge,
+            esAdmin
+              ? { backgroundColor: 'rgba(245,158,11,0.1)', borderColor: 'rgba(245,158,11,0.25)' }
+              : { backgroundColor: colors.blueSubtle, borderColor: `${colors.blue}40` },
+          ]}>
+            <Ionicons
+              name={esAdmin ? 'shield-checkmark-outline' : 'person-outline'}
+              size={10}
+              color={esAdmin ? colors.amber : colors.blue}
+            />
+            <Text style={[drawerStyles.rolBadgeText, { color: esAdmin ? colors.amber : colors.blue }]}>
               {esAdmin ? 'Administrador' : 'Chofer'}
             </Text>
           </View>
         </View>
       </View>
 
-      <View style={styles.divider} />
+      <View style={[drawerStyles.divider, { backgroundColor: colors.borderSubtle }]} />
 
-      <View style={styles.drawerItems}>
+      {/* Items de navegación */}
+      <View style={drawerStyles.items}>
         {items.map((item) => {
           const isActive = currentRoute === item.name;
           const esChatConBadge = item.name === 'chat' && noLeidosChat > 0;
           return (
             <TouchableOpacity
               key={item.name}
-              style={[styles.drawerItem, isActive && styles.drawerItemActive]}
+              style={[
+                drawerStyles.item,
+                isActive && { backgroundColor: `${colors.blue}14` },
+              ]}
               onPress={() => router.push(item.route as any)}
               activeOpacity={0.7}
             >
-              <View style={[styles.drawerIconBox, isActive && styles.drawerIconBoxActive]}>
-                <Ionicons name={item.icon as any} size={20} color={isActive ? '#4F8EF7' : '#4A6FA5'} />
+              <View style={[
+                drawerStyles.iconBox,
+                { backgroundColor: colors.borderSubtle },
+                isActive && { backgroundColor: `${colors.blue}26` },
+              ]}>
+                <Ionicons
+                  name={item.icon as any}
+                  size={20}
+                  color={isActive ? colors.blue : colors.textMuted}
+                />
                 {esChatConBadge && !isActive && (
-                  <View style={styles.iconBadge}>
-                    <Text style={styles.iconBadgeText}>{noLeidosChat > 99 ? '99+' : noLeidosChat}</Text>
+                  <View style={drawerStyles.iconBadge}>
+                    <Text style={drawerStyles.iconBadgeText}>
+                      {noLeidosChat > 99 ? '99+' : noLeidosChat}
+                    </Text>
                   </View>
                 )}
               </View>
-              <Text style={[styles.drawerLabel, isActive && styles.drawerLabelActive]}>{item.label}</Text>
+              <Text style={[
+                drawerStyles.label,
+                { color: colors.textMuted },
+                isActive && { color: colors.textPrimary },
+              ]}>
+                {item.label}
+              </Text>
               {esChatConBadge && !isActive && (
-                <View style={styles.labelBadge}>
-                  <Text style={styles.labelBadgeText}>{noLeidosChat > 99 ? '99+' : noLeidosChat}</Text>
+                <View style={drawerStyles.labelBadge}>
+                  <Text style={drawerStyles.labelBadgeText}>
+                    {noLeidosChat > 99 ? '99+' : noLeidosChat}
+                  </Text>
                 </View>
               )}
-              {isActive && <View style={styles.activeIndicator} />}
+              {isActive && (
+                <View style={[drawerStyles.activeIndicator, { backgroundColor: colors.blue }]} />
+              )}
             </TouchableOpacity>
           );
         })}
       </View>
 
-      <View style={styles.drawerFooter}>
-        <View style={styles.divider} />
-        <Text style={styles.drawerFooterText}>v{APP_VERSION} - {new Date().getFullYear()}</Text>
+      {/* Footer con toggle de tema */}
+      <View style={drawerStyles.footer}>
+        <View style={[drawerStyles.divider, { backgroundColor: colors.borderSubtle }]} />
+
+        {/* Botón de tema en el drawer */}
+        <TouchableOpacity
+          onPress={toggleTheme}
+          style={[drawerStyles.themeRow, { borderColor: colors.border }]}
+          activeOpacity={0.7}
+        >
+          <View style={[drawerStyles.iconBox, { backgroundColor: colors.borderSubtle }]}>
+            <Ionicons
+              name={isDark ? 'sunny-outline' : 'moon-outline'}
+              size={18}
+              color={isDark ? colors.amber : colors.blue}
+            />
+          </View>
+          <Text style={[drawerStyles.label, { color: colors.textMuted }]}>
+            {isDark ? 'Modo claro' : 'Modo oscuro'}
+          </Text>
+          <View style={[
+            drawerStyles.toggleTrack,
+            { backgroundColor: isDark ? colors.blue : colors.borderSubtle },
+          ]}>
+            <View style={[
+              drawerStyles.toggleThumb,
+              { transform: [{ translateX: isDark ? 18 : 2 }] },
+            ]} />
+          </View>
+        </TouchableOpacity>
+
+        <Text style={[drawerStyles.version, { color: colors.borderSubtle }]}>
+          v{APP_VERSION} - {new Date().getFullYear()}
+        </Text>
       </View>
     </View>
   );
 }
 
+// ─── Root Drawer Layout ───────────────────────────────────────────────────────
+
 export default function DrawerLayout() {
   const { esAdmin } = useEsAdmin();
+  const { colors, isDark } = useTheme();
   const rutaInicial = esAdmin === true ? 'index' : 'colectas';
+
   return (
     <Drawer
       initialRouteName={rutaInicial}
       drawerContent={(props) => <DrawerContent {...props} />}
       screenOptions={{
-        drawerType: 'front', headerShown: true,
+        drawerType: 'front',
+        headerShown: true,
         drawerStyle: { width: 280, backgroundColor: 'transparent' },
-        headerStyle: { backgroundColor: '#060B18', borderBottomWidth: 0, elevation: 0, shadowOpacity: 0 },
-        headerTintColor: '#FFFFFF',
+        headerStyle: {
+          backgroundColor: colors.bgHeader,
+          borderBottomWidth: 0,
+          elevation: 0,
+          shadowOpacity: 0,
+        },
+        headerTintColor: colors.textPrimary,
         headerLeft: () => <HeaderLeft />,
         headerRight: () => <HeaderRight />,
-        headerTitleStyle: { fontWeight: '700', fontSize: 17, color: '#FFFFFF' },
+        headerTitleStyle: { fontWeight: '700', fontSize: 17, color: colors.textPrimary },
       }}
     >
       <Drawer.Screen name="index" options={{ title: 'Recorridos' }} />
@@ -218,42 +324,94 @@ export default function DrawerLayout() {
       <Drawer.Screen name="colectas" options={{ title: 'Colectas de Hoy' }} />
       <Drawer.Screen name="chat" options={{ title: 'Chat' }} />
       <Drawer.Screen name="Panel" options={{ title: 'Panel del Dia' }} />
-      <Drawer.Screen name="escaner" options={{ title: 'Escanear QR', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }} />
-      <Drawer.Screen name="explore" options={{ drawerItemStyle: { display: 'none' } }} />
+      <Drawer.Screen
+        name="escaner"
+        options={{
+          title: 'Escanear QR',
+          headerShown: false,
+          drawerItemStyle: esAdmin ? { display: 'none' } : undefined,
+        }}
+      />
     </Drawer>
   );
 }
 
+// ─── Estilos del Drawer ───────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   headerBtn: { marginHorizontal: 14, padding: 4 },
-  drawerContainer: { flex: 1, backgroundColor: '#060B18', paddingTop: 56 },
-  drawerHeader: { paddingHorizontal: 24, paddingBottom: 20, alignItems: 'flex-start' },
-  drawerLogoBox: {
+  themeBtn: { marginRight: 2 },
+});
+
+const drawerStyles = StyleSheet.create({
+  container: { flex: 1, paddingTop: 56 },
+  header: { paddingHorizontal: 24, paddingBottom: 20, alignItems: 'flex-start' },
+  logoBox: {
     width: 54, height: 54, borderRadius: 16,
-    backgroundColor: 'rgba(79,142,247,0.12)',
-    borderWidth: 1, borderColor: 'rgba(79,142,247,0.2)',
     justifyContent: 'center', alignItems: 'center', marginBottom: 14,
+    borderWidth: 1,
   },
-  drawerBrand: { fontSize: 18, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.2 },
-  drawerNombreChofer: { fontSize: 14, fontWeight: '600', color: '#4A6FA5', marginTop: 4, marginBottom: 2 },
+  brand: { fontSize: 18, fontWeight: '800', letterSpacing: -0.2 },
+  nombreChofer: { fontSize: 14, fontWeight: '600', marginTop: 4, marginBottom: 2 },
   rolBadgeRow: { marginTop: 8 },
-  rolBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, alignSelf: 'flex-start' },
-  rolBadgeAdmin: { backgroundColor: 'rgba(245,158,11,0.1)', borderColor: 'rgba(245,158,11,0.25)' },
-  rolBadgeChofer: { backgroundColor: 'rgba(79,142,247,0.1)', borderColor: 'rgba(79,142,247,0.25)' },
+  rolBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4,
+    borderWidth: 1, alignSelf: 'flex-start',
+  },
   rolBadgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
-  divider: { height: 1, backgroundColor: '#0D1A2E', marginHorizontal: 24, marginBottom: 16 },
-  drawerItems: { paddingHorizontal: 16, gap: 4 },
-  drawerItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 12, borderRadius: 14, position: 'relative' },
-  drawerItemActive: { backgroundColor: 'rgba(79,142,247,0.08)' },
-  drawerIconBox: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#0D1A2E', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  drawerIconBoxActive: { backgroundColor: 'rgba(79,142,247,0.15)' },
-  drawerLabel: { fontSize: 15, fontWeight: '600', color: '#3A5A80', flex: 1 },
-  drawerLabelActive: { color: '#FFFFFF' },
-  activeIndicator: { width: 4, height: 18, borderRadius: 2, backgroundColor: '#4F8EF7', position: 'absolute', right: 12 },
-  drawerFooter: { position: 'absolute', bottom: 40, left: 0, right: 0 },
-  drawerFooterText: { textAlign: 'center', color: '#0D1A2E', fontSize: 11, fontWeight: '600', marginTop: 16 },
-  iconBadge: { position: 'absolute', top: -4, right: -4, backgroundColor: '#EF4444', borderRadius: 8, minWidth: 16, height: 16, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 3, borderWidth: 1.5, borderColor: '#060B18' },
+  divider: { height: 1, marginHorizontal: 24, marginBottom: 16 },
+  items: { paddingHorizontal: 16, gap: 4 },
+  item: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 13, paddingHorizontal: 12,
+    borderRadius: 14, position: 'relative',
+  },
+  iconBox: {
+    width: 36, height: 36, borderRadius: 10,
+    justifyContent: 'center', alignItems: 'center', marginRight: 12,
+  },
+  label: { fontSize: 15, fontWeight: '600', flex: 1 },
+  activeIndicator: {
+    width: 4, height: 18, borderRadius: 2,
+    position: 'absolute', right: 12,
+  },
+  iconBadge: {
+    position: 'absolute', top: -4, right: -4,
+    backgroundColor: '#EF4444', borderRadius: 8,
+    minWidth: 16, height: 16,
+    justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 3, borderWidth: 1.5, borderColor: '#060B18',
+  },
   iconBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
-  labelBadge: { backgroundColor: '#EF4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5, marginRight: 12 },
+  labelBadge: {
+    backgroundColor: '#EF4444', borderRadius: 10,
+    minWidth: 20, height: 20,
+    justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 5, marginRight: 12,
+  },
   labelBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
+
+  // Footer
+  footer: { position: 'absolute', bottom: 40, left: 0, right: 0 },
+  themeRow: {
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: 16, marginBottom: 12,
+    paddingVertical: 10, paddingHorizontal: 12,
+    borderRadius: 14, borderWidth: 1,
+  },
+  toggleTrack: {
+    width: 38, height: 22, borderRadius: 11,
+    justifyContent: 'center',
+  },
+  toggleThumb: {
+    width: 18, height: 18, borderRadius: 9,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.25,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  version: { textAlign: 'center', fontSize: 11, fontWeight: '600', marginTop: 8 },
 });
