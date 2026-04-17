@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
+import { Drawer } from 'expo-router/drawer';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Easing,
   Keyboard,
@@ -16,10 +17,13 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   useWindowDimensions,
-  View,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ADMIN_EMAIL } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../lib/ThemeContext';
+import { useToast } from '../../lib/toast';
 
 const ORS_URL = 'https://api.openrouteservice.org/geocode/search';
 const ORS_API_KEY = process.env.EXPO_PUBLIC_ORS_KEY || '';
@@ -67,6 +71,18 @@ export default function EscanerPantalla() {
   const [manualAddress, setManualAddress] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const router = useRouter();
+  const toast = useToast();
+  const { colors, isDark } = useTheme();
+
+  // ── tokens UI derivados del tema ──────────────────────────────────────────
+  const footerBg = isDark ? 'rgba(6,11,24,0.96)' : 'rgba(255,255,255,0.96)';
+  const headerBg = isDark ? 'rgba(6,11,24,0.0)' : 'rgba(255,255,255,0.0)'; // header transparente
+  const backBtnBg = isDark ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0.20)';
+  const badgeBg = isDark ? 'rgba(6,11,24,0.85)' : 'rgba(255,255,255,0.90)';
+  const instrBg = isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.80)';
+  const inputBg = isDark ? 'rgba(255,255,255,0.07)' : colors.bgInput;
+  const inputBorder = isDark ? 'rgba(255,255,255,0.12)' : colors.border;
+  const sendDisabledBg = isDark ? '#1E2D45' : colors.bgInput;
 
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -129,24 +145,18 @@ export default function EscanerPantalla() {
       ]);
       if (insertError) throw new Error('Error guardando el paquete en la base de datos.');
 
-      Alert.alert(
-        '¡Paquete asignado!',
-        `Dirección: ${data}\nAgregada a tu ruta exitosamente.`,
-        [
-          {
-            text: 'Escanear otro',
-            onPress: () => { setScanned(false); setProcesando(false); setManualAddress(''); },
-          },
-          {
-            text: 'Ir al panel',
-            onPress: () => { router.push('/(drawer)/Panel'); setProcesando(false); },
-          },
-        ]
-      );
+      // Éxito ✓
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      toast.success('Paquete agregado a tu ruta ✓');
+      setScanned(false);
+      setProcesando(false);
+      setManualAddress('');
+
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'No se pudo procesar la dirección.', [
-        { text: 'Reintentar', onPress: () => { setScanned(false); setProcesando(false); } },
-      ]);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      toast.error(error.message || 'No se pudo procesar la dirección.');
+      setScanned(false);
+      setProcesando(false);
     }
   };
 
@@ -154,17 +164,28 @@ export default function EscanerPantalla() {
     processAddress(data);
   };
 
-  const esAdministrador = userEmail === 'maxirusso20@gmail.com';
+  const esAdministrador = userEmail === ADMIN_EMAIL;
+
+  const handleVolver = () => {
+    if (esAdministrador) {
+      router.navigate('/(drawer)/' as any);
+    } else {
+      router.navigate('/(drawer)/Panel' as any);
+    }
+  };
 
   return (
     // CAPA RAÍZ: ocupa toda la pantalla, fondo negro
     <View style={styles.container}>
+      <Drawer.Screen options={{ headerShown: false }} />
 
       {/* ── CAPA 1: Cámara fija en el fondo ── */}
       <CameraView
         style={StyleSheet.absoluteFillObject}
         facing="back"
-        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+        barcodeScannerSettings={{ 
+          barcodeTypes: ['qr', 'code128', 'pdf417', 'code39', 'ean13', 'upc_a'] 
+        }}
         onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
       />
 
@@ -210,39 +231,44 @@ export default function EscanerPantalla() {
           <View style={styles.uiContainer}>
 
             {/* Header — siempre arriba del todo */}
-            <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) + 8 }]}>
-              <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                <Ionicons name="arrow-back" size={20} color="#FFF" />
+            <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) + 8, backgroundColor: headerBg }]}>
+              <TouchableOpacity onPress={handleVolver} style={[styles.backButton, { backgroundColor: backBtnBg }]}>
+                <Ionicons name="arrow-back" size={20} color={isDark ? '#FFF' : colors.blue} />
               </TouchableOpacity>
-              <Text style={styles.headerText}>Escanear paquete</Text>
+              <Text style={[styles.headerText, { 
+                color: isDark ? '#FFF' : colors.blue, 
+                textShadowColor: isDark ? 'rgba(0,0,0,0.9)' : 'transparent' 
+              }]}>
+                Escanear paquete
+              </Text>
               <View style={{ width: 36 }} />
             </View>
 
             {/* Centro — instrucción / loader flotando sobre la cámara */}
             <View style={styles.centerSpace}>
               {procesando ? (
-                <View style={styles.loaderBadge}>
-                  <ActivityIndicator size="small" color="#4F8EF7" />
-                  <Text style={styles.loaderText}>Procesando dirección…</Text>
+                <View style={[styles.loaderBadge, { backgroundColor: badgeBg, borderColor: colors.blue + '4D' }]}>
+                  <ActivityIndicator size="small" color={colors.blue} />
+                  <Text style={[styles.loaderText, { color: isDark ? '#C7D7F5' : colors.textSecondary }]}>Procesando dirección…</Text>
                 </View>
               ) : (
-                <View style={styles.instrBadge}>
-                  <Ionicons name="qr-code-outline" size={14} color="rgba(224,231,255,0.8)" />
-                  <Text style={styles.instrText}>Centrá el código QR en el recuadro</Text>
+                <View style={[styles.instrBadge, { backgroundColor: instrBg, borderColor: isDark ? 'rgba(255,255,255,0.10)' : colors.border }]}>
+                  <Ionicons name="qr-code-outline" size={14} color={isDark ? 'rgba(224,231,255,0.8)' : colors.blue} />
+                  <Text style={[styles.instrText, { color: isDark ? 'rgba(224,231,255,0.85)' : colors.textSecondary }]}>Centrá el código QR en el recuadro</Text>
                 </View>
               )}
             </View>
 
             {/* Footer — sube con el teclado porque el KAV comprime uiContainer */}
-            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 24), backgroundColor: footerBg }]}>
               {!esAdministrador && (
                 <>
-                  <Text style={styles.footerLabel}>O ingresá la dirección manualmente</Text>
+                  <Text style={[styles.footerLabel, { color: colors.textMuted }]}>O ingresá la dirección manualmente</Text>
                   <View style={styles.manualRow}>
                     <TextInput
-                      style={styles.manualInput}
+                      style={[styles.manualInput, { backgroundColor: inputBg, color: colors.textPrimary, borderColor: inputBorder }]}
                       placeholder="Ej: Av. Rivadavia 1234, CABA"
-                      placeholderTextColor="rgba(255,255,255,0.35)"
+                      placeholderTextColor={colors.textPlaceholder}
                       value={manualAddress}
                       onChangeText={setManualAddress}
                       onSubmitEditing={() => processAddress(manualAddress.trim())}
@@ -251,7 +277,7 @@ export default function EscanerPantalla() {
                     <TouchableOpacity
                       style={[
                         styles.btnSend,
-                        (!manualAddress.trim() || procesando || scanned) && styles.btnSendDisabled,
+                        (!manualAddress.trim() || procesando || scanned) && [styles.btnSendDisabled, { backgroundColor: sendDisabledBg }],
                       ]}
                       onPress={() => processAddress(manualAddress.trim())}
                       disabled={!manualAddress.trim() || procesando || scanned}
@@ -262,8 +288,8 @@ export default function EscanerPantalla() {
                 </>
               )}
 
-              <TouchableOpacity style={styles.btnCancelar} onPress={() => router.back()}>
-                <Ionicons name="close" size={18} color="#FFF" style={{ marginRight: 8 }} />
+              <TouchableOpacity style={styles.btnCancelar} onPress={handleVolver}>
+                <Ionicons name="close" size={18} color="#ff0000ff" style={{ marginRight: 8 }} />
                 <Text style={styles.btnCancelarText}>Cancelar</Text>
               </TouchableOpacity>
             </View>
@@ -413,5 +439,5 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(239,68,68,0.4)',
     borderRadius: 14, height: 50,
   },
-  btnCancelarText: { color: '#FCA5A5', fontWeight: '700', fontSize: 15 },
+  btnCancelarText: { color: '#ff0000ff', fontWeight: '700', fontSize: 15 },
 });

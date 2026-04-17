@@ -4,13 +4,26 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DrawerActions, useNavigation } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
+import * as SplashScreen from 'expo-splash-screen';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { ADMIN_EMAIL, APP_NAME, APP_VERSION } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 
+// Evitar que el splash screen se oculte automáticamente
+SplashScreen.preventAutoHideAsync();
+
 const lastSeenKey = (email: string) => `chat_last_seen_${email}`;
+
+// ─── Hooks de datos ───────────────────────────────────────────────────────────
 
 function useEsAdmin(): { esAdmin: boolean | null; miEmail: string } {
   const [esAdmin, setEsAdmin] = useState<boolean | null>(null);
@@ -112,7 +125,7 @@ function HeaderRight() {
 
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-      {/* Botón toggle tema */}
+      {/* Botón toggle tema — solo en header, ya no en el drawer */}
       <TouchableOpacity
         onPress={toggleTheme}
         style={[styles.headerBtn, styles.themeBtn]}
@@ -154,7 +167,7 @@ function DrawerContent(props: any) {
   const router = useRouter();
   const { esAdmin, miEmail } = useEsAdmin();
   const nombreChofer = useNombreChofer(miEmail, esAdmin);
-  const { colors, isDark, toggleTheme } = useTheme();
+  const { colors } = useTheme();
   const currentRoute = props.state?.routes[props.state?.index]?.name;
   const isChatActive = currentRoute === 'chat';
   const noLeidosChat = useMensajesNoLeidos(miEmail, esAdmin, isChatActive);
@@ -252,37 +265,9 @@ function DrawerContent(props: any) {
         })}
       </View>
 
-      {/* Footer con toggle de tema */}
+      {/* Footer limpio — solo versión */}
       <View style={drawerStyles.footer}>
         <View style={[drawerStyles.divider, { backgroundColor: colors.borderSubtle }]} />
-
-        {/* Botón de tema en el drawer */}
-        <TouchableOpacity
-          onPress={toggleTheme}
-          style={[drawerStyles.themeRow, { borderColor: colors.border }]}
-          activeOpacity={0.7}
-        >
-          <View style={[drawerStyles.iconBox, { backgroundColor: colors.borderSubtle }]}>
-            <Ionicons
-              name={isDark ? 'sunny-outline' : 'moon-outline'}
-              size={18}
-              color={isDark ? colors.amber : colors.blue}
-            />
-          </View>
-          <Text style={[drawerStyles.label, { color: colors.textMuted }]}>
-            {isDark ? 'Modo claro' : 'Modo oscuro'}
-          </Text>
-          <View style={[
-            drawerStyles.toggleTrack,
-            { backgroundColor: isDark ? colors.blue : colors.borderSubtle },
-          ]}>
-            <View style={[
-              drawerStyles.toggleThumb,
-              { transform: [{ translateX: isDark ? 18 : 2 }] },
-            ]} />
-          </View>
-        </TouchableOpacity>
-
         <Text style={[drawerStyles.version, { color: colors.borderSubtle }]}>
           v{APP_VERSION} - {new Date().getFullYear()}
         </Text>
@@ -296,7 +281,47 @@ function DrawerContent(props: any) {
 export default function DrawerLayout() {
   const { esAdmin } = useEsAdmin();
   const { colors, isDark } = useTheme();
-  const rutaInicial = esAdmin === true ? 'index' : 'colectas';
+
+  // Ocultar splash nativo cuando el rol Y el tema ya están disponibles
+  useEffect(() => {
+    if (esAdmin !== null) {
+      SplashScreen.hideAsync();
+    }
+  }, [esAdmin]);
+
+  // Splash inteligente: usa el color real del tema en lugar de devolver null,
+  // evitando el flash blanco en modo oscuro mientras se resuelve el rol.
+  if (esAdmin === null) {
+    return (
+      <View style={[
+        splashStyles.container,
+        { backgroundColor: colors.bg },
+      ]}>
+        <View style={[
+          splashStyles.iconBox,
+          {
+            backgroundColor: isDark ? 'rgba(79,142,247,0.10)' : 'rgba(79,142,247,0.08)',
+            borderColor: isDark ? 'rgba(79,142,247,0.25)' : 'rgba(79,142,247,0.18)',
+          },
+        ]}>
+          <Ionicons name="bus" size={44} color="#4F8EF7" />
+        </View>
+        <ActivityIndicator
+          size="large"
+          color="#4F8EF7"
+          style={{ marginTop: 28 }}
+        />
+        <Text style={[
+          splashStyles.loadingText,
+          { color: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)' },
+        ]}>
+          Cargando...
+        </Text>
+      </View>
+    );
+  }
+
+  const rutaInicial = esAdmin ? 'index' : 'colectas';
 
   return (
     <Drawer
@@ -336,82 +361,55 @@ export default function DrawerLayout() {
   );
 }
 
-// ─── Estilos del Drawer ───────────────────────────────────────────────────────
+// ─── Estilos ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   headerBtn: { marginHorizontal: 14, padding: 4 },
   themeBtn: { marginRight: 2 },
 });
 
+const splashStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  iconBox: {
+    width: 82,
+    height: 82,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 14,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+});
+
 const drawerStyles = StyleSheet.create({
   container: { flex: 1, paddingTop: 56 },
   header: { paddingHorizontal: 24, paddingBottom: 20, alignItems: 'flex-start' },
-  logoBox: {
-    width: 54, height: 54, borderRadius: 16,
-    justifyContent: 'center', alignItems: 'center', marginBottom: 14,
-    borderWidth: 1,
-  },
+  logoBox: { width: 54, height: 54, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 14, borderWidth: 1 },
   brand: { fontSize: 18, fontWeight: '800', letterSpacing: -0.2 },
   nombreChofer: { fontSize: 14, fontWeight: '600', marginTop: 4, marginBottom: 2 },
   rolBadgeRow: { marginTop: 8 },
-  rolBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4,
-    borderWidth: 1, alignSelf: 'flex-start',
-  },
+  rolBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, alignSelf: 'flex-start' },
   rolBadgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
   divider: { height: 1, marginHorizontal: 24, marginBottom: 16 },
   items: { paddingHorizontal: 16, gap: 4 },
-  item: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 13, paddingHorizontal: 12,
-    borderRadius: 14, position: 'relative',
-  },
-  iconBox: {
-    width: 36, height: 36, borderRadius: 10,
-    justifyContent: 'center', alignItems: 'center', marginRight: 12,
-  },
+  item: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 12, borderRadius: 14, position: 'relative' },
+  iconBox: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   label: { fontSize: 15, fontWeight: '600', flex: 1 },
-  activeIndicator: {
-    width: 4, height: 18, borderRadius: 2,
-    position: 'absolute', right: 12,
-  },
-  iconBadge: {
-    position: 'absolute', top: -4, right: -4,
-    backgroundColor: '#EF4444', borderRadius: 8,
-    minWidth: 16, height: 16,
-    justifyContent: 'center', alignItems: 'center',
-    paddingHorizontal: 3, borderWidth: 1.5, borderColor: '#060B18',
-  },
+  activeIndicator: { width: 4, height: 18, borderRadius: 2, position: 'absolute', right: 12 },
+  iconBadge: { position: 'absolute', top: -4, right: -4, backgroundColor: '#EF4444', borderRadius: 8, minWidth: 16, height: 16, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 3, borderWidth: 1.5, borderColor: '#060B18' },
   iconBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
-  labelBadge: {
-    backgroundColor: '#EF4444', borderRadius: 10,
-    minWidth: 20, height: 20,
-    justifyContent: 'center', alignItems: 'center',
-    paddingHorizontal: 5, marginRight: 12,
-  },
+  labelBadge: { backgroundColor: '#EF4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5, marginRight: 12 },
   labelBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
-
-  // Footer
+  // Footer simplificado — sin toggle de tema (está en el header)
   footer: { position: 'absolute', bottom: 40, left: 0, right: 0 },
-  themeRow: {
-    flexDirection: 'row', alignItems: 'center',
-    marginHorizontal: 16, marginBottom: 12,
-    paddingVertical: 10, paddingHorizontal: 12,
-    borderRadius: 14, borderWidth: 1,
-  },
-  toggleTrack: {
-    width: 38, height: 22, borderRadius: 11,
-    justifyContent: 'center',
-  },
-  toggleThumb: {
-    width: 18, height: 18, borderRadius: 9,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.25,
-    shadowRadius: 2,
-    elevation: 2,
-  },
   version: { textAlign: 'center', fontSize: 11, fontWeight: '600', marginTop: 8 },
 });

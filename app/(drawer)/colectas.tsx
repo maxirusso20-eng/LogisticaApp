@@ -1,13 +1,16 @@
 // app/(drawer)/colectas.tsx
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
+import SignatureScreen from 'react-native-signature-canvas';
+import { BottomSheetModal, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
-  Image,
   Linking,
   Platform,
   RefreshControl,
@@ -18,17 +21,22 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import * as Location from 'expo-location';
 import { ADMIN_EMAIL, getSaludo } from '../../lib/constants';
 import { startTracking, stopTracking } from '../../lib/locationTracker';
+import { SkeletonColectaCard } from '../../lib/skeleton';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
+import { useToast } from '../../lib/toast';
 
 const ignorarNotificacionesCache = new Map<string, number>();
 const CACHE_TTL_MS = 5_000;
+const ORS_URL = 'https://api.openrouteservice.org/geocode/search';
+const ORS_API_KEY = process.env.EXPO_PUBLIC_ORS_KEY || '';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
+    shouldPlaySound: true, shouldSetBadge: false,
     shouldShowBanner: true, shouldShowList: true,
   }),
 });
@@ -56,7 +64,7 @@ async function enviarMensajeAutoChatColecta(emailChofer: string, nombreColecta: 
 
 interface Cliente {
   id: number | string; cliente: string; direccion: string; horario: string;
-  chofer: string; completado: boolean; foto_url?: string | null; email_chofer?: string;
+  chofer: string; completado: boolean; foto_url?: string | null; firma_url?: string | null; email_chofer?: string;
 }
 interface GrupoChofer { nombre: string; colectas: Cliente[]; hechas: number; total: number; }
 type FiltroColecta = 'todas' | 'pendientes' | 'completadas';
@@ -89,11 +97,39 @@ async function notificarColectaVencida(clienteNombre: string, emailChofer: strin
     await Promise.all(tokens.map(token => fetch('https://exp.host/--/api/v2/push/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: token, title: '⚠️ Colecta no realizada', body: `${clienteNombre} no fue marcada como completada a tiempo.`, sound: 'default', data: { tipo: 'COLECTA_VENCIDA' } }) })));
   } catch (err) { console.warn('[Push]', err); }
 }
-const abrirMapa = (direccion: string) => {
+const abrirMapa = async (direccion: string) => {
   if (!direccion) return;
   const u = encodeURIComponent(direccion);
-  const url = Platform.select({ ios: `maps:0,0?q=${u}`, android: `geo:0,0?q=${u}`, default: `https://www.google.com/maps/search/?api=1&query=${u}` });
-  if (url) Linking.openURL(url).catch(console.error);
+  
+  // URLs nativas y de navegador (plan B)
+  const urlIos = `maps:0,0?q=${u}`;
+  const urlAndroid = `geo:0,0?q=${u}`;
+  const urlWeb = `https://www.google.com/maps/search/?api=1&query=${u}`;
+
+  try {
+    if (Platform.OS === 'ios') {
+      // Pregunta si Apple Maps está instalado
+      const supported = await Linking.canOpenURL(urlIos);
+      if (supported) {
+        await Linking.openURL(urlIos);
+      } else {
+        await Linking.openURL(urlWeb); // Abre Safari si falla
+      }
+    } else if (Platform.OS === 'android') {
+      // Pregunta si Google Maps está instalado
+      const supported = await Linking.canOpenURL(urlAndroid);
+      if (supported) {
+        await Linking.openURL(urlAndroid);
+      } else {
+        await Linking.openURL(urlWeb); // Abre Chrome si falla
+      }
+    } else {
+      await Linking.openURL(urlWeb);
+    }
+  } catch (error) {
+    console.error('Error abriendo el mapa:', error);
+    Alert.alert('Error', 'No se pudo abrir la dirección en el mapa.');
+  }
 };
 const agruparPorChofer = (lista: Cliente[]): GrupoChofer[] => {
   const mapa = new Map<string, Cliente[]>();
@@ -136,7 +172,12 @@ function FotoColecta({ clienteId, fotoUrl, vencida, done }: {
       {fotoLocal ? (
         <View>
           <Text style={[ST.fotoLabel, { color: colors.textMuted }]}>{done ? '📸 Foto de entrega' : '📸 Justificación'}</Text>
-          <Image source={{ uri: fotoLocal }} style={[ST.fotoPreview, { backgroundColor: colors.bgCard, borderColor: colors.border }]} resizeMode="cover" />
+          <Image
+            source={{ uri: fotoLocal }}
+            style={[ST.fotoPreview, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
+            contentFit="cover"
+            transition={200}
+          />
           <TouchableOpacity style={ST.fotoBtnReemplazar} onPress={sacarFoto} disabled={subiendo} activeOpacity={0.75}>
             <Ionicons name="camera-outline" size={13} color={colors.textMuted} />
             <Text style={[ST.fotoBtnReemplazarText, { color: colors.textMuted }]}>Reemplazar foto</Text>
@@ -214,10 +255,104 @@ function ColectaCard({ item, index, onToggle, toggling }: {
           </View>
         )}
         {(vencida || done) && (
-          <FotoColecta clienteId={item.id} fotoUrl={item.foto_url ?? null} vencida={vencida} done={done} emailChofer={item.email_chofer ?? ''} clienteNombre={item.cliente} />
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+            <View style={{ flex: 1 }}>
+              <FotoColecta clienteId={item.id} fotoUrl={item.foto_url ?? null} vencida={vencida} done={done} emailChofer={item.email_chofer ?? ''} clienteNombre={item.cliente} />
+            </View>
+            {done && (
+              <View style={{ flex: 1 }}>
+                <FirmaColecta clienteId={item.id} firmaUrl={item.firma_url ?? null} vencida={vencida} done={done} />
+              </View>
+            )}
+          </View>
         )}
       </View>
     </Animated.View>
+  );
+}
+
+// ─── FirmaColecta ─────────────────────────────────────────────────────────────
+
+function FirmaColecta({ clienteId, firmaUrl, vencida, done }: {
+  clienteId: number | string; firmaUrl: string | null; vencida: boolean; done: boolean;
+}) {
+  const { colors } = useTheme();
+  const [subiendo, setSubiendo] = useState(false);
+  const [firmaLocal, setFirmaLocal] = useState<string | null>(firmaUrl);
+  const sheetRef = useRef<BottomSheetModal>(null);
+
+  useEffect(() => { setFirmaLocal(firmaUrl); }, [firmaUrl]);
+
+  const snapPoints = useMemo(() => ['65%', '90%'], []);
+  const renderBackdrop = useCallback((props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} opacity={0.6} />, []);
+
+  const handleSignature = async (signature: string) => {
+    sheetRef.current?.dismiss();
+    setSubiendo(true);
+    try {
+      const blob = await (await fetch(signature)).blob();
+      const filePath = `firmas/${String(clienteId)}_${Date.now()}.png`;
+      const { error: ue } = await supabase.storage.from('firmas-colectas').upload(filePath, blob, { contentType: 'image/png', upsert: true });
+      if (ue) throw ue;
+      const { data: ud } = supabase.storage.from('firmas-colectas').getPublicUrl(filePath);
+      const { error: upd } = await supabase.from('Clientes').update({ firma_url: ud.publicUrl }).eq('id', clienteId);
+      if (upd) throw upd;
+      setFirmaLocal(ud.publicUrl);
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'No se pudo subir la firma.');
+    } finally {
+      setSubiendo(false);
+    }
+  };
+
+  return (
+    <View style={ST.fotoContainer}>
+      {firmaLocal ? (
+        <View>
+          <Text style={[ST.fotoLabel, { color: colors.textMuted }]}>✍️ Firma del cliente</Text>
+          <Image source={{ uri: firmaLocal }} style={[ST.fotoPreview, { backgroundColor: colors.bgInput, borderColor: colors.border }]} contentFit="contain" transition={200} />
+          <TouchableOpacity style={ST.fotoBtnReemplazar} onPress={() => sheetRef.current?.present()} disabled={subiendo}>
+             <Ionicons name="create-outline" size={13} color={colors.textMuted} />
+             <Text style={[ST.fotoBtnReemplazarText, { color: colors.textMuted }]}>Nueva firma</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity style={[ST.fotoBtnSacar, { backgroundColor: colors.bgInput, borderWidth: 1, borderColor: colors.blue }]} onPress={() => sheetRef.current?.present()} disabled={subiendo || (vencida && !done)}>
+          {subiendo ? <ActivityIndicator size="small" color={colors.blue} /> : (
+            <><Ionicons name="pencil" size={16} color={colors.blue} /><Text style={[ST.fotoBtnText, { color: colors.blue }]}>Pedir Firma</Text></>
+          )}
+        </TouchableOpacity>
+      )}
+
+      <BottomSheetModal
+        ref={sheetRef}
+        index={1}
+        snapPoints={snapPoints}
+        backdropComponent={renderBackdrop}
+        backgroundStyle={{ backgroundColor: colors.bgCard }}
+        handleIndicatorStyle={{ backgroundColor: colors.borderSubtle }}
+        enablePanDownToClose
+      >
+        <View style={{ flex: 1, padding: 10 }}>
+          <Text style={{ textAlign: 'center', marginBottom: 10, fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }}>Firma del Cliente</Text>
+          <SignatureScreen
+            onOK={handleSignature}
+            onEmpty={() => Alert.alert('Aviso', 'La firma no puede estar vacía')}
+            descriptionText=""
+            clearText="Borrar"
+            confirmText="Guardar"
+            webStyle={`
+              .m-signature-pad { box-shadow: none; border: 1.5px solid ${colors.border}; border-radius: 14px; }
+              body { background-color: transparent; }
+              .m-signature-pad--body { background-color: ${colors.bgInput}; border-radius: 12px; overflow: hidden; }
+              .m-signature-pad--footer { padding: 15px 10px; margin-top: 10px; }
+              .button { background-color: ${colors.blue}; color: #fff; padding: 10px 20px; border-radius: 10px; font-weight: bold; border: none; font-size: 14px;}
+              .button.clear { background-color: transparent; border: 1.5px solid ${colors.border}; color: ${colors.textPrimary}; }
+            `}
+          />
+        </View>
+      </BottomSheetModal>
+    </View>
   );
 }
 
@@ -354,6 +489,7 @@ const VistaAdmin: React.FC<{ clientes: Cliente[]; refrescando: boolean; onRefres
 
 export default function ColectasScreen() {
   const { colors } = useTheme();
+  const toast = useToast();
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cargando, setCargando] = useState(true);
   const [refrescando, setRefrescando] = useState(false);
@@ -367,6 +503,67 @@ export default function ColectasScreen() {
   const emailUsuarioRef = useRef<string | null>(null);
   const userIdRef = useRef<string | null>(null);
   const esAdminRef = useRef(false);
+  const [ordenandoGeo, setOrdenandoGeo] = useState(false);
+
+  const ordenarPorCercania = async () => {
+    if (clientes.length === 0) return;
+    setOrdenandoGeo(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') throw new Error('Permisos de GPS denegados.');
+      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const lat1 = location.coords.latitude;
+      const lon1 = location.coords.longitude;
+
+      const calculados = [];
+      for (const c of clientes) {
+        if (c.completado) {
+          calculados.push({ ...c, distancia: 999999 });
+          continue;
+        }
+        let lat2 = 0, lon2 = 0;
+        if (c.direccion) {
+          try {
+            const res = await Location.geocodeAsync(c.direccion + ', Argentina');
+            if (res.length > 0) { lat2 = res[0].latitude; lon2 = res[0].longitude; }
+          } catch { }
+
+          if (lat2 === 0 && ORS_API_KEY) {
+            try {
+               const res = await fetch(`${ORS_URL}?api_key=${ORS_API_KEY}&text=${encodeURIComponent(c.direccion)}&boundary.country=AR`);
+               const payload = await res.json();
+               if (payload.features?.length > 0) {
+                  lon2 = payload.features[0].geometry.coordinates[0];
+                  lat2 = payload.features[0].geometry.coordinates[1];
+               }
+            } catch {}
+            await new Promise(r => setTimeout(r, 200));
+          }
+        }
+
+        if (lat2 === 0) {
+          calculados.push({ ...c, distancia: 999998 });
+        } else {
+          const R = 6371;
+          const dLat = (lat2 - lat1) * (Math.PI / 180);
+          const dLon = (lon2 - lon1) * (Math.PI / 180);
+          const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+          const c_dist = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          calculados.push({ ...c, distancia: R * c_dist });
+        }
+      }
+
+      const ordenados = calculados.sort((a, b) => a.distancia - b.distancia);
+      setClientes(ordenados.map(({ distancia, ...c }) => c));
+      setFiltro('pendientes');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      toast.success('Ruta optimizada por cercanía 📍');
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'No se pudo optimizar la ruta.');
+    } finally {
+      setOrdenandoGeo(false);
+    }
+  };
 
   const fetchClientes = useCallback(async (mostrarLoader = false) => {
     if (mostrarLoader) setCargando(true);
@@ -380,7 +577,7 @@ export default function ColectasScreen() {
         if (cd?.nombre) setNombre(cd.nombre.split(' ')[0]);
         else { const fb: string = user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0]; setNombre(fb.split(' ')[0]); }
       } catch { const fb = user.user_metadata?.full_name || user.email.split('@')[0]; setNombre(fb.split(' ')[0]); }
-      let query = supabase.from('Clientes').select('id, cliente, direccion, horario, chofer, completado, foto_url, email_chofer').order('horario', { ascending: true });
+      let query = supabase.from('Clientes').select('id, cliente, direccion, horario, chofer, completado, foto_url, firma_url, email_chofer').order('horario', { ascending: true });
       if (!esAdminRef.current) query = query.eq('email_chofer', user.email);
       const { data, error } = await query;
       if (error) throw error;
@@ -391,7 +588,7 @@ export default function ColectasScreen() {
 
   useEffect(() => {
     fetchClientes(true);
-    const channel = supabase.channel(`colectas-sync-${Date.now()}`)
+    const channel = supabase.channel('colectas-sync')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'Clientes' }, (payload) => {
         const registro = payload.new as Cliente & { email_chofer?: string };
         const registroOld = payload.old as Cliente & { email_chofer?: string };
@@ -455,7 +652,14 @@ export default function ColectasScreen() {
     try {
       const { error } = await supabase.from('Clientes').update({ completado: nuevoEstado }).eq('id', id);
       if (error) { console.error('[Colectas]', error.message); setClientes(prev => prev.map(c => c.id === id ? { ...c, completado: actual } : c)); ignorarNotificacionesCache.delete(idStr); return; }
-      if (nuevoEstado === true && userIdRef.current) void enviarMensajeAutoChatColecta(emailUsuarioRef.current!, nombreCliente || 'Sin nombre');
+      if (nuevoEstado) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        toast.success(`${nombreCliente} marcada como completada ✓`);
+        if (userIdRef.current) void enviarMensajeAutoChatColecta(emailUsuarioRef.current!, nombreCliente || 'Sin nombre');
+      } else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        toast.info(`${nombreCliente} marcada como pendiente`);
+      }
     } finally { setToggling(prev => { const next = new Set(prev); next.delete(id); return next; }); }
   };
 
@@ -469,10 +673,10 @@ export default function ColectasScreen() {
   });
 
   if (cargando) return (
-    <View style={[ST.loader, { backgroundColor: colors.bg }]}>
-      <ActivityIndicator size="large" color={colors.blue} />
-      <Text style={[ST.loaderText, { color: colors.textMuted }]}>{esAdmin ? 'Cargando panel de supervisión...' : 'Cargando colectas...'}</Text>
-    </View>
+    <ScrollView style={[ST.container, { backgroundColor: colors.bg }]} contentContainerStyle={ST.content}
+      scrollEnabled={false}>
+      {[0, 1, 2, 3].map(i => <SkeletonColectaCard key={i} />)}
+    </ScrollView>
   );
 
   if (esAdmin) return <VistaAdmin clientes={clientes} refrescando={refrescando} onRefresh={handleRefresh} />;
@@ -518,6 +722,18 @@ export default function ColectasScreen() {
         {search.length > 0 && (<TouchableOpacity onPress={() => setSearch('')}><Ionicons name="close-circle" size={16} color={colors.textMuted} /></TouchableOpacity>)}
       </View>
 
+      {!esAdmin && (
+        <TouchableOpacity 
+          style={[ST.btnOptimization, { backgroundColor: colors.bgCard, borderColor: colors.blue }]} 
+          onPress={ordenarPorCercania} 
+          disabled={ordenandoGeo} 
+          activeOpacity={0.7}
+        >
+          {ordenandoGeo ? <ActivityIndicator size="small" color={colors.blue} style={{ marginRight: 8 }} /> : <Ionicons name="location" size={16} color={colors.blue} style={{ marginRight: 8 }} />}
+          <Text style={[ST.btnOptimizationText, { color: colors.blue }]}>{ordenandoGeo ? 'Calculando distancias...' : 'Optimizar ruta (Más cercano primero)'}</Text>
+        </TouchableOpacity>
+      )}
+
       <View style={ST.filtrosRow}>
         {([{ key: 'todas', label: 'Todas', count: clientes.length }, { key: 'pendientes', label: 'Pendientes', count: totalPendientes }, { key: 'completadas', label: 'Completadas', count: totalHechas }] as { key: FiltroColecta; label: string; count: number }[]).map(tab => (
           <TouchableOpacity key={tab.key} style={[ST.filtroBtn, { backgroundColor: colors.bgCard, borderColor: colors.border }, filtro === tab.key && { backgroundColor: colors.blueSubtle, borderColor: colors.blue }]} onPress={() => setFiltro(tab.key)}>
@@ -555,6 +771,8 @@ const ST = StyleSheet.create({
   progressLabel: { fontSize: 11, fontWeight: '600', textAlign: 'right' },
   searchRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, paddingHorizontal: 16, height: 48, marginBottom: 12 },
   searchInput: { flex: 1, fontSize: 14 },
+  btnOptimization: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 14, borderWidth: 1, marginBottom: 14 },
+  btnOptimizationText: { fontSize: 13, fontWeight: '700' },
   filtrosRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
   filtroBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 12, borderWidth: 1 },
   filtroText: { fontSize: 12, fontWeight: '700' },
@@ -584,7 +802,7 @@ const ST = StyleSheet.create({
   detailText: { flex: 1, fontSize: 12, fontWeight: '500', lineHeight: 18 },
   doneBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10, alignSelf: 'flex-start', backgroundColor: 'rgba(52,211,153,0.08)', borderWidth: 1, borderColor: 'rgba(52,211,153,0.18)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
   doneBadgeText: { fontSize: 11, color: '#34D399', fontWeight: '700' },
-  fotoContainer: { marginTop: 12 }, fotoLabel: { fontSize: 11, fontWeight: '600', marginBottom: 6 },
+  fotoContainer: { flex: 1 }, fotoLabel: { fontSize: 11, fontWeight: '600', marginBottom: 6 },
   fotoPreview: { width: '100%', height: 160, borderRadius: 12, borderWidth: 1 },
   fotoBtnSacar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16, marginTop: 4 },
   fotoBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },

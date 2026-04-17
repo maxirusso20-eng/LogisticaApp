@@ -1,11 +1,13 @@
 // app/(drawer)/personal.tsx
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   RefreshControl,
@@ -16,8 +18,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
+import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView, BottomSheetView } from '@gorhom/bottom-sheet';
+import { SkeletonChoferCard } from '../../lib/skeleton';
 import { useTheme } from '../../lib/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { useToast } from '../../lib/toast';
 
 interface Chofer {
   id: number; nombre: string; dni: string; celular: string; condicion: string;
@@ -86,7 +92,7 @@ const FormularioChofer: React.FC<FormularioChoferProps> = ({ form, esEdicion, on
   const inputStyle = [M.input, { color: colors.textPrimary }];
   const wrapStyle = [M.inputWrap, { backgroundColor: colors.bgCard, borderColor: colors.border }];
   return (
-    <ScrollView style={M.formScroll} contentContainerStyle={M.formContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    <View style={M.formContent}>
       <View style={M.fieldRow}>
         {!esEdicion && (
           <View style={[M.fieldGroup, { flex: 1, marginRight: 10 }]}>
@@ -133,7 +139,7 @@ const FormularioChofer: React.FC<FormularioChoferProps> = ({ form, esEdicion, on
         {guardando ? <ActivityIndicator color="#fff" size="small" /> : (<><Ionicons name={esEdicion ? 'checkmark-circle' : 'person-add'} size={18} color="#fff" /><Text style={M.btnGuardarTexto}>{esEdicion ? 'Guardar Cambios' : 'Agregar Chofer'}</Text></>)}
       </TouchableOpacity>
       <View style={{ height: 40 }} />
-    </ScrollView>
+    </View>
   );
 };
 
@@ -147,28 +153,30 @@ const ModalChofer: React.FC<ModalChoferProps> = ({ visible, choferEditar, onCerr
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [guardando, setGuardando] = useState(false);
   const formDefault = (): FormChofer => ({ id: '', nombre: '', dni: '', celular: '', direccion: '', fechaIngreso: '', zona: [], vehiculo: [], condicion: 'SUPLENTE' });
-  const [form, setForm] = useState<FormChofer>(formDefault());
+  
+  // Aquí esquivamos el bug del React Compiler renombrando a formData
+  const [formData, setFormData] = useState<FormChofer>(formDefault());
 
   useEffect(() => {
     if (visible) {
       if (choferEditar) {
-        setForm({ id: choferEditar.id.toString(), nombre: choferEditar.nombre || '', dni: choferEditar.dni || '', celular: choferEditar.celular || '', direccion: (choferEditar as any).direccion || '', fechaIngreso: (choferEditar as any).fechaIngreso || '', zona: getArr(choferEditar.zona), vehiculo: getArr(choferEditar.vehiculo), condicion: choferEditar.condicion || 'SUPLENTE' });
-      } else { setForm(formDefault()); }
+        setFormData({ id: choferEditar.id.toString(), nombre: choferEditar.nombre || '', dni: choferEditar.dni || '', celular: choferEditar.celular || '', direccion: (choferEditar as any).direccion || '', fechaIngreso: (choferEditar as any).fechaIngreso || '', zona: getArr(choferEditar.zona), vehiculo: getArr(choferEditar.vehiculo), condicion: choferEditar.condicion || 'SUPLENTE' });
+      } else { setFormData(formDefault()); }
       slideAnim.setValue(60);
       Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 65, friction: 11 }).start();
     }
   }, [visible, choferEditar]);
 
-  const onChange = (campo: keyof FormChofer, valor: string | string[]) => setForm(prev => ({ ...prev, [campo]: valor }));
+  const onChange = (campo: keyof FormChofer, valor: string | string[]) => setFormData(prev => ({ ...prev, [campo]: valor }));
 
   const handleGuardar = async () => {
-    if (!form.nombre.trim()) { Alert.alert('Campo requerido', 'El nombre es obligatorio.'); return; }
-    if (!esEdicion && !form.id) { Alert.alert('Campo requerido', 'El ID es obligatorio para un chofer nuevo.'); return; }
+    if (!formData.nombre.trim()) { Alert.alert('Campo requerido', 'El nombre es obligatorio.'); return; }
+    if (!esEdicion && !formData.id) { Alert.alert('Campo requerido', 'El ID es obligatorio para un chofer nuevo.'); return; }
     setGuardando(true);
     try {
-      const payload = { nombre: form.nombre.trim(), dni: form.dni.trim(), celular: form.celular.trim(), direccion: form.direccion.trim(), fechaIngreso: form.fechaIngreso.trim(), zona: form.zona, vehiculo: form.vehiculo, condicion: form.condicion };
+      const payload = { nombre: formData.nombre.trim(), dni: formData.dni.trim(), celular: formData.celular.trim(), direccion: formData.direccion.trim(), fechaIngreso: formData.fechaIngreso.trim(), zona: formData.zona, vehiculo: formData.vehiculo, condicion: formData.condicion };
       if (esEdicion) { const { error } = await supabase.from('Choferes').update(payload).eq('id', choferEditar!.id); if (error) throw error; }
-      else { const { error } = await supabase.from('Choferes').insert([{ id: parseInt(form.id), ...payload }]); if (error) throw error; }
+      else { const { error } = await supabase.from('Choferes').insert([{ id: parseInt(formData.id), ...payload }]); if (error) throw error; }
       onGuardado(); onCerrar();
     } catch (err: any) { Alert.alert(esEdicion ? 'Error al actualizar' : 'Error al agregar', err?.message || 'Ocurrió un error inesperado.'); }
     finally { setGuardando(false); }
@@ -193,7 +201,7 @@ const ModalChofer: React.FC<ModalChoferProps> = ({ visible, choferEditar, onCerr
         </View>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <Animated.View style={{ flex: 1, transform: [{ translateY: slideAnim }] }}>
-            <FormularioChofer form={form} esEdicion={esEdicion} onChange={onChange} onGuardar={handleGuardar} guardando={guardando} />
+            <FormularioChofer form={formData} esEdicion={esEdicion} onChange={onChange} onGuardar={handleGuardar} guardando={guardando} />
           </Animated.View>
         </KeyboardAvoidingView>
       </View>
@@ -203,10 +211,11 @@ const ModalChofer: React.FC<ModalChoferProps> = ({ visible, choferEditar, onCerr
 
 // ─── ChoferCard ───────────────────────────────────────────────────────────────
 
-function ChoferCard({ item, index, onEditar }: { item: Chofer; index: number; onEditar: (chofer: Chofer) => void }) {
+function ChoferCard({ item, index, onEditar, onEliminar }: { item: Chofer; index: number; onEditar: (chofer: Chofer) => void; onEliminar: (chofer: Chofer) => void }) {
   const { colors } = useTheme();
   const fade = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(0.96)).current;
+  const swipeableRef = useRef<Swipeable>(null);
   const cfg = getCondicionCfg(item.condicion);
   const initials = (item.nombre || '?').split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
   const vehiculoTexto = getVehiculo(item.vehiculo);
@@ -220,35 +229,74 @@ function ChoferCard({ item, index, onEditar }: { item: Chofer; index: number; on
     ]).start();
   }, []);
 
+  const renderRightActions = () => (
+    <View style={P.swipeActions}>
+      <TouchableOpacity
+        style={[P.swipeBtn, { backgroundColor: '#10B981' }]}
+        onPress={() => {
+          swipeableRef.current?.close();
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          if (item.celular) Linking.openURL(`tel:${item.celular}`);
+        }}
+      >
+        <Ionicons name="call" size={20} color="#fff" />
+        <Text style={P.swipeBtnText}>Llamar</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[P.swipeBtn, { backgroundColor: '#4F8EF7' }]}
+        onPress={() => {
+          swipeableRef.current?.close();
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          onEditar(item);
+        }}
+      >
+        <Ionicons name="pencil" size={18} color="#fff" />
+        <Text style={P.swipeBtnText}>Editar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderLeftActions = () => (
+    <TouchableOpacity
+      style={[P.swipeBtn, { backgroundColor: '#EF4444', minWidth: 80, borderRadius: 16, marginBottom: 12, marginLeft: 0, justifyContent: 'center', alignItems: 'center' }]}
+      onPress={() => {
+        swipeableRef.current?.close();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        onEliminar(item);
+      }}
+    >
+      <Ionicons name="trash" size={20} color="#fff" />
+      <Text style={P.swipeBtnText}>Borrar</Text>
+    </TouchableOpacity>
+  );
+
   return (
-    <Animated.View style={[P.card, { backgroundColor: colors.bgCard, borderColor: colors.border, opacity: fade, transform: [{ scale }] }]}>
-      <View style={P.cardTop}>
-        <View style={[P.avatar, { backgroundColor: avatarColor + '20', borderColor: avatarColor + '40' }]}>
-          <Text style={[P.avatarText, { color: avatarColor }]}>{initials}</Text>
-        </View>
-        <View style={P.info}>
-          <Text style={[P.nombre, { color: colors.textPrimary }]}>{item.nombre}</Text>
-          <Text style={[P.dni, { color: colors.textMuted }]}>DNI {item.dni}  ·  ID {item.id}</Text>
-        </View>
-        <View style={P.cardActions}>
+    <Swipeable ref={swipeableRef} renderRightActions={renderRightActions} renderLeftActions={renderLeftActions} overshootRight={false} overshootLeft={false} friction={2}>
+      <Animated.View style={[P.card, { backgroundColor: colors.bgCard, borderColor: colors.border, opacity: fade, transform: [{ scale }] }]}>
+        <View style={P.cardTop}>
+          <View style={[P.avatar, { backgroundColor: avatarColor + '20', borderColor: avatarColor + '40' }]}>
+            <Text style={[P.avatarText, { color: avatarColor }]}>{initials}</Text>
+          </View>
+          <View style={P.info}>
+            <Text style={[P.nombre, { color: colors.textPrimary }]}>{item.nombre}</Text>
+            <Text style={[P.dni, { color: colors.textMuted }]}>DNI {item.dni}  ·  ID {item.id}</Text>
+          </View>
           <View style={[P.badge, { backgroundColor: cfg.bg }]}>
             <Text style={[P.badgeText, { color: cfg.color }]}>{cfg.label}</Text>
           </View>
-          <TouchableOpacity style={[P.editBtn, { backgroundColor: 'rgba(79,142,247,0.1)', borderColor: 'rgba(79,142,247,0.2)' }]} onPress={() => onEditar(item)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="pencil-outline" size={15} color="#4F8EF7" />
-          </TouchableOpacity>
         </View>
-      </View>
-      <View style={[P.divider, { backgroundColor: colors.borderSubtle }]} />
-      <View style={P.details}>
-        {[{ icon: 'car-outline', val: vehiculoTexto }, { icon: 'call-outline', val: item.celular || '—' }, { icon: 'map-outline', val: zonaTexto }].map((d, i) => (
-          <View key={i} style={P.detailRow}>
-            <Ionicons name={d.icon as any} size={14} color={colors.textMuted} />
-            <Text style={[P.detailText, { color: colors.textSecondary }]}>{d.val}</Text>
-          </View>
-        ))}
-      </View>
-    </Animated.View>
+        <View style={[P.divider, { backgroundColor: colors.borderSubtle }]} />
+        <View style={P.details}>
+          {[{ icon: 'car-outline', val: vehiculoTexto }, { icon: 'call-outline', val: item.celular || '—' }, { icon: 'map-outline', val: zonaTexto }].map((d, i) => (
+            <View key={i} style={P.detailRow}>
+              <Ionicons name={d.icon as any} size={14} color={colors.textMuted} />
+              <Text style={[P.detailText, { color: colors.textSecondary }]}>{d.val}</Text>
+            </View>
+          ))}
+        </View>
+        <Text style={[P.swipeHint, { color: colors.textMuted }]}>← Deslizá para acciones</Text>
+      </Animated.View>
+    </Swipeable>
   );
 }
 
@@ -256,6 +304,7 @@ function ChoferCard({ item, index, onEditar }: { item: Chofer; index: number; on
 
 export default function PersonalScreen() {
   const { colors } = useTheme();
+  const toast = useToast();
   const [search, setSearch] = useState('');
   const [filtro, setFiltro] = useState<'todos' | 'TITULAR' | 'SUPLENTE' | 'COLECTADOR'>('todos');
   const [choferes, setChoferes] = useState<Chofer[]>([]);
@@ -310,10 +359,10 @@ export default function PersonalScreen() {
   const fabRotateInterp = fabRotate.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] });
 
   if (cargando) return (
-    <View style={[P.loader, { backgroundColor: colors.bg }]}>
-      <ActivityIndicator size="large" color="#4F8EF7" />
-      <Text style={[P.loaderText, { color: colors.textMuted }]}>Cargando personal...</Text>
-    </View>
+    <ScrollView style={[P.container, { backgroundColor: colors.bg }]} contentContainerStyle={P.content}
+      scrollEnabled={false}>
+      {[0, 1, 2, 3].map(i => <SkeletonChoferCard key={i} />)}
+    </ScrollView>
   );
 
   return (
@@ -343,9 +392,21 @@ export default function PersonalScreen() {
         <Text style={[P.count, { color: colors.textMuted }]}>{filtrados.length} chofer{filtrados.length !== 1 ? 'es' : ''}</Text>
         {filtrados.length === 0
           ? <View style={P.emptyState}><Ionicons name="people-outline" size={48} color={colors.borderSubtle} /><Text style={[P.emptyText, { color: colors.textMuted }]}>Sin resultados</Text></View>
-          : filtrados.map((c, i) => <ChoferCard key={c.id} item={c} index={i} onEditar={(ch) => { setChoferEditar(ch); setModalVisible(true); }} />)
-        }
-        <View style={{ height: 100 }} />
+          : filtrados.map((c, i) => <ChoferCard key={c.id} item={c} index={i}
+              onEditar={(ch) => { setChoferEditar(ch); setModalVisible(true); }}
+              onEliminar={(ch) => {
+                Alert.alert('Eliminar chofer', `¿Eliminar a ${ch.nombre}?`, [
+                  { text: 'Cancelar', style: 'cancel' },
+                  { text: 'Eliminar', style: 'destructive', onPress: async () => {
+                    const { error } = await supabase.from('Choferes').delete().eq('id', ch.id);
+                    if (error) { toast.error('No se pudo eliminar'); return; }
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    toast.success(`${ch.nombre} eliminado`);
+                  }},
+                ]);
+              }}
+            />)
+        }<View style={{ height: 100 }} />
       </ScrollView>
       <Animated.View style={[P.fab, { transform: [{ scale: fabScale }] }]}>
         <TouchableOpacity style={P.fabBtn} onPress={abrirAgregar} activeOpacity={0.85}>
@@ -384,6 +445,10 @@ const P = StyleSheet.create({
   editBtn: { width: 30, height: 30, borderRadius: 9, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
   divider: { height: 1, marginBottom: 14 }, details: { gap: 8 },
   detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8 }, detailText: { fontSize: 13, fontWeight: '500', flex: 1 },
+  swipeActions: { flexDirection: 'row', alignItems: 'center', paddingRight: 8, gap: 8, marginBottom: 12 },
+  swipeBtn: { borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', gap: 4 },
+  swipeBtnText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  swipeHint: { fontSize: 10, fontWeight: '500', textAlign: 'right', marginTop: 8, opacity: 0.6 },
   fab: { position: 'absolute', bottom: 28, right: 20 },
   fabBtn: { width: 58, height: 58, borderRadius: 18, backgroundColor: '#4F8EF7', justifyContent: 'center', alignItems: 'center', shadowColor: '#4F8EF7', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 10 },
 });

@@ -18,12 +18,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/bottom-sheet';
 import { useTheme } from '../../lib/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { ADMIN_EMAIL } from '../../lib/constants';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false,
+    shouldPlaySound: true, shouldSetBadge: false,
     shouldShowBanner: true, shouldShowList: true,
   }),
 });
@@ -45,6 +47,7 @@ async function registerForPushNotificationsAsync(): Promise<Notifications.ExpoPu
 interface Chofer { id: number; orden?: number | null; nombre: string; dni: string; celular: string; direccion: string; fechaIngreso: string; zona: string[]; vehiculo: string[]; condicion: string; }
 interface Recorrido { id?: number; orden?: number | null; localidad: string; idChofer: number; chofer: string; pqteDia: number; porFuera: number; entregados: number; zona: string; }
 type ZonaKey = 'ZONA OESTE' | 'ZONA SUR' | 'ZONA NORTE' | 'CABA';
+type TipoDia = 'semana' | 'sabado';
 
 const ZONAS: ZonaKey[] = ['ZONA OESTE', 'ZONA SUR', 'ZONA NORTE', 'CABA'];
 const ZONA_COLORES: Record<ZonaKey, string> = { 'ZONA OESTE': '#3b82f6', 'ZONA SUR': '#10b981', 'ZONA NORTE': '#f59e0b', 'CABA': '#8b5cf6' };
@@ -59,7 +62,7 @@ const ordenNumerico = (o: number | null | undefined) => o == null || Number.isNa
 const compararRecorridoPorOrden = (a: Recorrido, b: Recorrido): number => { const d = ordenNumerico(a.orden) - ordenNumerico(b.orden); if (d !== 0) return d; return (a.id ?? Number.MAX_SAFE_INTEGER) - (b.id ?? Number.MAX_SAFE_INTEGER); };
 const ordenarChoferesPorOrden = (lista: Chofer[]): Chofer[] => [...lista].sort((a, b) => { const d = ordenNumerico(a.orden) - ordenNumerico(b.orden); return d !== 0 ? d : a.id - b.id; });
 
-// ─── SelectorChips ────────────────────────────────────────────────────────────
+// ─── SelectorChips (sin cambios) ──────────────────────────────────────────────
 
 interface SelectorChipsProps { opciones: string[]; seleccionados: string | string[]; multi?: boolean; onToggle: (valor: string) => void; colorActivo?: string; }
 const SelectorChips: React.FC<SelectorChipsProps> = ({ opciones, seleccionados, multi = false, onToggle, colorActivo = '#3b82f6' }) => {
@@ -76,7 +79,7 @@ const SelectorChips: React.FC<SelectorChipsProps> = ({ opciones, seleccionados, 
   );
 };
 
-// ─── TablaZona ────────────────────────────────────────────────────────────────
+// ─── TablaZona (sin cambios) ──────────────────────────────────────────────────
 
 interface TablaZonaProps { zona: ZonaKey; datos: Recorrido[]; choferes: Chofer[]; visible: boolean; onToggle: (zona: ZonaKey) => void; onActualizar: (zona: ZonaKey, index: number, campo: string, valor: string) => void; }
 const TablaZona: React.FC<TablaZonaProps> = ({ zona, datos, choferes, visible, onToggle, onActualizar }) => {
@@ -121,7 +124,7 @@ const TablaZona: React.FC<TablaZonaProps> = ({ zona, datos, choferes, visible, o
   );
 };
 
-// ─── ModalAgregarRecorrido ────────────────────────────────────────────────────
+// ─── ModalAgregarRecorrido (sin cambios) ──────────────────────────────────────
 
 interface ModalRecorridoProps { visible: boolean; onCerrar: () => void; onGuardar: (zona: ZonaKey, localidad: string) => void; }
 const ModalAgregarRecorrido: React.FC<ModalRecorridoProps> = ({ visible, onCerrar, onGuardar }) => {
@@ -133,65 +136,104 @@ const ModalAgregarRecorrido: React.FC<ModalRecorridoProps> = ({ visible, onCerra
   const cerrar = () => { resetear(); onCerrar(); };
   const confirmar = () => { if (!zonaSeleccionada || !localidad.trim()) { Alert.alert('Campo vacío', 'Ingresá una localidad para continuar.'); return; } onGuardar(zonaSeleccionada, localidad.trim()); resetear(); };
 
+  const bottomSheetRef = useRef<BottomSheetModal>(null);
+  const snapPoints = React.useMemo(() => ['50%', '85%'], []);
+  const renderBackdrop = React.useCallback(
+    (props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} opacity={0.6} />,
+    []
+  );
+
+  useEffect(() => {
+    if (visible) {
+      bottomSheetRef.current?.present();
+    } else {
+      bottomSheetRef.current?.dismiss();
+    }
+  }, [visible]);
+
   return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={S.modalOverlay}>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={cerrar} />
-          <View style={[S.bottomSheet, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
-            <View style={[S.modalHeader, { borderBottomColor: colors.border }]}>
-              <View>
-                <Text style={[S.modalTitulo, { color: colors.textPrimary }]}>{paso === 1 ? 'Nueva fila de recorrido' : zonaSeleccionada}</Text>
-                <Text style={[S.modalSubtitulo, { color: colors.textMuted }]}>{paso === 1 ? 'Seleccioná la tabla de destino' : 'Completá los datos de la ruta'}</Text>
-              </View>
-              <TouchableOpacity onPress={cerrar} style={[S.botonCerrar, { backgroundColor: colors.bgInput }]}>
-                <Ionicons name="close" size={16} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-            {paso === 1 && (
-              <View style={S.gridZonas}>
-                {ZONAS.map(zona => {
-                  const color = ZONA_COLORES[zona];
-                  return (
-                    <TouchableOpacity key={zona} style={[S.botonZona, { backgroundColor: colors.bgInput, borderColor: color + '55' }]} onPress={() => { setZonaSeleccionada(zona); setPaso(2); }} activeOpacity={0.75}>
-                      <Text style={S.botonZonaIcono}>{ZONA_ICONOS[zona]}</Text>
-                      <Text style={[S.botonZonaTexto, { color }]}>{zona}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-            {paso === 2 && zonaSeleccionada && (
-              <View>
-                <TouchableOpacity onPress={() => setPaso(1)} style={S.botonVolver}>
-                  <Ionicons name="arrow-back" size={14} color="#60a5fa" style={{ marginRight: 4 }} />
-                  <Text style={S.botonVolverTexto}>Cambiar zona</Text>
-                </TouchableOpacity>
-                <View style={[S.zonaBadgeGrande, { backgroundColor: ZONA_COLORES[zonaSeleccionada] + '22', borderColor: ZONA_COLORES[zonaSeleccionada] + '66' }]}>
-                  <Text style={S.zonaBadgeGrandeIcono}>{ZONA_ICONOS[zonaSeleccionada]}</Text>
-                  <Text style={[S.zonaBadgeGrandeTexto, { color: ZONA_COLORES[zonaSeleccionada] }]}>{zonaSeleccionada}</Text>
-                </View>
-                <Text style={[S.label, { color: colors.textMuted }]}>LOCALIDAD / RUTA</Text>
-                <TextInput style={[S.inputFicha, { backgroundColor: colors.bg, color: colors.textPrimary, borderColor: colors.border }]} placeholder="Ej: Morón, Quilmes, etc." placeholderTextColor={colors.textPlaceholder} value={localidad} onChangeText={setLocalidad} autoFocus />
-                <Text style={[S.labelInfo, { color: colors.textMuted }]}>Se va a agregar una fila nueva a la tabla {zonaSeleccionada}.</Text>
-                <TouchableOpacity style={[S.botonGuardar, { backgroundColor: ZONA_COLORES[zonaSeleccionada], flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }]} onPress={confirmar}>
-                  <Text style={S.botonGuardarTexto}>Agregar fila</Text>
-                  <Ionicons name="arrow-forward" size={16} color="#fff" style={{ marginLeft: 8 }} />
-                </TouchableOpacity>
-              </View>
-            )}
+    <BottomSheetModal
+      ref={bottomSheetRef}
+      index={1}
+      snapPoints={snapPoints}
+      backdropComponent={renderBackdrop}
+      onDismiss={cerrar}
+      backgroundStyle={{ backgroundColor: colors.bgCard }}
+      handleIndicatorStyle={{ backgroundColor: colors.borderSubtle }}
+      enablePanDownToClose
+      keyboardBehavior="interactive"
+      keyboardBlurBehavior="restore"
+    >
+      <BottomSheetView style={{ flex: 1, paddingHorizontal: 20, paddingBottom: 40, paddingTop: 6 }}>
+        <View style={[S.modalHeader, { borderBottomColor: colors.border }]}>
+          <View>
+            <Text style={[S.modalTitulo, { color: colors.textPrimary }]}>{paso === 1 ? 'Nueva fila de recorrido' : zonaSeleccionada}</Text>
+            <Text style={[S.modalSubtitulo, { color: colors.textMuted }]}>{paso === 1 ? 'Seleccioná la tabla de destino' : 'Completá los datos de la ruta'}</Text>
           </View>
+          <TouchableOpacity onPress={cerrar} style={[S.botonCerrar, { backgroundColor: colors.bgInput }]}>
+            <Ionicons name="close" size={16} color={colors.textMuted} />
+          </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+        {paso === 1 && (
+          <View style={S.gridZonas}>
+            {ZONAS.map(zona => {
+              const color = ZONA_COLORES[zona];
+              return (
+                <TouchableOpacity key={zona} style={[S.botonZona, { backgroundColor: colors.bgInput, borderColor: color + '55' }]} onPress={() => { setZonaSeleccionada(zona); setPaso(2); }} activeOpacity={0.75}>
+                  <Text style={S.botonZonaIcono}>{ZONA_ICONOS[zona]}</Text>
+                  <Text style={[S.botonZonaTexto, { color }]}>{zona}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+        {paso === 2 && zonaSeleccionada && (
+          <View>
+            <TouchableOpacity onPress={() => setPaso(1)} style={S.botonVolver}>
+              <Ionicons name="arrow-back" size={14} color="#60a5fa" style={{ marginRight: 4 }} />
+              <Text style={S.botonVolverTexto}>Cambiar zona</Text>
+            </TouchableOpacity>
+            <View style={[S.zonaBadgeGrande, { backgroundColor: ZONA_COLORES[zonaSeleccionada] + '22', borderColor: ZONA_COLORES[zonaSeleccionada] + '66' }]}>
+              <Text style={S.zonaBadgeGrandeIcono}>{ZONA_ICONOS[zonaSeleccionada]}</Text>
+              <Text style={[S.zonaBadgeGrandeTexto, { color: ZONA_COLORES[zonaSeleccionada] }]}>{zonaSeleccionada}</Text>
+            </View>
+            <Text style={[S.label, { color: colors.textMuted }]}>LOCALIDAD / RUTA</Text>
+            <TextInput style={[S.inputFicha, { backgroundColor: colors.bg, color: colors.textPrimary, borderColor: colors.border }]} placeholder="Ej: Morón, Quilmes, etc." placeholderTextColor={colors.textPlaceholder} value={localidad} onChangeText={setLocalidad} autoFocus />
+            <Text style={[S.labelInfo, { color: colors.textMuted }]}>Se va a agregar una fila nueva a la tabla {zonaSeleccionada}.</Text>
+            <TouchableOpacity style={[S.botonGuardar, { backgroundColor: ZONA_COLORES[zonaSeleccionada], flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }]} onPress={confirmar}>
+              <Text style={S.botonGuardarTexto}>Agregar fila</Text>
+              <Ionicons name="arrow-forward" size={16} color="#fff" style={{ marginLeft: 8 }} />
+            </TouchableOpacity>
+          </View>
+        )}
+      </BottomSheetView>
+    </BottomSheetModal>
   );
 };
 
 // ─── RecorridosScreen ─────────────────────────────────────────────────────────
 
 export default function RecorridosScreen() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const router = useRouter();
+
+  // ── Autorización (Role Guard) ─────────────────────────────────────────────
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.email === ADMIN_EMAIL) {
+        setIsAuthorized(true);
+      } else {
+        setIsAuthorized(false);
+        router.replace('/(drawer)/Panel' as any);
+      }
+    });
+  }, [router]);
+
+  // ── Estado de pestañas ────────────────────────────────────────────────────
+  const [tipoDia, setTipoDia] = useState<TipoDia>('semana');
+
   const [choferes, setChoferes] = useState<Chofer[]>([]);
   const [recorridos, setRecorridos] = useState<Record<ZonaKey, Recorrido[]>>({ 'ZONA OESTE': [], 'ZONA SUR': [], 'ZONA NORTE': [], 'CABA': [] });
   const [zonasVisibles, setZonasVisibles] = useState<Record<ZonaKey, boolean>>({ 'ZONA OESTE': true, 'ZONA SUR': true, 'ZONA NORTE': true, 'CABA': true });
@@ -199,28 +241,60 @@ export default function RecorridosScreen() {
   const [modalRecorrido, setModalRecorrido] = useState(false);
   const [colectasPendientes, setColectasPendientes] = useState<number | null>(null);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Data fetching
+  // ─────────────────────────────────────────────────────────────────────────
+
   const refreshChoferes = useCallback(async () => {
-    try { const { data, error } = await supabase.from('Choferes').select('id, orden, nombre, dni, celular, direccion, fechaIngreso, zona, vehiculo, condicion').order('orden', { ascending: true, nullsFirst: false }); if (error) throw error; setChoferes(ordenarChoferesPorOrden(data || [])); } catch (err) { console.error('Error cargando choferes:', err); }
+    try {
+      const { data, error } = await supabase
+        .from('Choferes')
+        .select('id, orden, nombre, dni, celular, direccion, fechaIngreso, zona, vehiculo, condicion')
+        .order('orden', { ascending: true, nullsFirst: false });
+      if (error) throw error;
+      setChoferes(ordenarChoferesPorOrden(data || []));
+    } catch (err) { console.error('Error cargando choferes:', err); }
   }, []);
 
+  // refreshRecorridos depende de tipoDia: al cambiar la pestaña se recarga
   const refreshRecorridos = useCallback(async () => {
+    const tablaActiva = tipoDia === 'semana' ? 'Recorridos' : 'recorridos_sabados';
     try {
-      const { data, error } = await supabase.from('Recorridos').select('*').order('orden', { ascending: true, nullsFirst: false });
+      const { data, error } = await supabase
+        .from(tablaActiva)
+        .select('*')
+        .order('orden', { ascending: true, nullsFirst: false });
       if (error) throw error;
       const porZona: Record<ZonaKey, Recorrido[]> = { 'ZONA OESTE': [], 'ZONA SUR': [], 'ZONA NORTE': [], 'CABA': [] };
       (data || []).forEach(rec => { const zona = rec.zona as ZonaKey; if (zona in porZona) porZona[zona].push(rec); });
       (Object.keys(porZona) as ZonaKey[]).forEach(z => porZona[z].sort(compararRecorridoPorOrden));
       setRecorridos(porZona);
     } catch (err) { console.error('Error cargando recorridos:', err); }
-  }, []);
+  }, [tipoDia]); // ← se recrea (y por tanto re-ejecuta) al cambiar de pestaña
 
   const fetchColectasPendientes = useCallback(async () => {
-    try { const { data: { user } } = await supabase.auth.getUser(); if (!user?.email) return; const { count, error } = await supabase.from('Clientes').select('id', { count: 'exact', head: true }).eq('email_chofer', user.email).eq('completado', false); if (!error) setColectasPendientes(count ?? 0); } catch { }
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.email) return;
+      const { count, error } = await supabase
+        .from('Clientes')
+        .select('id', { count: 'exact', head: true })
+        .eq('email_chofer', user.email)
+        .eq('completado', false);
+      if (!error) setColectasPendientes(count ?? 0);
+    } catch { }
   }, []);
 
+  // Carga inicial + re-carga automática cuando cambia la pestaña
   useEffect(() => {
-    refreshChoferes(); refreshRecorridos(); fetchColectasPendientes();
+    refreshChoferes();
+    refreshRecorridos();
+    fetchColectasPendientes();
   }, [refreshChoferes, refreshRecorridos, fetchColectasPendientes]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Push notifications
+  // ─────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const responseListener = Notifications.addNotificationResponseReceivedListener(response => {
@@ -241,75 +315,196 @@ export default function RecorridosScreen() {
     return () => { responseListener.remove(); };
   }, [router]);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Realtime — escucha AMBAS tablas + Choferes
+  // ─────────────────────────────────────────────────────────────────────────
+
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    const schedule = (fn: () => void) => { if (debounceRef.current) clearTimeout(debounceRef.current); debounceRef.current = setTimeout(fn, 320); };
-    const channel = supabase.channel('logistica-public-sync')
+    const schedule = (fn: () => void) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(fn, 320);
+    };
+
+    const channel = supabase
+      .channel('logistica-public-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'Recorridos' }, () => schedule(refreshRecorridos))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'recorridos_sabados' }, () => schedule(refreshRecorridos))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'Choferes' }, () => schedule(refreshChoferes))
       .subscribe();
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); void supabase.removeChannel(channel); };
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      void supabase.removeChannel(channel);
+    };
   }, [refreshRecorridos, refreshChoferes]);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Mutaciones — usan tablaActiva dinámicamente
+  // ─────────────────────────────────────────────────────────────────────────
+
   const actualizarRecorrido = async (zona: ZonaKey, index: number, campo: string, valor: string) => {
+    const tablaActiva = tipoDia === 'semana' ? 'Recorridos' : 'recorridos_sabados';
     const anterior = recorridos[zona][index];
     const copia = { ...anterior };
-    if (['pqteDia', 'porFuera', 'entregados'].includes(campo)) (copia as any)[campo] = parseInt(valor) || 0;
-    else if (campo === 'idChofer') { copia.idChofer = parseInt(valor) || 0; copia.chofer = choferes.find(c => c.id === copia.idChofer)?.nombre ?? 'Sin Asignar'; }
-    else (copia as any)[campo] = valor;
+
+    if (['pqteDia', 'porFuera', 'entregados'].includes(campo)) {
+      (copia as any)[campo] = parseInt(valor) || 0;
+    } else if (campo === 'idChofer') {
+      copia.idChofer = parseInt(valor) || 0;
+      copia.chofer = choferes.find(c => c.id === copia.idChofer)?.nombre ?? 'Sin Asignar';
+    } else {
+      (copia as any)[campo] = valor;
+    }
+
+    // Optimistic update
     setRecorridos(prev => { const lista = [...prev[zona]]; lista[index] = copia; return { ...prev, [zona]: lista }; });
+
     try {
       const idDb = anterior.id;
       const payload: Record<string, any> = { [campo]: (copia as any)[campo] };
       if (campo === 'idChofer') payload['chofer'] = copia.chofer;
-      const query = idDb ? supabase.from('Recorridos').update(payload).eq('id', idDb) : supabase.from('Recorridos').update(payload).match({ zona, localidad: copia.localidad });
+
+      const query = idDb
+        ? supabase.from(tablaActiva).update(payload).eq('id', idDb)
+        : supabase.from(tablaActiva).update(payload).match({ zona, localidad: copia.localidad });
+
       const { error } = await query;
       if (error) throw error;
-    } catch (err) { console.error('Error actualizando recorrido:', err); setRecorridos(prev => { const lista = [...prev[zona]]; lista[index] = anterior; return { ...prev, [zona]: lista }; }); }
+    } catch (err) {
+      console.error('Error actualizando recorrido:', err);
+      // Rollback
+      setRecorridos(prev => { const lista = [...prev[zona]]; lista[index] = anterior; return { ...prev, [zona]: lista }; });
+    }
   };
 
   const agregarRecorrido = async (zona: ZonaKey, localidad: string) => {
+    const tablaActiva = tipoDia === 'semana' ? 'Recorridos' : 'recorridos_sabados';
     const nuevo = { zona, localidad, idChofer: 0, chofer: 'Sin Asignar', pqteDia: 0, porFuera: 0, entregados: 0 };
     setRecorridos(prev => ({ ...prev, [zona]: [...prev[zona], nuevo].sort(compararRecorridoPorOrden) }));
     setModalRecorrido(false);
-    try { await supabase.from('Recorridos').insert([nuevo]); } catch (err) { console.error('Error insertando recorrido:', err); }
+    try { await supabase.from(tablaActiva).insert([nuevo]); } catch (err) { console.error('Error insertando recorrido:', err); }
   };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────
+
+  if (isAuthorized !== true) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
 
   return (
     <View style={[S.root, { backgroundColor: colors.bg }]}>
+
+      {/* Widget colectas pendientes — sin cambios */}
       {colectasPendientes != null && colectasPendientes > 0 && (
         <View style={[S.widgetColectas, { backgroundColor: colors.bgCard, borderColor: `${colors.blue}59` }]}>
           <View style={S.widgetLeft}>
             <Ionicons name="archive-outline" size={26} color={colors.blue} />
             <View style={{ flex: 1 }}>
-              <Text style={[S.widgetTitle, { color: colors.textPrimary }]} numberOfLines={1}>{colectasPendientes} colecta{colectasPendientes !== 1 ? 's' : ''} pendiente{colectasPendientes !== 1 ? 's' : ''} hoy</Text>
+              <Text style={[S.widgetTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+                {colectasPendientes} colecta{colectasPendientes !== 1 ? 's' : ''} pendiente{colectasPendientes !== 1 ? 's' : ''} hoy
+              </Text>
               <Text style={[S.widgetSub, { color: colors.textMuted }]}>Tu lista te espera</Text>
             </View>
           </View>
-          <TouchableOpacity style={[S.widgetBtn, { backgroundColor: colors.blue }]} onPress={() => router.push('/(drawer)/colectas' as any)} activeOpacity={0.8}>
+          <TouchableOpacity
+            style={[S.widgetBtn, { backgroundColor: colors.blue }]}
+            onPress={() => router.push('/(drawer)/colectas' as any)}
+            activeOpacity={0.8}
+          >
             <Text style={S.widgetBtnText}>Ver</Text>
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Action bar — sin cambios */}
       <View style={S.actionBar}>
-        <TouchableOpacity onPress={() => setModalRecorrido(true)} style={[S.btnAccion, { backgroundColor: colors.blue }]} activeOpacity={0.8}>
+        <TouchableOpacity
+          onPress={() => setModalRecorrido(true)}
+          style={[S.btnAccion, { backgroundColor: colors.blue }]}
+          activeOpacity={0.8}
+        >
           <Ionicons name="add" size={18} color="#FFFFFF" />
           <Text style={S.btnAccionTexto}>Recorrido</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.push('/(drawer)/personal' as any)} style={[S.btnAccion, S.btnAccionSecundario, { backgroundColor: colors.blueSubtle, borderColor: `${colors.blue}4D` }]} activeOpacity={0.8}>
+        <TouchableOpacity
+          onPress={() => router.push('/(drawer)/personal' as any)}
+          style={[S.btnAccion, S.btnAccionSecundario, { backgroundColor: colors.blueSubtle, borderColor: `${colors.blue}4D` }]}
+          activeOpacity={0.8}
+        >
           <Ionicons name="person-add-outline" size={18} color={colors.blue} />
           <Text style={[S.btnAccionTexto, { color: colors.blue }]}>Chofer</Text>
         </TouchableOpacity>
       </View>
-      <ScrollView style={[S.container, { backgroundColor: colors.bg }]} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refrescando} onRefresh={async () => { setRefrescando(true); await Promise.all([refreshChoferes(), refreshRecorridos()]); setRefrescando(false); }} tintColor={colors.blue} colors={[colors.blue]} />}>
+
+      {/* ── Segmented Control ── */}
+      <View style={[S.tabsContainer, { backgroundColor: isDark ? '#0d1526' : colors.bgCard, borderColor: colors.border, borderWidth: 1 }]}>
+        <TouchableOpacity
+          style={[S.tabBtn, tipoDia === 'semana' && { backgroundColor: isDark ? '#3b82f6' : '#4F8EF7' }]}
+          onPress={() => setTipoDia('semana')}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name="calendar-outline"
+            size={13}
+            color={tipoDia === 'semana' ? '#FFFFFF' : (isDark ? 'rgba(255,255,255,0.5)' : colors.textMuted)}
+            style={{ marginRight: 5 }}
+          />
+          <Text style={[S.tabTexto, { color: tipoDia === 'semana' ? '#FFFFFF' : (isDark ? 'rgba(255,255,255,0.5)' : colors.textMuted) }]}>LUN — VIE</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[S.tabBtn, tipoDia === 'sabado' && { backgroundColor: isDark ? '#3b82f6' : '#4F8EF7' }]}
+          onPress={() => setTipoDia('sabado')}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name="sunny-outline"
+            size={13}
+            color={tipoDia === 'sabado' ? '#FFFFFF' : (isDark ? 'rgba(255,255,255,0.5)' : colors.textMuted)}
+            style={{ marginRight: 5 }}
+          />
+          <Text style={[S.tabTexto, { color: tipoDia === 'sabado' ? '#FFFFFF' : (isDark ? 'rgba(255,255,255,0.5)' : colors.textMuted) }]}>SÁBADOS</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Tablas de recorridos */}
+      <ScrollView
+        style={[S.container, { backgroundColor: colors.bg }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refrescando}
+            onRefresh={async () => {
+              setRefrescando(true);
+              await Promise.all([refreshChoferes(), refreshRecorridos()]);
+              setRefrescando(false);
+            }}
+            tintColor={colors.blue}
+            colors={[colors.blue]}
+          />
+        }
+      >
         {ZONAS.map(zona => (
-          <TablaZona key={zona} zona={zona} datos={recorridos[zona] || []} choferes={choferes} visible={zonasVisibles[zona]}
-            onToggle={z => setZonasVisibles(prev => ({ ...prev, [z]: !prev[z] }))} onActualizar={actualizarRecorrido} />
+          <TablaZona
+            key={zona}
+            zona={zona}
+            datos={recorridos[zona] || []}
+            choferes={choferes}
+            visible={zonasVisibles[zona]}
+            onToggle={z => setZonasVisibles(prev => ({ ...prev, [z]: !prev[z] }))}
+            onActualizar={actualizarRecorrido}
+          />
         ))}
         <View style={{ height: 80 }} />
       </ScrollView>
-      <ModalAgregarRecorrido visible={modalRecorrido} onCerrar={() => setModalRecorrido(false)} onGuardar={agregarRecorrido} />
+
+      <ModalAgregarRecorrido
+        visible={modalRecorrido}
+        onCerrar={() => setModalRecorrido(false)}
+        onGuardar={agregarRecorrido}
+      />
     </View>
   );
 }
@@ -317,21 +512,56 @@ export default function RecorridosScreen() {
 // ─── Estilos estáticos ────────────────────────────────────────────────────────
 
 const S = StyleSheet.create({
-  root: { flex: 1 }, container: { flex: 1, padding: 15 },
+  root: { flex: 1 },
+  container: { flex: 1, padding: 15 },
+
+  // Widget colectas
   widgetColectas: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderRadius: 16, marginHorizontal: 16, marginTop: 12, padding: 14, gap: 12 },
   widgetLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  widgetTitle: { fontSize: 13, fontWeight: '700' }, widgetSub: { fontSize: 11, marginTop: 2 },
-  widgetBtn: { borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10 }, widgetBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  widgetTitle: { fontSize: 13, fontWeight: '700' },
+  widgetSub: { fontSize: 11, marginTop: 2 },
+  widgetBtn: { borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10 },
+  widgetBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+
+  // Action bar
   actionBar: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
   btnAccion: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12 },
   btnAccionSecundario: { borderWidth: 1 },
   btnAccionTexto: { color: '#fff', fontWeight: '700', fontSize: 13 },
+
+  // ── Segmented Control ──────────────────────────────────────────────────────
+  tabsContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+  },
+  tabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 9,
+    backgroundColor: 'transparent',
+  },
+  tabTexto: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+
+  // Tablas
   tablaContainer: { marginBottom: 24 },
   zonaHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, paddingLeft: 12, borderLeftWidth: 3 },
   zonaHeader: { fontSize: 16, fontWeight: 'bold', flex: 1 },
-  zonaBadge: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 }, zonaBadgeTexto: { fontSize: 10, fontWeight: 'bold' },
+  zonaBadge: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  zonaBadgeTexto: { fontSize: 10, fontWeight: 'bold' },
   scrollHorizontal: { borderRadius: 10, borderWidth: 1 },
-  filaTabla: { flexDirection: 'row' }, filaHeader: {},
+  filaTabla: { flexDirection: 'row' },
+  filaHeader: {},
   celdaHeader: { width: 100, padding: 10, justifyContent: 'center', alignItems: 'center', borderBottomWidth: 1 },
   textoHeader: { fontSize: 10, fontWeight: 'bold', textAlign: 'center', letterSpacing: 0.5 },
   celda: { width: 100, padding: 10, justifyContent: 'center', alignItems: 'center', borderBottomWidth: 1 },
@@ -343,21 +573,27 @@ const S = StyleSheet.create({
   selectorRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, marginRight: 8, marginBottom: 8, borderWidth: 1 },
   chipTexto: { fontSize: 11, fontWeight: 'bold' },
-  botonGuardar: { padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 20 }, botonGuardarTexto: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
+  botonGuardar: { padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 20 },
+  botonGuardarTexto: { color: '#fff', fontWeight: 'bold', fontSize: 15 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   bottomSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 6, paddingBottom: 40, paddingHorizontal: 20, borderTopWidth: 1 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 16, borderBottomWidth: 1, marginBottom: 16 },
-  modalTitulo: { fontSize: 18, fontWeight: 'bold' }, modalSubtitulo: { fontSize: 12, marginTop: 3 },
+  modalTitulo: { fontSize: 18, fontWeight: 'bold' },
+  modalSubtitulo: { fontSize: 12, marginTop: 3 },
   botonCerrar: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   gridZonas: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: 4 },
   botonZona: { width: '48%', borderWidth: 1, borderRadius: 14, padding: 20, alignItems: 'center', marginBottom: 12 },
-  botonZonaIcono: { fontSize: 28, marginBottom: 8 }, botonZonaTexto: { fontSize: 14, fontWeight: 'bold' },
+  botonZonaIcono: { fontSize: 28, marginBottom: 8 },
+  botonZonaTexto: { fontSize: 14, fontWeight: 'bold' },
   botonVolver: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', marginBottom: 14, paddingVertical: 6, paddingHorizontal: 10 },
   botonVolverTexto: { color: '#60a5fa', fontSize: 13 },
   zonaBadgeGrande: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 16 },
-  zonaBadgeGrandeIcono: { fontSize: 20, marginRight: 8 }, zonaBadgeGrandeTexto: { fontSize: 15, fontWeight: 'bold' },
+  zonaBadgeGrandeIcono: { fontSize: 20, marginRight: 8 },
+  zonaBadgeGrandeTexto: { fontSize: 15, fontWeight: 'bold' },
   labelInfo: { fontSize: 11, marginTop: 10, marginBottom: 4, lineHeight: 16 },
-  fichaTecnica: { padding: 16 }, divisor: { height: 1, marginBottom: 14 }, fila: { flexDirection: 'row', marginBottom: 4 },
+  fichaTecnica: { padding: 16 },
+  divisor: { height: 1, marginBottom: 14 },
+  fila: { flexDirection: 'row', marginBottom: 4 },
   modalFullScreen: { flex: 1 },
   modalFullHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, paddingTop: Platform.OS === 'ios' ? 56 : 20, borderBottomWidth: 1 },
 });

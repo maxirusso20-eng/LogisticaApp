@@ -3,10 +3,15 @@
     "name": "LogisticaApp",
     "slug": "LogisticaApp",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "logisticaapp",
     "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F3F4F6"
+    },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
@@ -14,6 +19,13 @@
           "location",
           "fetch"
         ]
+      },
+      "splash": {
+        "backgroundColor": "#F3F4F6",
+        "dark": {
+          "backgroundColor": "#060B18",
+          "image": "./assets/images/splash-icon.png"
+        }
       }
     },
     "android": {
@@ -28,7 +40,14 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION"
-      ]
+      ],
+      "splash": {
+        "backgroundColor": "#F3F4F6",
+        "dark": {
+          "backgroundColor": "#060B18",
+          "image": "./assets/images/splash-icon.png"
+        }
+      }
     },
     "web": {
       "output": "static",
@@ -60,7 +79,8 @@
         {
           "cameraPermission": "La aplicación necesita acceso a la cámara para escanear los códigos QR de los paquetes."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,

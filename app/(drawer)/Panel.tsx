@@ -1,10 +1,14 @@
 // app/(drawer)/Panel.tsx
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     Animated,
+    AppState,
+    AppStateStatus,
     RefreshControl,
     ScrollView,
     StyleSheet,
@@ -13,16 +17,10 @@ import {
     View,
 } from 'react-native';
 import { getCondicionCfg, getSaludo, getZonaColor } from '../../lib/constants';
+import { SkeletonFilaRecorrido } from '../../lib/skeleton';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
-
-// Colores semánticos que NO dependen del tema (siempre iguales)
-const SEM = {
-    blue: '#4F8EF7',
-    amber: '#F59E0B',
-    green: '#34D399',
-    red: '#EF4444',
-};
+import { useToast } from '../../lib/toast';
 
 interface Recorrido {
     id: number;
@@ -48,6 +46,73 @@ interface ChoferInfo {
 const porcentajeDia = (r: Recorrido) => !r.pqteDia ? 0 : Math.min(100, ((r.entregados || 0) / r.pqteDia) * 100);
 const porcentajeFuera = (r: Recorrido) => !r.porFuera ? 0 : Math.min(100, ((r.entregadosFuera || 0) / r.porFuera) * 100);
 
+// ─── Offline Queue ──────────────────────────────────────────────────────────────────────
+
+const OFFLINE_KEY = '@offline_queue_recorridos';
+
+interface OfflineMutation {
+    id: number;
+    campo: 'entregados' | 'entregadosFuera';
+    valor: number;
+    timestamp: number;
+}
+
+async function leerCola(): Promise<OfflineMutation[]> {
+    try {
+        const raw = await AsyncStorage.getItem(OFFLINE_KEY);
+        return raw ? (JSON.parse(raw) as OfflineMutation[]) : [];
+    } catch {
+        return [];
+    }
+}
+
+async function guardarCola(cola: OfflineMutation[]): Promise<void> {
+    try {
+        await AsyncStorage.setItem(OFFLINE_KEY, JSON.stringify(cola));
+    } catch { }
+}
+
+async function encolarMutacion(mutation: OfflineMutation): Promise<void> {
+    const cola = await leerCola();
+    // Consolidar: si ya existe una mutación pendiente para id+campo, la reemplaza
+    const sin = cola.filter(m => !(m.id === mutation.id && m.campo === mutation.campo));
+    await guardarCola([...sin, mutation]);
+}
+
+async function flushCola(): Promise<{ ok: number; fail: number }> {
+    const cola = await leerCola();
+    if (cola.length === 0) return { ok: 0, fail: 0 };
+
+    let ok = 0;
+    const pendientes: OfflineMutation[] = [];
+
+    for (const m of cola) {
+        try {
+            const { error } = await supabase
+                .from('Recorridos')
+                .update({ [m.campo]: m.valor })
+                .eq('id', m.id);
+            if (error) throw error;
+            ok++;
+        } catch {
+            pendientes.push(m); // Re-encolar si sigue fallando
+        }
+    }
+
+    await guardarCola(pendientes);
+    return { ok, fail: pendientes.length };
+}
+
+const isNetworkError = (err: any): boolean => {
+    const msg: string = (err?.message || '').toLowerCase();
+    return (
+        err instanceof TypeError ||
+        msg.includes('network') ||
+        msg.includes('failed to fetch') ||
+        msg.includes('network request failed')
+    );
+};
+
 // ─── ContadorEntregados ───────────────────────────────────────────────────────
 
 interface ContadorEntregadosProps {
@@ -60,13 +125,14 @@ function ContadorEntregados({ label, total, entregados, color, guardando, onIncr
     const scaleAnim = useRef(new Animated.Value(1)).current;
     const restante = Math.max(0, total - entregados);
     const completo = total > 0 && entregados >= total;
-    const colorEf = completo ? SEM.green : color;
+    const colorEf = completo ? colors.green : color;
 
-    const pulse = () => {
-        Animated.sequence([
-            Animated.timing(scaleAnim, { toValue: 1.2, duration: 70, useNativeDriver: true }),
-            Animated.timing(scaleAnim, { toValue: 1, duration: 70, useNativeDriver: true }),
-        ]).start();
+    const onPress = (isIncrement: boolean) => {
+        if (isIncrement && (completo || guardando)) return;
+        if (!isIncrement && (entregados <= 0 || guardando)) return;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        if (isIncrement) { pulse(); onIncrement(); }
+        else { onDecrement(); }
     };
 
     return (
@@ -99,9 +165,9 @@ function ContadorEntregados({ label, total, entregados, color, guardando, onIncr
                     <Ionicons
                         name={completo ? 'checkmark-circle' : 'time-outline'}
                         size={11}
-                        color={completo ? SEM.green : colors.textMuted}
+                        color={completo ? colors.green : colors.textMuted}
                     />
-                    <Text style={[C.restText, { color: completo ? SEM.green : colors.textMuted }]}>
+                    <Text style={[C.restText, { color: completo ? colors.green : colors.textMuted }]}>
                         {completo ? 'Completo' : `${restante} restante${restante !== 1 ? 's' : ''}`}
                     </Text>
                 </View>
@@ -112,7 +178,7 @@ function ContadorEntregados({ label, total, entregados, color, guardando, onIncr
                     <TouchableOpacity
                         style={[C.btn, { backgroundColor: colors.bgInput, borderColor: colors.borderSubtle },
                         (entregados <= 0 || guardando) && C.btnDis]}
-                        onPress={() => { if (!guardando && entregados > 0) onDecrement(); }}
+                        onPress={() => onPress(false)}
                         disabled={entregados <= 0 || guardando}
                         activeOpacity={0.7}
                     >
@@ -126,7 +192,7 @@ function ContadorEntregados({ label, total, entregados, color, guardando, onIncr
                         { borderColor: colorEf + '50', backgroundColor: colorEf + '15' },
                         (completo || guardando) && C.btnDis,
                         ]}
-                        onPress={() => { if (!guardando && !completo) { pulse(); onIncrement(); } }}
+                        onPress={() => onPress(true)}
                         disabled={completo || guardando}
                         activeOpacity={0.7}
                     >
@@ -185,7 +251,7 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
             todoCompleto && { borderColor: 'rgba(52,211,153,0.3)', backgroundColor: colors.bgCard },
             { opacity: fade },
         ]}>
-            <View style={[S.filaAccent, { backgroundColor: todoCompleto ? SEM.green : colorZona }]} />
+            <View style={[S.filaAccent, { backgroundColor: todoCompleto ? colors.green : colorZona }]} />
 
             <View style={S.filaBody}>
                 <View style={S.filaHeader}>
@@ -199,7 +265,7 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
                     </View>
                     {todoCompleto && (
                         <View style={S.todoCompletoBadge}>
-                            <Ionicons name="checkmark-circle" size={13} color={SEM.green} />
+                            <Ionicons name="checkmark-circle" size={13} color={colors.green} />
                             <Text style={S.todoCompletoBadgeText}>Todo completo</Text>
                         </View>
                     )}
@@ -211,7 +277,7 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
                         <View style={[S.progressBg, { backgroundColor: colors.bg, borderColor: colors.borderSubtle }]}>
                             <View style={[S.progressFill, {
                                 width: `${pctDia}%` as any,
-                                backgroundColor: completoDia ? SEM.green : SEM.blue,
+                                backgroundColor: completoDia ? colors.green : colors.blue,
                             }]} />
                         </View>
                         <Text style={[S.progressPct, { color: colors.textMuted }]}>{pctDia.toFixed(0)}%</Text>
@@ -223,7 +289,7 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
                         <View style={[S.progressBg, { backgroundColor: colors.bg, borderColor: colors.borderSubtle }]}>
                             <View style={[S.progressFill, {
                                 width: `${pctFuera}%` as any,
-                                backgroundColor: completoFuera ? SEM.green : SEM.amber,
+                                backgroundColor: completoFuera ? colors.green : colors.amber,
                             }]} />
                         </View>
                         <Text style={[S.progressPct, { color: colors.textMuted }]}>{pctFuera.toFixed(0)}%</Text>
@@ -238,7 +304,7 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
                         label="DEL DÍA"
                         total={recorrido.pqteDia || 0}
                         entregados={recorrido.entregados || 0}
-                        color={SEM.blue}
+                        color={colors.blue}
                         guardando={isGuardando('entregados')}
                         onIncrement={() => cambiar('entregados', +1)}
                         onDecrement={() => cambiar('entregados', -1)}
@@ -248,7 +314,7 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
                         label="POR FUERA"
                         total={recorrido.porFuera || 0}
                         entregados={recorrido.entregadosFuera || 0}
-                        color={SEM.amber}
+                        color={colors.amber}
                         guardando={isGuardando('entregadosFuera')}
                         onIncrement={() => cambiar('entregadosFuera', +1)}
                         onDecrement={() => cambiar('entregadosFuera', -1)}
@@ -263,6 +329,7 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
 
 export default function PanelScreen() {
     const { colors } = useTheme();
+    const toast = useToast();
     const [recorridos, setRecorridos] = useState<Recorrido[]>([]);
     const [choferInfo, setChoferInfo] = useState<ChoferInfo | null>(null);
     const [cargando, setCargando] = useState(true);
@@ -319,19 +386,75 @@ export default function PanelScreen() {
         return () => { void supabase.removeChannel(channel); };
     }, [cargarDatos]);
 
+    // ─── Auto-sincronización al recuperar conectividad ───────────────────────────────
+    const [pendientesOffline, setPendientesOffline] = useState(0);
+    const appState = useRef<AppStateStatus>(AppState.currentState);
+    const sincronizando = useRef(false);
+
+    const intentarSync = useCallback(async () => {
+        if (sincronizando.current) return;
+        const cola = await leerCola();
+        if (cola.length === 0) return;
+
+        sincronizando.current = true;
+        const { ok, fail } = await flushCola();
+        sincronizando.current = false;
+
+        setPendientesOffline(fail);
+        if (ok > 0) {
+            // Recargar datos para que la UI refleje confirmación del servidor
+            cargarDatos();
+        }
+    }, [cargarDatos]);
+
+    useEffect(() => {
+        // Leer cola inicial al montar el componente
+        leerCola().then(q => setPendientesOffline(q.length));
+
+        const sub = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+            if (appState.current.match(/inactive|background/) && nextState === 'active') {
+                // App vuelve a primer plano → intentar vaciar la cola offline
+                intentarSync();
+            }
+            appState.current = nextState;
+        });
+
+        // También intentar sincronizar al montar (por si ya había cosas pendientes)
+        intentarSync();
+
+        return () => sub.remove();
+    }, [intentarSync]);
+
     const handleGuardar = useCallback(async (id: number, campo: 'entregados' | 'entregadosFuera', valor: number) => {
+        // 1. Actualización optimista inmediata
         setRecorridos(prev => prev.map(r => r.id === id ? { ...r, [campo]: valor } : r));
         setGuardandoCampo({ id, campo });
         try {
             const { error } = await supabase.from('Recorridos').update({ [campo]: valor }).eq('id', id);
             if (error) throw error;
+            // Éxito: si había una mutación pendiente para este campo, la removemos
+            const cola = await leerCola();
+            const nueva = cola.filter(m => !(m.id === id && m.campo === campo));
+            await guardarCola(nueva);
+            setPendientesOffline(nueva.length);
         } catch (err: any) {
-            await cargarDatos();
-            Alert.alert('Error', err?.message || 'No se pudo guardar. Verificá tu conexión.');
+            if (isNetworkError(err)) {
+                // 2. Error de red → encolar silenciosamente
+                await encolarMutacion({ id, campo, valor, timestamp: Date.now() });
+                const cola = await leerCola();
+                setPendientesOffline(cola.length);
+                toast.warning('Sin conexión — se guardará cuando vuelva internet');
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            } else {
+                // Error de base de datos u otro: revertir y notificar
+                await cargarDatos();
+                toast.error(err?.message || 'No se pudo guardar el dato.');
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            }
         } finally {
             setGuardandoCampo(null);
         }
-    }, [cargarDatos]);
+    }, [cargarDatos, toast]);
 
     const handleRefresh = () => { setRefrescando(true); cargarDatos(); };
 
@@ -341,10 +464,10 @@ export default function PanelScreen() {
 
     if (cargando) {
         return (
-            <View style={[S.loader, { backgroundColor: colors.bg }]}>
-                <ActivityIndicator size="large" color={SEM.blue} />
-                <Text style={[S.loaderText, { color: colors.textSecondary }]}>Cargando tu panel...</Text>
-            </View>
+            <ScrollView style={[S.container, { backgroundColor: colors.bg }]} contentContainerStyle={S.content}
+                scrollEnabled={false}>
+                {[0, 1, 2].map(i => <SkeletonFilaRecorrido key={i} />)}
+            </ScrollView>
         );
     }
 
@@ -363,7 +486,7 @@ export default function PanelScreen() {
     if (recorridos.length === 0) {
         return (
             <ScrollView style={[S.container, { backgroundColor: colors.bg }]} contentContainerStyle={S.content}
-                refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={SEM.blue} colors={[SEM.blue]} />}>
+                refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={colors.blue} colors={[colors.blue]} />}>
                 <GreetingBox saludo={saludo} choferInfo={choferInfo} totalPaquetes={0} totalEntregados={0} progreso={0} />
                 <View style={S.sinRutas}>
                     <Ionicons name="map-outline" size={52} color={colors.borderSubtle} />
@@ -379,9 +502,25 @@ export default function PanelScreen() {
     return (
         <ScrollView style={[S.container, { backgroundColor: colors.bg }]} contentContainerStyle={S.content}
             showsVerticalScrollIndicator={false}
-            refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={SEM.blue} colors={[SEM.blue]} />}>
+            refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={colors.blue} colors={[colors.blue]} />}>
             <GreetingBox saludo={saludo} choferInfo={choferInfo}
                 totalPaquetes={totalPaquetes} totalEntregados={totalEntregadosTodo} progreso={progresoGlobal} />
+
+            {/* Banner offline: solo visible si hay cambios pendientes de sincronizar */}
+            {pendientesOffline > 0 && (
+                <TouchableOpacity
+                    style={S.offlineBanner}
+                    onPress={intentarSync}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons name="cloud-offline-outline" size={16} color="#F59E0B" />
+                    <Text style={S.offlineBannerText}>
+                        {pendientesOffline} cambio{pendientesOffline !== 1 ? 's' : ''} pendiente{pendientesOffline !== 1 ? 's' : ''} — Tocá para sincronizar
+                    </Text>
+                    <Ionicons name="sync-outline" size={14} color="#F59E0B" />
+                </TouchableOpacity>
+            )}
+
             {recorridos.map((rec, i) => (
                 <FilaRecorrido key={rec.id} recorrido={rec} index={i}
                     onGuardar={handleGuardar} guardandoCampo={guardandoCampo} />
@@ -403,7 +542,7 @@ function GreetingBox({ saludo, choferInfo, totalPaquetes, totalEntregados, progr
         <View style={[S.greetingBox, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
             <View style={S.greetingTop}>
                 <View style={{ flex: 1 }}>
-                    <Text style={[S.greetingEyebrow, { color: SEM.blue }]}>PANEL DEL DÍA</Text>
+                    <Text style={[S.greetingEyebrow, { color: colors.blue }]}>PANEL DEL DÍA</Text>
                     <Text style={[S.greetingNombre, { color: colors.textPrimary }]}>
                         {saludo}, {choferInfo.nombre.split(' ')[0]} 👋
                     </Text>
@@ -418,11 +557,11 @@ function GreetingBox({ saludo, choferInfo, totalPaquetes, totalEntregados, progr
                     <Text style={[S.statLabel, { color: colors.textMuted }]}>Total</Text>
                 </View>
                 <View style={[S.statBox, { borderLeftWidth: 1, borderRightWidth: 1, borderColor: colors.borderSubtle }]}>
-                    <Text style={[S.statNum, { color: SEM.green }]}>{totalEntregados}</Text>
+                    <Text style={[S.statNum, { color: colors.green }]}>{totalEntregados}</Text>
                     <Text style={[S.statLabel, { color: colors.textMuted }]}>Entregados</Text>
                 </View>
                 <View style={S.statBox}>
-                    <Text style={[S.statNum, { color: restante > 0 ? SEM.amber : '#6B7280' }]}>{restante}</Text>
+                    <Text style={[S.statNum, { color: restante > 0 ? colors.amber : '#6B7280' }]}>{restante}</Text>
                     <Text style={[S.statLabel, { color: colors.textMuted }]}>Restantes</Text>
                 </View>
             </View>
@@ -431,7 +570,7 @@ function GreetingBox({ saludo, choferInfo, totalPaquetes, totalEntregados, progr
                     <View style={[S.progressBg, { flex: undefined, backgroundColor: colors.bg, borderColor: colors.borderSubtle }]}>
                         <View style={[S.progressFill, {
                             width: `${progreso * 100}%` as any,
-                            backgroundColor: progreso >= 1 ? SEM.green : SEM.blue,
+                            backgroundColor: progreso >= 1 ? colors.green : colors.blue,
                         }]} />
                     </View>
                     <View style={S.progressFooter}>
@@ -440,7 +579,7 @@ function GreetingBox({ saludo, choferInfo, totalPaquetes, totalEntregados, progr
                         </Text>
                         {progreso >= 1 && (
                             <View style={S.completadoBadge}>
-                                <Ionicons name="checkmark-circle" size={11} color={SEM.green} />
+                                <Ionicons name="checkmark-circle" size={11} color={colors.green} />
                                 <Text style={S.completadoText}>¡Día completo!</Text>
                             </View>
                         )}
@@ -518,4 +657,14 @@ const S = StyleSheet.create({
     progressPct: { fontSize: 9, fontWeight: '700', width: 28, textAlign: 'right' },
     contadoresRow: { flexDirection: 'row', borderRadius: 14, overflow: 'hidden', borderWidth: 1, marginTop: 12 },
     contadoresDivisor: { width: 1 },
+    offlineBanner: {
+        flexDirection: 'row', alignItems: 'center', gap: 8,
+        backgroundColor: 'rgba(245,158,11,0.10)',
+        borderWidth: 1, borderColor: 'rgba(245,158,11,0.30)',
+        borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10,
+        marginBottom: 12,
+    },
+    offlineBannerText: {
+        flex: 1, color: '#F59E0B', fontSize: 12, fontWeight: '700',
+    },
 });

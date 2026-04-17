@@ -114,8 +114,8 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue>({
   isDark: true,
   colors: DARK,
-  toggleTheme: () => {},
-  setTheme: () => {},
+  toggleTheme: () => { },
+  setTheme: () => { },
 });
 
 const STORAGE_KEY = 'app_theme_isDark';
@@ -142,7 +142,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const setTheme = useCallback((dark: boolean) => {
     setIsDark(dark);
-    AsyncStorage.setItem(STORAGE_KEY, dark ? 'true' : 'false').catch(() => {});
+    AsyncStorage.setItem(STORAGE_KEY, dark ? 'true' : 'false').catch(() => { });
   }, []);
 
   const toggleTheme = useCallback(() => {
@@ -167,3 +167,4 @@ export function useTheme(): ThemeContextValue {
 
 // Re-export paletas para uso en StyleSheet estático (si fuera necesario)
 export { DARK as DARK_COLORS, LIGHT as LIGHT_COLORS };
+
