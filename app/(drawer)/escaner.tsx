@@ -122,11 +122,35 @@ export default function EscanerPantalla() {
 
     try {
       if (!data) throw new Error('Dirección vacía.');
+
+      // Validar que el contenido escaneado parezca una dirección.
+      // Rechazar: URLs (http/https), emails, WiFi QRs (WIFI:...),
+      // VCards (BEGIN:VCARD), y contenido muy corto (<5 chars).
+      const trimmed = data.trim();
+      if (trimmed.length < 5) throw new Error('El código no contiene una dirección válida.');
+      if (/^(https?:\/\/|mailto:|tel:|WIFI:|BEGIN:|geo:|MATMSG:|SMSTO:)/i.test(trimmed)) {
+        throw new Error('El código escaneado no es una dirección. Probá con otro QR.');
+      }
+
       if (!ORS_API_KEY) throw new Error('No hay API Key configurada (EXPO_PUBLIC_ORS_KEY).');
 
-      const response = await fetch(
-        `${ORS_URL}?api_key=${ORS_API_KEY}&text=${encodeURIComponent(data)}&boundary.country=AR`
-      );
+      // Timeout de 8s para que no cuelgue si ORS está lento
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+      let response: Response;
+      try {
+        response = await fetch(
+          `${ORS_URL}?api_key=${ORS_API_KEY}&text=${encodeURIComponent(trimmed)}&boundary.country=AR`,
+          { signal: controller.signal }
+        );
+      } catch (e: any) {
+        if (e.name === 'AbortError') throw new Error('La búsqueda tardó demasiado. Intentá de nuevo.');
+        throw new Error('Sin conexión. Verificá tu red.');
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
       if (!response.ok) throw new Error(`ORS devolvió status ${response.status}`);
 
       const featureCollection = await response.json();
@@ -141,7 +165,7 @@ export default function EscanerPantalla() {
       const choferId = userData.user.id;
 
       const { error: insertError } = await supabase.from('rutas_activas').insert([
-        { chofer_id: choferId, direccion: data, lat: latitud, lng: longitud, estado: 'pendiente' },
+        { chofer_id: choferId, direccion: trimmed, lat: latitud, lng: longitud, estado: 'pendiente' },
       ]);
       if (insertError) throw new Error('Error guardando el paquete en la base de datos.');
 
@@ -183,8 +207,8 @@ export default function EscanerPantalla() {
       <CameraView
         style={StyleSheet.absoluteFillObject}
         facing="back"
-        barcodeScannerSettings={{ 
-          barcodeTypes: ['qr', 'code128', 'pdf417', 'code39', 'ean13', 'upc_a'] 
+        barcodeScannerSettings={{
+          barcodeTypes: ['qr', 'code128', 'pdf417', 'code39', 'ean13', 'upc_a']
         }}
         onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
       />
@@ -235,9 +259,9 @@ export default function EscanerPantalla() {
               <TouchableOpacity onPress={handleVolver} style={[styles.backButton, { backgroundColor: backBtnBg }]}>
                 <Ionicons name="arrow-back" size={20} color={isDark ? '#FFF' : colors.blue} />
               </TouchableOpacity>
-              <Text style={[styles.headerText, { 
-                color: isDark ? '#FFF' : colors.blue, 
-                textShadowColor: isDark ? 'rgba(0,0,0,0.9)' : 'transparent' 
+              <Text style={[styles.headerText, {
+                color: isDark ? '#FFF' : colors.blue,
+                textShadowColor: isDark ? 'rgba(0,0,0,0.9)' : 'transparent'
               }]}>
                 Escanear paquete
               </Text>

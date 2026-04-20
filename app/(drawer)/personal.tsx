@@ -19,11 +19,11 @@ import {
   View,
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { BottomSheetModal, BottomSheetBackdrop, BottomSheetScrollView, BottomSheetView } from '@gorhom/bottom-sheet';
 import { SkeletonChoferCard } from '../../lib/skeleton';
-import { useTheme } from '../../lib/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { useTheme } from '../../lib/ThemeContext';
 import { useToast } from '../../lib/toast';
+import { useRoleGuard } from '../_hooks/useRoleGuard';
 
 interface Chofer {
   id: number; nombre: string; dni: string; celular: string; condicion: string;
@@ -153,7 +153,7 @@ const ModalChofer: React.FC<ModalChoferProps> = ({ visible, choferEditar, onCerr
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [guardando, setGuardando] = useState(false);
   const formDefault = (): FormChofer => ({ id: '', nombre: '', dni: '', celular: '', direccion: '', fechaIngreso: '', zona: [], vehiculo: [], condicion: 'SUPLENTE' });
-  
+
   // Aquí esquivamos el bug del React Compiler renombrando a formData
   const [formData, setFormData] = useState<FormChofer>(formDefault());
 
@@ -305,6 +305,7 @@ function ChoferCard({ item, index, onEditar, onEliminar }: { item: Chofer; index
 export default function PersonalScreen() {
   const { colors } = useTheme();
   const toast = useToast();
+  const { autorizado, verificando } = useRoleGuard('admin');
   const [search, setSearch] = useState('');
   const [filtro, setFiltro] = useState<'todos' | 'TITULAR' | 'SUPLENTE' | 'COLECTADOR'>('todos');
   const [choferes, setChoferes] = useState<Chofer[]>([]);
@@ -358,6 +359,15 @@ export default function PersonalScreen() {
 
   const fabRotateInterp = fabRotate.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] });
 
+  // Role guard: si el usuario no es admin, el hook ya redirigió a /Panel
+  if (verificando) return (
+    <ScrollView style={[P.container, { backgroundColor: colors.bg }]} contentContainerStyle={P.content}
+      scrollEnabled={false}>
+      {[0, 1, 2, 3].map(i => <SkeletonChoferCard key={i} />)}
+    </ScrollView>
+  );
+  if (!autorizado) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
+
   if (cargando) return (
     <ScrollView style={[P.container, { backgroundColor: colors.bg }]} contentContainerStyle={P.content}
       scrollEnabled={false}>
@@ -393,19 +403,21 @@ export default function PersonalScreen() {
         {filtrados.length === 0
           ? <View style={P.emptyState}><Ionicons name="people-outline" size={48} color={colors.borderSubtle} /><Text style={[P.emptyText, { color: colors.textMuted }]}>Sin resultados</Text></View>
           : filtrados.map((c, i) => <ChoferCard key={c.id} item={c} index={i}
-              onEditar={(ch) => { setChoferEditar(ch); setModalVisible(true); }}
-              onEliminar={(ch) => {
-                Alert.alert('Eliminar chofer', `¿Eliminar a ${ch.nombre}?`, [
-                  { text: 'Cancelar', style: 'cancel' },
-                  { text: 'Eliminar', style: 'destructive', onPress: async () => {
+            onEditar={(ch) => { setChoferEditar(ch); setModalVisible(true); }}
+            onEliminar={(ch) => {
+              Alert.alert('Eliminar chofer', `¿Eliminar a ${ch.nombre}?`, [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Eliminar', style: 'destructive', onPress: async () => {
                     const { error } = await supabase.from('Choferes').delete().eq('id', ch.id);
                     if (error) { toast.error('No se pudo eliminar'); return; }
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                     toast.success(`${ch.nombre} eliminado`);
-                  }},
-                ]);
-              }}
-            />)
+                  }
+                },
+              ]);
+            }}
+          />)
         }<View style={{ height: 100 }} />
       </ScrollView>
       <Animated.View style={[P.fab, { transform: [{ scale: fabScale }] }]}>

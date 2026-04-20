@@ -127,6 +127,13 @@ function ContadorEntregados({ label, total, entregados, color, guardando, onIncr
     const completo = total > 0 && entregados >= total;
     const colorEf = completo ? colors.green : color;
 
+    const pulse = () => {
+        Animated.sequence([
+            Animated.timing(scaleAnim, { toValue: 1.15, duration: 100, useNativeDriver: true }),
+            Animated.timing(scaleAnim, { toValue: 1, duration: 100, useNativeDriver: true })
+        ]).start();
+    };
+
     const onPress = (isIncrement: boolean) => {
         if (isIncrement && (completo || guardando)) return;
         if (!isIncrement && (entregados <= 0 || guardando)) return;

@@ -18,7 +18,7 @@ import {
 import MapView, { Marker, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../lib/ThemeContext';
-import { startTracking } from '../../lib/locationTracker';
+import { startTracking, stopTracking } from '../../lib/locationTracker';
 import { supabase } from '../../lib/supabase';
 import { useMapaData } from '../_hooks/useMapaData';
 
@@ -215,13 +215,10 @@ export default function MapaScreen() {
       mapRef.current.animateCamera({ zoom: camera.zoom + (isZoomIn ? 1 : -1) });
   };
 
-  // ── GPS: singleton via locationTracker ──────────────────────────────────
-  // Antes: mapa.tsx tenía su propio watchPositionAsync que duplicaba el
-  // tracker de colectas.tsx → dos watchers escribiendo en Supabase al mismo
-  // tiempo cuando ambas pantallas estaban activas en el drawer.
-  // Ahora: startTracking() del singleton maneja todo (watchPositionAsync +
-  // update a Supabase). Si ya está corriendo desde colectas, esta llamada
-  // es un no-op. stopTracking() solo detiene si nadie más lo necesita.
+  // ── GPS: singleton via locationTracker (ref-counted) ─────────────────────
+  // startTracking incrementa el ref count, stopTracking lo decrementa.
+  // El watcher real solo se detiene cuando ref count llega a 0, así que
+  // si colectas también lo usa, mapa puede desmontarse sin romperlo.
   useEffect(() => {
     let montado = true;
     const iniciar = async () => {
@@ -235,7 +232,7 @@ export default function MapaScreen() {
           if (montado) setMiUbicacion({ latitud: pos.coords.latitude, longitud: pos.coords.longitude });
         } catch { }
 
-        // Delegar el tracking a locationTracker (singleton compartido con colectas)
+        // Delegar al tracker singleton (ref-counted)
         const ok = await startTracking(user.email);
         if (!ok && montado) setErrorPermiso('GPS no disponible en este modo. El mapa sigue activo.');
       } catch (err) {
@@ -246,8 +243,9 @@ export default function MapaScreen() {
     iniciar();
     return () => {
       montado = false;
-      // No detener el tracker al salir del mapa: colectas puede seguir usándolo.
-      // stopTracking() se llama solo desde colectas.tsx al desmontar.
+      // Balance del startTracking: decrementa el ref count.
+      // Si colectas.tsx también incrementó, el watcher sigue vivo.
+      stopTracking().catch(() => { });
     };
   }, []);
 

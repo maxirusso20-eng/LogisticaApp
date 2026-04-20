@@ -18,7 +18,6 @@ import { ADMIN_EMAIL, APP_NAME, APP_VERSION } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 
-// Evitar que el splash screen se oculte automáticamente
 SplashScreen.preventAutoHideAsync();
 
 const lastSeenKey = (email: string) => `chat_last_seen_${email}`;
@@ -53,7 +52,11 @@ function useNombreChofer(miEmail: string, esAdmin: boolean | null): string {
   return nombre;
 }
 
-function useMensajesNoLeidos(miEmail: string, esAdmin: boolean | null, isChatActive: boolean): number {
+function useMensajesNoLeidos(
+  miEmail: string,
+  esAdmin: boolean | null,
+  isChatActive: boolean
+): number {
   const [noLeidos, setNoLeidos] = useState(0);
 
   const fetchCount = useCallback(async () => {
@@ -61,8 +64,11 @@ function useMensajesNoLeidos(miEmail: string, esAdmin: boolean | null, isChatAct
     try {
       const lastSeen = await AsyncStorage.getItem(lastSeenKey(miEmail));
       const desde = lastSeen ?? new Date(0).toISOString();
-      let query = supabase.from('mensajes').select('id', { count: 'exact', head: true })
-        .gt('created_at', desde).neq('remitente', 'Sistema');
+      let query = supabase
+        .from('mensajes')
+        .select('id', { count: 'exact', head: true })
+        .gt('created_at', desde)
+        .neq('remitente', 'Sistema');
       if (esAdmin) {
         query = query.neq('remitente', 'Admin');
       } else {
@@ -76,12 +82,14 @@ function useMensajesNoLeidos(miEmail: string, esAdmin: boolean | null, isChatAct
   useEffect(() => {
     if (!isChatActive || !miEmail) return;
     AsyncStorage.setItem(lastSeenKey(miEmail), new Date().toISOString())
-      .then(() => setNoLeidos(0)).catch(console.warn);
+      .then(() => setNoLeidos(0))
+      .catch(console.warn);
   }, [isChatActive, miEmail]);
 
   useEffect(() => {
     if (!isChatActive) fetchCount();
-    const canal = supabase.channel('badge-mensajes-noLeidos')
+    const canal = supabase
+      .channel('badge-mensajes-noLeidos')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensajes' },
         () => { if (!isChatActive) fetchCount(); })
       .subscribe();
@@ -112,20 +120,19 @@ function HeaderRight() {
   const { isDark, toggleTheme, colors } = useTheme();
 
   const handleLogout = () => {
-    Alert.alert('Cerrar Sesion', 'Estas seguro que deseas salir?', [
+    Alert.alert('Cerrar Sesion', '¿Estás seguro que deseás salir?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Salir', style: 'destructive', onPress: async () => {
           try { await supabase.auth.signOut(); router.replace('/login' as any); }
           catch { Alert.alert('Error', 'No se pudo cerrar la sesion.'); }
-        }
+        },
       },
     ]);
   };
 
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-      {/* Botón toggle tema — solo en header, ya no en el drawer */}
       <TouchableOpacity
         onPress={toggleTheme}
         style={[styles.headerBtn, styles.themeBtn]}
@@ -178,6 +185,14 @@ function DrawerContent(props: any) {
   return (
     <View style={[drawerStyles.container, { backgroundColor: colors.bgDrawer }]}>
 
+      {/* ── Handle visual de deslizamiento ─────────────────────────────────
+          Indica al usuario que puede deslizar para cerrar el drawer.
+          Posicionado en la parte superior con un pequeño margen negativo
+          para que "flote" visualmente sobre el borde redondeado. */}
+      <View style={drawerStyles.handleWrap}>
+        <View style={[drawerStyles.handle, { backgroundColor: colors.borderSubtle }]} />
+      </View>
+
       {/* Header del drawer */}
       <View style={drawerStyles.header}>
         <View style={[drawerStyles.logoBox, { backgroundColor: colors.blueSubtle, borderColor: `${colors.blue}33` }]}>
@@ -186,7 +201,9 @@ function DrawerContent(props: any) {
         <Text style={[drawerStyles.brand, { color: colors.textPrimary }]}>{APP_NAME}</Text>
 
         {!esAdmin && nombreChofer ? (
-          <Text style={[drawerStyles.nombreChofer, { color: colors.textMuted }]}>{nombreChofer}</Text>
+          <Text style={[drawerStyles.nombreChofer, { color: colors.textMuted }]}>
+            {nombreChofer}
+          </Text>
         ) : null}
 
         <View style={drawerStyles.rolBadgeRow}>
@@ -265,11 +282,11 @@ function DrawerContent(props: any) {
         })}
       </View>
 
-      {/* Footer limpio — solo versión */}
+      {/* Footer — solo versión */}
       <View style={drawerStyles.footer}>
         <View style={[drawerStyles.divider, { backgroundColor: colors.borderSubtle }]} />
         <Text style={[drawerStyles.version, { color: colors.borderSubtle }]}>
-          v{APP_VERSION} - {new Date().getFullYear()}
+          v{APP_VERSION} · {new Date().getFullYear()}
         </Text>
       </View>
     </View>
@@ -282,21 +299,14 @@ export default function DrawerLayout() {
   const { esAdmin } = useEsAdmin();
   const { colors, isDark } = useTheme();
 
-  // Ocultar splash nativo cuando el rol Y el tema ya están disponibles
   useEffect(() => {
-    if (esAdmin !== null) {
-      SplashScreen.hideAsync();
-    }
+    if (esAdmin !== null) SplashScreen.hideAsync();
   }, [esAdmin]);
 
-  // Splash inteligente: usa el color real del tema en lugar de devolver null,
-  // evitando el flash blanco en modo oscuro mientras se resuelve el rol.
+  // Splash inteligente — respeta el tema actual, evita flash blanco en modo oscuro
   if (esAdmin === null) {
     return (
-      <View style={[
-        splashStyles.container,
-        { backgroundColor: colors.bg },
-      ]}>
+      <View style={[splashStyles.container, { backgroundColor: colors.bg }]}>
         <View style={[
           splashStyles.iconBox,
           {
@@ -306,11 +316,7 @@ export default function DrawerLayout() {
         ]}>
           <Ionicons name="bus" size={44} color="#4F8EF7" />
         </View>
-        <ActivityIndicator
-          size="large"
-          color="#4F8EF7"
-          style={{ marginTop: 28 }}
-        />
+        <ActivityIndicator size="large" color="#4F8EF7" style={{ marginTop: 28 }} />
         <Text style={[
           splashStyles.loadingText,
           { color: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)' },
@@ -328,9 +334,23 @@ export default function DrawerLayout() {
       initialRouteName={rutaInicial}
       drawerContent={(props) => <DrawerContent {...props} />}
       screenOptions={{
-        drawerType: 'front',
+        // ── Gesture config ─────────────────────────────────────────────────
+        drawerType: 'front',       // drawer se superpone a la pantalla
+        swipeEnabled: true,          // deslizar desde el borde para abrir/cerrar
+        swipeEdgeWidth: 100,           // zona sensible al borde (px) — más fácil de activar
+        swipeMinDistance: 5,            // distancia mínima para detectar el gesto
+
+        // ── Estética del panel ─────────────────────────────────────────────
+        drawerStyle: {
+          width: 280,
+          backgroundColor: 'transparent', // el color lo pone DrawerContent
+          // Bordes redondeados solo del lado derecho (donde termina el drawer)
+          borderTopRightRadius: 24,
+          borderBottomRightRadius: 24,
+        },
+
+        // ── Header ─────────────────────────────────────────────────────────
         headerShown: true,
-        drawerStyle: { width: 280, backgroundColor: 'transparent' },
         headerStyle: {
           backgroundColor: colors.bgHeader,
           borderBottomWidth: 0,
@@ -341,6 +361,10 @@ export default function DrawerLayout() {
         headerLeft: () => <HeaderLeft />,
         headerRight: () => <HeaderRight />,
         headerTitleStyle: { fontWeight: '700', fontSize: 17, color: colors.textPrimary },
+
+        // ── Overlay ────────────────────────────────────────────────────────
+        // Oscurecer levemente el contenido detrás cuando el drawer está abierto
+        overlayColor: 'rgba(0,0,0,0.45)',
       }}
     >
       <Drawer.Screen name="index" options={{ title: 'Recorridos' }} />
@@ -369,29 +393,27 @@ const styles = StyleSheet.create({
 });
 
 const splashStyles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  iconBox: {
-    width: 82,
-    height: 82,
-    borderRadius: 24,
-    borderWidth: 1.5,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 14,
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-  },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  iconBox: { width: 82, height: 82, borderRadius: 24, borderWidth: 1.5, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 14, fontSize: 12, fontWeight: '600', letterSpacing: 0.5 },
 });
 
 const drawerStyles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 56 },
+  container: { flex: 1, paddingTop: 44 },
+
+  // ── Handle visual ──────────────────────────────────────────────────────────
+  handleWrap: {
+    alignItems: 'center',
+    paddingBottom: 14,
+    // Posicionarlo sobre el borde redondeado superior
+    marginTop: -4,
+  },
+  handle: {
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+  },
+
   header: { paddingHorizontal: 24, paddingBottom: 20, alignItems: 'flex-start' },
   logoBox: { width: 54, height: 54, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 14, borderWidth: 1 },
   brand: { fontSize: 18, fontWeight: '800', letterSpacing: -0.2 },
@@ -409,7 +431,6 @@ const drawerStyles = StyleSheet.create({
   iconBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
   labelBadge: { backgroundColor: '#EF4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5, marginRight: 12 },
   labelBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
-  // Footer simplificado — sin toggle de tema (está en el header)
   footer: { position: 'absolute', bottom: 40, left: 0, right: 0 },
   version: { textAlign: 'center', fontSize: 11, fontWeight: '600', marginTop: 8 },
 });

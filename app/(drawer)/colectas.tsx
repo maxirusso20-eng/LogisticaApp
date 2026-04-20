@@ -1,11 +1,13 @@
 // app/(drawer)/colectas.tsx
 import { Ionicons } from '@expo/vector-icons';
+import { BottomSheetBackdrop, BottomSheetModal } from '@gorhom/bottom-sheet';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
-import SignatureScreen from 'react-native-signature-canvas';
-import { BottomSheetModal, BottomSheetBackdrop } from '@gorhom/bottom-sheet';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -21,7 +23,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import * as Location from 'expo-location';
+import SignatureScreen from 'react-native-signature-canvas';
 import { ADMIN_EMAIL, getSaludo } from '../../lib/constants';
 import { startTracking, stopTracking } from '../../lib/locationTracker';
 import { SkeletonColectaCard } from '../../lib/skeleton';
@@ -33,6 +35,24 @@ const ignorarNotificacionesCache = new Map<string, number>();
 const CACHE_TTL_MS = 5_000;
 const ORS_URL = 'https://api.openrouteservice.org/geocode/search';
 const ORS_API_KEY = process.env.EXPO_PUBLIC_ORS_KEY || '';
+
+/**
+ * Reduce fotos a 1024px de ancho + JPEG 75% antes de subir a Supabase.
+ * Antes: ~2-4MB por foto con cámara moderna (quality 0.7 no hace resize real)
+ * Ahora: ~150-300KB por foto — reducción de ~85% de storage.
+ */
+async function comprimirImagen(uri: string): Promise<string> {
+  try {
+    const result = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 1024 } }],
+      { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return result.uri;
+  } catch {
+    return uri;
+  }
+}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -57,7 +77,15 @@ async function enviarMensajeAutoChatColecta(emailChofer: string, nombreColecta: 
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { error } = await supabase.from('mensajes').insert([{ user_id: user.id, remitente: 'Sistema', texto: `🔔 Colecta recogida: ${nombreColecta}`, chofer_email: emailChofer }]);
+    const { error } = await supabase.from('mensajes').insert([{
+      user_id: user.id,
+      remitente: 'Sistema',
+      texto: `🔔 Colecta recogida: ${nombreColecta}`,
+      chofer_email: emailChofer,
+      visto_admin: false,
+      visto_chofer: true,
+      estado: 'enviado',
+    }]);
     if (error) console.warn('[Chat auto]', error.message);
   } catch (err) { console.warn('[Chat auto]', err); }
 }
@@ -83,10 +111,33 @@ const colectaVencida = (horario: string, completado: boolean): boolean => {
   return ahora.getHours() * 60 + ahora.getMinutes() >= m + 15;
 };
 const notificacionesVencidasEnviadas = new Set<string>();
+const VENCIDAS_KEY = '@notificaciones_vencidas_enviadas';
+
+// Hidratar el Set desde AsyncStorage al importar
+void (async () => {
+  try {
+    const raw = await AsyncStorage.getItem(VENCIDAS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { key: string; fecha: string }[];
+      const hoy = new Date().toDateString();
+      parsed.filter(e => e.fecha === hoy).forEach(e => notificacionesVencidasEnviadas.add(e.key));
+    }
+  } catch { }
+})();
+
+async function persistirVencida(key: string): Promise<void> {
+  try {
+    const hoy = new Date().toDateString();
+    const actuales = Array.from(notificacionesVencidasEnviadas).map(k => ({ key: k, fecha: hoy }));
+    await AsyncStorage.setItem(VENCIDAS_KEY, JSON.stringify(actuales));
+  } catch { }
+}
+
 async function notificarColectaVencida(clienteNombre: string, emailChofer: string): Promise<void> {
   const key = `${clienteNombre}-${new Date().toDateString()}`;
   if (notificacionesVencidasEnviadas.has(key)) return;
   notificacionesVencidasEnviadas.add(key);
+  void persistirVencida(key);
   try {
     const [{ data: cd }, { data: ad }] = await Promise.all([
       supabase.from('Choferes').select('push_token').eq('email', emailChofer).maybeSingle(),
@@ -100,7 +151,7 @@ async function notificarColectaVencida(clienteNombre: string, emailChofer: strin
 const abrirMapa = async (direccion: string) => {
   if (!direccion) return;
   const u = encodeURIComponent(direccion);
-  
+
   // URLs nativas y de navegador (plan B)
   const urlIos = `maps:0,0?q=${u}`;
   const urlAndroid = `geo:0,0?q=${u}`;
@@ -151,11 +202,13 @@ function FotoColecta({ clienteId, fotoUrl, vencida, done }: {
   const sacarFoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Sin permiso', 'Necesitás permitir el acceso a la cámara.'); return; }
-    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7, allowsEditing: false });
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 1, allowsEditing: false });
     if (result.canceled || !result.assets[0]) return;
     setSubiendo(true);
     try {
-      const blob = await (await fetch(result.assets[0].uri)).blob();
+      // Comprimir antes de subir: 1024px + JPEG 75% → ~150-300KB
+      const uriComprimida = await comprimirImagen(result.assets[0].uri);
+      const blob = await (await fetch(uriComprimida)).blob();
       const filePath = `colectas/${String(clienteId)}_${Date.now()}.jpg`;
       const { error: ue } = await supabase.storage.from('fotos-colectas').upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
       if (ue) throw ue;
@@ -312,8 +365,8 @@ function FirmaColecta({ clienteId, firmaUrl, vencida, done }: {
           <Text style={[ST.fotoLabel, { color: colors.textMuted }]}>✍️ Firma del cliente</Text>
           <Image source={{ uri: firmaLocal }} style={[ST.fotoPreview, { backgroundColor: colors.bgInput, borderColor: colors.border }]} contentFit="contain" transition={200} />
           <TouchableOpacity style={ST.fotoBtnReemplazar} onPress={() => sheetRef.current?.present()} disabled={subiendo}>
-             <Ionicons name="create-outline" size={13} color={colors.textMuted} />
-             <Text style={[ST.fotoBtnReemplazarText, { color: colors.textMuted }]}>Nueva firma</Text>
+            <Ionicons name="create-outline" size={13} color={colors.textMuted} />
+            <Text style={[ST.fotoBtnReemplazarText, { color: colors.textMuted }]}>Nueva firma</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -530,13 +583,13 @@ export default function ColectasScreen() {
 
           if (lat2 === 0 && ORS_API_KEY) {
             try {
-               const res = await fetch(`${ORS_URL}?api_key=${ORS_API_KEY}&text=${encodeURIComponent(c.direccion)}&boundary.country=AR`);
-               const payload = await res.json();
-               if (payload.features?.length > 0) {
-                  lon2 = payload.features[0].geometry.coordinates[0];
-                  lat2 = payload.features[0].geometry.coordinates[1];
-               }
-            } catch {}
+              const res = await fetch(`${ORS_URL}?api_key=${ORS_API_KEY}&text=${encodeURIComponent(c.direccion)}&boundary.country=AR`);
+              const payload = await res.json();
+              if (payload.features?.length > 0) {
+                lon2 = payload.features[0].geometry.coordinates[0];
+                lat2 = payload.features[0].geometry.coordinates[1];
+              }
+            } catch { }
             await new Promise(r => setTimeout(r, 200));
           }
         }
@@ -723,10 +776,10 @@ export default function ColectasScreen() {
       </View>
 
       {!esAdmin && (
-        <TouchableOpacity 
-          style={[ST.btnOptimization, { backgroundColor: colors.bgCard, borderColor: colors.blue }]} 
-          onPress={ordenarPorCercania} 
-          disabled={ordenandoGeo} 
+        <TouchableOpacity
+          style={[ST.btnOptimization, { backgroundColor: colors.bgCard, borderColor: colors.blue }]}
+          onPress={ordenarPorCercania}
+          disabled={ordenandoGeo}
           activeOpacity={0.7}
         >
           {ordenandoGeo ? <ActivityIndicator size="small" color={colors.blue} style={{ marginRight: 8 }} /> : <Ionicons name="location" size={16} color={colors.blue} style={{ marginRight: 8 }} />}
