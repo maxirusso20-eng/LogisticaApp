@@ -1,10 +1,12 @@
 // app/(drawer)/chat.tsx
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { decode } from 'base64-arraybuffer';
 import { Audio } from 'expo-av';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Image } from 'expo-image';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
@@ -27,9 +29,22 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { ADMIN_EMAIL, APP_NAME } from '../../lib/constants';
+import { APP_NAME } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
+
+// ─── Coordinadores ────────────────────────────────────────────────────────────
+// Deben coincidir con los de la web (src/components/PantallaChat.jsx)
+const COORDINADORES = [
+    { id: 'maxi', nombre: 'Maxi', apellido: 'Russo', email: 'maxirusso20@gmail.com', rol: 'Coordinador General', color: '#3B82F6' },
+    { id: 'fede', nombre: 'Fede', apellido: 'Avila', email: 'fedeavila@gmail.com', rol: 'Coordinador de Flota', color: '#8B5CF6' },
+];
+
+// Lista de emails de admins para detectar si el usuario actual es admin
+const ADMIN_EMAILS = COORDINADORES.map(c => c.email);
+
+// Valores exactos que espera la web para el campo `remitente`
+const REMITENTE_ADMIN = 'Administración';
 
 // ─── Compresión de imágenes ───────────────────────────────────────────────────
 // Antes: quality:0.7 en el picker → cámara moderna = 2–6 MB por foto
@@ -53,14 +68,33 @@ const uploadMediaToSupabase = async (uri: string, pathPrefix: string, type: stri
         const finalUri = type === 'image' ? await comprimirImagen(uri) : uri;
         const ext = type === 'image' ? 'jpg' : (finalUri.split('.').pop() || 'tmp');
         const fp = `${pathPrefix}_${Date.now()}.${ext}`;
-        const blob = await (await fetch(finalUri)).blob();
+
         let contentType = 'application/octet-stream';
         if (type === 'image') contentType = 'image/jpeg';
-        if (type === 'audio') contentType = `audio/${ext}`;
-        if (type === 'document') contentType = `application/${ext}`;
+        else if (type === 'audio') {
+            // m4a es el formato típico de grabaciones de Expo
+            if (ext === 'm4a' || ext === 'mp4') contentType = 'audio/m4a';
+            else if (ext === 'mp3') contentType = 'audio/mpeg';
+            else if (ext === 'wav') contentType = 'audio/wav';
+            else contentType = `audio/${ext}`;
+        } else if (type === 'document') contentType = `application/${ext}`;
+
+        // ── FIX clave para React Native / Expo ─────────────────────────────
+        // El patrón `await fetch(uri).blob()` devuelve un blob de 0 bytes en
+        // RN/Expo. Hay que leer el archivo como base64 con FileSystem y
+        // convertirlo a ArrayBuffer antes de subirlo.
+        const base64 = await FileSystem.readAsStringAsync(finalUri, {
+            encoding: 'base64',
+        });
+        const arrayBuffer = decode(base64);
+
+        if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+            throw new Error('Archivo vacío después de leerlo');
+        }
+
         const { error: ue } = await supabase.storage
             .from('chat-media')
-            .upload(fp, blob, { contentType, upsert: true });
+            .upload(fp, arrayBuffer, { contentType, upsert: true });
         if (ue) throw ue;
         const { data: ud } = supabase.storage.from('chat-media').getPublicUrl(fp);
         return ud.publicUrl;
@@ -138,7 +172,7 @@ const TYPING_TIMEOUT_MS = 2500;
 
 interface Mensaje {
     id: number; created_at: string; user_id: string; remitente: string;
-    texto: string; chofer_email: string; visto_admin: boolean;
+    texto: string; chofer_email: string; admin_id?: string; visto_admin: boolean;
     visto_chofer?: boolean; estado?: string;
     media_url?: string; media_type?: 'audio' | 'image' | 'document' | null;
 }
@@ -146,6 +180,10 @@ interface Mensaje {
 interface Conversacion {
     email: string; nombre: string; ultimoMensaje: string;
     ultimaHora: string; noLeidos: number; online: boolean;
+}
+
+interface Coordinador {
+    id: string; nombre: string; apellido: string; email: string; rol: string; color: string;
 }
 
 // ─── Helpers de formato ───────────────────────────────────────────────────────
@@ -254,7 +292,7 @@ const Burbuja: React.FC<{
         return `${m}:${(s % 60) < 10 ? '0' : ''}${s % 60}`;
     };
 
-    if (mensaje.texto.startsWith('🔔') || mensaje.remitente === 'Sistema') {
+    if (mensaje.texto.startsWith('🔔') || mensaje.texto.startsWith('⚠️') || mensaje.remitente === 'Sistema' || mensaje.remitente === '🤖 Sistema') {
         return (
             <View style={SS.sistemaWrapper}>
                 <View style={SS.sistemaBurbuja}>
@@ -335,7 +373,7 @@ const Burbuja: React.FC<{
 // Se usa la función Postgres get_conversaciones_admin() que hace todo en 1 query.
 // Ver mejoras.sql para crear la función.
 
-const ListaConversaciones: React.FC<{ onAbrir: (conv: Conversacion) => void }> = ({ onAbrir }) => {
+const ListaConversaciones: React.FC<{ miEmail: string; onAbrir: (conv: Conversacion) => void }> = ({ miEmail, onAbrir }) => {
     const { colors } = useTheme();
     const [conversaciones, setConversaciones] = useState<Conversacion[]>([]);
     const [cargando, setCargando] = useState(true);
@@ -353,9 +391,38 @@ const ListaConversaciones: React.FC<{ onAbrir: (conv: Conversacion) => void }> =
                 .order('nombre', { ascending: true });
             if (!chofData?.length) { setCargando(false); return; }
 
-            // Query 2: último mensaje + no leídos para TODOS los choferes en 1 sola llamada
-            // (función Postgres con DISTINCT ON + COUNT — ver mejoras.sql)
-            const { data: convData } = await supabase.rpc('get_conversaciones_admin');
+            // Query 2: último mensaje + no leídos SOLO de conversaciones con este admin
+            // Intenta usar la función Postgres nueva con filtro por admin_email.
+            // Si todavía no fue creada, cae al fallback con query manual.
+            let convData: any[] | null = null;
+            const rpcRes = await supabase.rpc('get_conversaciones_admin_v2', { admin_email: miEmail });
+            if (!rpcRes.error) convData = rpcRes.data;
+            else {
+                // Fallback: query manual filtrando por admin_id
+                const { data } = await supabase
+                    .from('mensajes')
+                    .select('chofer_email, texto, created_at, media_type, visto_admin, remitente')
+                    .eq('admin_id', miEmail)
+                    .order('created_at', { ascending: false })
+                    .limit(500);
+                // Reducir a último mensaje por chofer + contar no leídos
+                const map = new Map<string, any>();
+                (data || []).forEach((m: any) => {
+                    if (!map.has(m.chofer_email)) {
+                        map.set(m.chofer_email, {
+                            chofer_email: m.chofer_email,
+                            ultimo_texto: m.texto,
+                            ultimo_created_at: m.created_at,
+                            ultimo_media_type: m.media_type,
+                            no_leidos: 0,
+                        });
+                    }
+                    if (!m.visto_admin && m.remitente !== REMITENTE_ADMIN) {
+                        map.get(m.chofer_email).no_leidos++;
+                    }
+                });
+                convData = Array.from(map.values());
+            }
 
             // Combinar en memoria con Map → O(n), no O(n²)
             const convMap = new Map<string, any>();
@@ -385,7 +452,7 @@ const ListaConversaciones: React.FC<{ onAbrir: (conv: Conversacion) => void }> =
             setConversaciones(conMensajes);
         } catch (err) { console.error('[Chat Admin] Error:', err); }
         finally { setCargando(false); }
-    }, []);
+    }, [miEmail]);
 
     useEffect(() => {
         cargar();
@@ -479,8 +546,8 @@ const ListaConversaciones: React.FC<{ onAbrir: (conv: Conversacion) => void }> =
 
 const ConversacionView: React.FC<{
     miUserId: string; miEmail: string; miNombre: string; esAdmin: boolean;
-    choferEmail: string; choferNombre: string; onVolver?: () => void;
-}> = ({ miUserId, miEmail, miNombre, esAdmin, choferEmail, choferNombre, onVolver }) => {
+    choferEmail: string; choferNombre: string; adminEmail: string; onVolver?: () => void;
+}> = ({ miUserId, miEmail, miNombre, esAdmin, choferEmail, choferNombre, adminEmail, onVolver }) => {
     const { colors } = useTheme();
     const [mensajes, setMensajes] = useState<Mensaje[]>([]);
     const [texto, setTexto] = useState('');
@@ -500,40 +567,45 @@ const ConversacionView: React.FC<{
     const fetchMensajes = useCallback(async () => {
         const { data } = await supabase
             .from('mensajes')
-            .select('id, created_at, user_id, remitente, texto, chofer_email, visto_admin, visto_chofer, estado, media_url, media_type')
+            .select('id, created_at, user_id, remitente, texto, chofer_email, admin_id, visto_admin, visto_chofer, estado, media_url, media_type')
             .eq('chofer_email', choferEmail)
+            .eq('admin_id', adminEmail)
             .order('created_at', { ascending: false })
             .limit(50);
         setMensajes(data ?? []);
-    }, [choferEmail]);
+    }, [choferEmail, adminEmail]);
 
     const marcarVisto = useCallback(async () => {
         if (esAdmin) {
             await supabase.from('mensajes')
                 .update({ visto_admin: true })
                 .eq('chofer_email', choferEmail)
+                .eq('admin_id', adminEmail)
                 .eq('visto_admin', false)
-                .neq('remitente', 'Admin');
+                .neq('remitente', REMITENTE_ADMIN);
         } else {
             await supabase.from('mensajes')
                 .update({ visto_chofer: true })
                 .eq('chofer_email', choferEmail)
+                .eq('admin_id', adminEmail)
                 .eq('visto_chofer', false)
-                .eq('remitente', 'Admin');
+                .eq('remitente', REMITENTE_ADMIN);
         }
-    }, [esAdmin, choferEmail]);
+    }, [esAdmin, choferEmail, adminEmail]);
 
     useEffect(() => {
         fetchMensajes();
         marcarVisto();
         if (msgCanalRef.current) void supabase.removeChannel(msgCanalRef.current);
         const canal = supabase
-            .channel(`msgs-${choferEmail.replace(/[@.]/g, '-')}`)
+            .channel(`msgs-${choferEmail.replace(/[@.]/g, '-')}-${adminEmail.replace(/[@.]/g, '-')}`)
             .on('postgres_changes', {
                 event: 'INSERT', schema: 'public', table: 'mensajes',
                 filter: `chofer_email=eq.${choferEmail}`,
             }, (payload) => {
                 const nuevo = payload.new as Mensaje;
+                // Filtro extra en cliente: solo mensajes de esta conversación con este admin
+                if (nuevo.admin_id !== adminEmail) return;
                 setMensajes(prev => prev.some(m => m.id === nuevo.id) ? prev : [nuevo, ...prev]);
                 if (esAdmin) marcarVisto();
             })
@@ -542,21 +614,22 @@ const ConversacionView: React.FC<{
                 filter: `chofer_email=eq.${choferEmail}`,
             }, (payload) => {
                 const upd = payload.new as Mensaje;
+                if (upd.admin_id !== adminEmail) return;
                 setMensajes(prev => prev.map(m => m.id === upd.id ? { ...m, visto_admin: upd.visto_admin } : m));
             })
             .subscribe();
         msgCanalRef.current = canal;
         return () => { if (msgCanalRef.current) { void supabase.removeChannel(msgCanalRef.current); msgCanalRef.current = null; } };
-    }, [choferEmail, fetchMensajes, esAdmin, marcarVisto]);
+    }, [choferEmail, adminEmail, fetchMensajes, esAdmin, marcarVisto]);
 
     useEffect(() => {
         if (presenceCanalRef.current) void supabase.removeChannel(presenceCanalRef.current);
-        const canalId = `presence-${choferEmail.replace(/[@.]/g, '-')}`;
+        const canalId = `presence-${choferEmail.replace(/[@.]/g, '-')}-${adminEmail.replace(/[@.]/g, '-')}`;
         const canal = supabase.channel(canalId, { config: { presence: { key: miEmail } } });
         canal
             .on('presence', { event: 'sync' }, () => {
                 const emails = Object.keys(canal.presenceState());
-                setOnline(emails.includes(esAdmin ? choferEmail : ADMIN_EMAIL));
+                setOnline(emails.includes(esAdmin ? choferEmail : adminEmail));
             })
             .on('broadcast', { event: 'typing' }, (payload) => {
                 const { email: em, nombre: nom, escribiendo } = payload.payload as any;
@@ -576,7 +649,7 @@ const ConversacionView: React.FC<{
                 presenceCanalRef.current = null;
             }
         };
-    }, [choferEmail, miEmail, miNombre, esAdmin]);
+    }, [choferEmail, adminEmail, miEmail, miNombre, esAdmin]);
 
     const emitirTyping = (escribiendo: boolean) => {
         presenceCanalRef.current?.send({ type: 'broadcast', event: 'typing', payload: { email: miEmail, nombre: miNombre, escribiendo } });
@@ -590,25 +663,77 @@ const ConversacionView: React.FC<{
     };
 
     const empezarGrabacion = async () => {
+        // Guard: si ya hay una grabación activa, no arrancar otra
+        if (recording || isRecording) {
+            console.warn('[Audio] Ya hay una grabación en curso, ignoro');
+            return;
+        }
         try {
-            await Audio.requestPermissionsAsync();
+            const { status } = await Audio.requestPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permiso denegado', 'Necesitamos acceso al micrófono para grabar.');
+                return;
+            }
             await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-            const { recording: r } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-            setRecording(r); setIsRecording(true);
-        } catch (err) { console.error('Error starting record', err); }
+
+            // Limpiar cualquier recording huérfano por las dudas (no debería haber por el guard,
+            // pero si el componente se re-montó, el SDK puede estar con un objeto colgado)
+            try {
+                const r = new Audio.Recording();
+                await r.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+                await r.startAsync();
+                setRecording(r);
+                setIsRecording(true);
+            } catch (innerErr: any) {
+                // Si falla por "Only one Recording object can be prepared", intentar limpiar y reintentar una vez
+                if (String(innerErr?.message || '').toLowerCase().includes('only one recording')) {
+                    console.warn('[Audio] Recording colgado, limpio y reintento');
+                    // No hay una API oficial para limpiar el huérfano; lo mejor es forzar el modo y esperar
+                    await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+                    await new Promise(res => setTimeout(res, 300));
+                    await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+                    const r2 = new Audio.Recording();
+                    await r2.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+                    await r2.startAsync();
+                    setRecording(r2);
+                    setIsRecording(true);
+                } else {
+                    throw innerErr;
+                }
+            }
+        } catch (err: any) {
+            console.error('[Audio] Error al iniciar grabación:', err);
+            setRecording(null);
+            setIsRecording(false);
+            Alert.alert('Error', 'No se pudo iniciar la grabación. Probá de nuevo.');
+        }
     };
 
     const detenerGrabacion = async (cancelar = false) => {
-        if (!recording) return;
+        if (!recording) { setIsRecording(false); return; }
         setIsRecording(false);
+        const rec = recording;
+        setRecording(null);  // liberar el state antes de operaciones async
         try {
-            await recording.stopAndUnloadAsync();
-            const uri = recording.getURI();
-            setRecording(null);
+            await rec.stopAndUnloadAsync();
+            const uri = rec.getURI();
             if (!cancelar && uri) await handleEnviarMedia(uri, 'audio', '🎙️ Nota de voz');
-        } catch (err) { console.error('Error stopping record', err); }
-        await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+        } catch (err) {
+            console.error('[Audio] Error al detener grabación:', err);
+        } finally {
+            try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false }); } catch { }
+        }
     };
+
+    // Liberar grabación si el componente se desmonta o cambia de chat
+    useEffect(() => {
+        return () => {
+            if (recording) {
+                recording.stopAndUnloadAsync().catch(() => { });
+            }
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const handleAdjuntar = () => {
         const accion = async (i: number) => {
@@ -642,8 +767,8 @@ const ConversacionView: React.FC<{
             const url = await uploadMediaToSupabase(uri, miUserId, mType);
             if (!url) return;
             const { error } = await supabase.from('mensajes').insert([{
-                user_id: miUserId, remitente: esAdmin ? 'Admin' : miNombre,
-                texto: pseudoTexto, chofer_email: choferEmail,
+                user_id: miUserId, remitente: esAdmin ? REMITENTE_ADMIN : miNombre,
+                texto: pseudoTexto, chofer_email: choferEmail, admin_id: adminEmail,
                 media_url: url, media_type: mType,
                 visto_admin: esAdmin, visto_chofer: !esAdmin, estado: 'enviado',
             }]);
@@ -658,8 +783,8 @@ const ConversacionView: React.FC<{
         try {
             const tokenDest = admin
                 ? (await supabase.from('Choferes').select('push_token').eq('email', cEmail).maybeSingle()).data?.push_token
-                : (await supabase.from('Admins').select('push_token').eq('email', ADMIN_EMAIL).maybeSingle()).data?.push_token;
-            if (tokenDest) await enviarPush(tokenDest, `💬 ${admin ? 'Admin' : mNom}`, txt, { tipo: 'CHAT', chofer_email: cEmail, chofer_nombre: admin ? cNom : mNom });
+                : (await supabase.from('Admins').select('push_token').eq('email', adminEmail).maybeSingle()).data?.push_token;
+            if (tokenDest) await enviarPush(tokenDest, `💬 ${admin ? 'Admin' : mNom}`, txt, { tipo: 'CHAT', chofer_email: cEmail, chofer_nombre: admin ? cNom : mNom, admin_email: adminEmail });
         } catch (err) { console.warn('[Push]', err); }
     };
 
@@ -673,8 +798,8 @@ const ConversacionView: React.FC<{
         setTexto('');
         try {
             const { error } = await supabase.from('mensajes').insert([{
-                user_id: miUserId, remitente: esAdmin ? 'Admin' : miNombre,
-                texto: txt, chofer_email: choferEmail,
+                user_id: miUserId, remitente: esAdmin ? REMITENTE_ADMIN : miNombre,
+                texto: txt, chofer_email: choferEmail, admin_id: adminEmail,
                 visto_admin: esAdmin, visto_chofer: !esAdmin, estado: 'enviado',
             }]);
             if (error) { setTexto(txt); console.error('[Chat] Error:', error.message); return; }
@@ -796,6 +921,67 @@ const ConversacionView: React.FC<{
     );
 };
 
+// ─── Selector de Coordinador (para choferes) ──────────────────────────────────
+
+const SelectorCoordinador: React.FC<{
+    onSeleccionar: (coord: Coordinador) => void;
+    noLeidosPorCoord: Record<string, number>;
+}> = ({ onSeleccionar, noLeidosPorCoord }) => {
+    const { colors } = useTheme();
+    return (
+        <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: 20 }}>
+            <View style={{ paddingHorizontal: 20, paddingBottom: 16 }}>
+                <Text style={{ fontSize: 22, fontWeight: '800', color: colors.textPrimary, marginBottom: 4 }}>
+                    Contactar a Logística
+                </Text>
+                <Text style={{ fontSize: 13, color: colors.textMuted }}>
+                    Elegí con quién querés chatear
+                </Text>
+            </View>
+            {COORDINADORES.map(coord => {
+                const noLeidos = noLeidosPorCoord[coord.email] || 0;
+                return (
+                    <Pressable
+                        key={coord.id}
+                        onPress={() => onSeleccionar(coord)}
+                        style={({ pressed }) => [
+                            SS.convItem,
+                            { backgroundColor: colors.bg },
+                            pressed && { opacity: 0.7 }
+                        ]}
+                    >
+                        <View style={SS.convAvatarWrap}>
+                            <View style={[SS.convAvatar, { backgroundColor: coord.color + '22', borderColor: coord.color, borderWidth: 2 }]}>
+                                <Text style={[SS.convAvatarText, { color: coord.color }]}>
+                                    {coord.nombre[0]}{coord.apellido[0]}
+                                </Text>
+                            </View>
+                        </View>
+                        <View style={SS.convInfo}>
+                            <View style={SS.convTopRow}>
+                                <Text style={[SS.convNombreItem, { color: colors.textPrimary, fontWeight: '700' }]}>
+                                    {coord.nombre} {coord.apellido}
+                                </Text>
+                                {noLeidos > 0 && (
+                                    <View style={[SS.badge, { backgroundColor: coord.color }]}>
+                                        <Text style={SS.badgeText}>{noLeidos > 99 ? '99+' : noLeidos}</Text>
+                                    </View>
+                                )}
+                            </View>
+                            <View style={SS.convBottomRow}>
+                                <Text style={[SS.convUltimoMsg, { color: colors.textMuted }]}>
+                                    {coord.rol}
+                                </Text>
+                            </View>
+                        </View>
+                        <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                    </Pressable>
+                );
+            })}
+        </View>
+    );
+};
+
 // ─── ChatScreen ───────────────────────────────────────────────────────────────
 
 export default function ChatScreen() {
@@ -808,13 +994,15 @@ export default function ChatScreen() {
     const [miNombre, setMiNombre] = useState('Chofer');
     const [esAdmin, setEsAdmin] = useState(false);
     const [convAbierta, setConvAbierta] = useState<Conversacion | null>(null);
+    const [coordElegido, setCoordElegido] = useState<Coordinador | null>(null);
+    const [noLeidosPorCoord, setNoLeidosPorCoord] = useState<Record<string, number>>({});
 
     useEffect(() => {
         const init = async () => {
             const { data: { user }, error } = await supabase.auth.getUser();
             if (error || !user) { setAuthError(true); setCargando(false); return; }
             const email = user.email ?? '';
-            const admin = email === ADMIN_EMAIL;
+            const admin = ADMIN_EMAILS.includes(email);
             setMiUserId(user.id); setMiEmail(email); setEsAdmin(admin);
             // Nombre real desde tabla Choferes (más fiable que user_metadata)
             try {
@@ -822,7 +1010,10 @@ export default function ChatScreen() {
                     const { data: cd } = await supabase.from('Choferes').select('nombre').eq('email', email).maybeSingle();
                     setMiNombre(cd?.nombre?.split(' ')[0] ?? (user.user_metadata?.full_name || email.split('@')[0] || 'Chofer'));
                 } else {
-                    setMiNombre('Admin');
+                    // Para admins, el nombre que aparece es "Administración" en los mensajes,
+                    // pero localmente mostramos su nombre real
+                    const coord = COORDINADORES.find(c => c.email === email);
+                    setMiNombre(coord?.nombre || 'Admin');
                 }
             } catch {
                 setMiNombre(user.user_metadata?.full_name?.split(' ')[0] || email.split('@')[0] || 'Chofer');
@@ -841,12 +1032,46 @@ export default function ChatScreen() {
         AsyncStorage.setItem(`chat_last_seen_${miEmail}`, new Date().toISOString()).catch(console.warn);
     }, [miEmail]);
 
+    // Contar no leídos por coordinador (solo para choferes)
+    useEffect(() => {
+        if (esAdmin || !miEmail) return;
+        const cargarNoLeidos = async () => {
+            const counts: Record<string, number> = {};
+            for (const coord of COORDINADORES) {
+                const { count } = await supabase
+                    .from('mensajes')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('chofer_email', miEmail)
+                    .eq('admin_id', coord.email)
+                    .eq('remitente', REMITENTE_ADMIN)
+                    .eq('visto_chofer', false);
+                counts[coord.email] = count || 0;
+            }
+            setNoLeidosPorCoord(counts);
+        };
+        cargarNoLeidos();
+        // Refrescar cuando haya mensajes nuevos
+        const canal = supabase
+            .channel(`no-leidos-${miEmail.replace(/[@.]/g, '-')}`)
+            .on('postgres_changes', {
+                event: '*', schema: 'public', table: 'mensajes',
+                filter: `chofer_email=eq.${miEmail}`,
+            }, cargarNoLeidos)
+            .subscribe();
+        return () => { void supabase.removeChannel(canal); };
+    }, [esAdmin, miEmail, coordElegido]);
+
     useEffect(() => {
         const sub = Notifications.addNotificationResponseReceivedListener(response => {
             const data = response.notification.request.content.data as any;
             if (data?.tipo === 'CHAT') {
                 if (data.chofer_email && esAdmin)
                     setConvAbierta({ email: data.chofer_email, nombre: data.chofer_nombre || data.chofer_email, ultimoMensaje: '', ultimaHora: '', noLeidos: 0, online: false });
+                // Si el push viene de un admin específico y el usuario es chofer, abrir ese chat
+                if (data.admin_email && !esAdmin) {
+                    const coord = COORDINADORES.find(c => c.email === data.admin_email);
+                    if (coord) setCoordElegido(coord);
+                }
                 router.push('/(drawer)/chat' as any);
             }
         });
@@ -870,16 +1095,35 @@ export default function ChatScreen() {
         </View>
     );
 
-    if (!esAdmin) return (
-        <ConversacionView miUserId={miUserId} miEmail={miEmail} miNombre={miNombre}
-            esAdmin={false} choferEmail={miEmail} choferNombre="Maxi (Admin)" />
-    );
+    // FLUJO CHOFER: primero elige coordinador, después entra al chat
+    if (!esAdmin) {
+        if (!coordElegido) {
+            return <SelectorCoordinador onSeleccionar={setCoordElegido} noLeidosPorCoord={noLeidosPorCoord} />;
+        }
+        return (
+            <ConversacionView
+                miUserId={miUserId} miEmail={miEmail} miNombre={miNombre}
+                esAdmin={false}
+                choferEmail={miEmail}
+                choferNombre={`${coordElegido.nombre} ${coordElegido.apellido}`}
+                adminEmail={coordElegido.email}
+                onVolver={() => setCoordElegido(null)}
+            />
+        );
+    }
+
+    // FLUJO ADMIN: lista de conversaciones → conversación específica
     if (convAbierta) return (
-        <ConversacionView miUserId={miUserId} miEmail={miEmail} miNombre={miNombre}
-            esAdmin={true} choferEmail={convAbierta.email} choferNombre={convAbierta.nombre}
-            onVolver={() => setConvAbierta(null)} />
+        <ConversacionView
+            miUserId={miUserId} miEmail={miEmail} miNombre={miNombre}
+            esAdmin={true}
+            choferEmail={convAbierta.email}
+            choferNombre={convAbierta.nombre}
+            adminEmail={miEmail}
+            onVolver={() => setConvAbierta(null)}
+        />
     );
-    return <ListaConversaciones onAbrir={setConvAbierta} />;
+    return <ListaConversaciones miEmail={miEmail} onAbrir={setConvAbierta} />;
 }
 
 // ─── Estilos estáticos ────────────────────────────────────────────────────────
