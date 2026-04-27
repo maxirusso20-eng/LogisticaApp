@@ -13,6 +13,12 @@ import { ADMIN_EMAIL } from '../lib/constants';
 import { supabase } from '../lib/supabase';
 import { ThemeProvider, useTheme } from '../lib/ThemeContext';
 import { ToastProvider } from '../lib/toast';
+import * as SplashScreen from 'expo-splash-screen';
+
+// Mantener el splash nativo de Expo visible hasta que la app esté lista
+SplashScreen.preventAutoHideAsync().catch(() => {
+  // Ignorar errores si ya fue ocultado
+});
 
 // ─── Parche Global de Tipografía ──────────────────────────────────────────────
 interface ComponentWithDefaultProps extends React.FC<any> {
@@ -434,17 +440,45 @@ function InnerLayout() {
   const router = useRouter();
 
   useEffect(() => {
+    let resolved = false;
+
+    // Timeout de seguridad: si en 5s no llega INITIAL_SESSION, forzar al login
+    const timeoutId = setTimeout(() => {
+      if (!resolved) {
+        console.warn('[Auth] ⚠️ Timeout esperando INITIAL_SESSION (5s) — forzando logout');
+        resolved = true;
+        setHasSession(false);
+        setIsLoading(false);
+      }
+    }, 5000);
+
+    // Forzar lectura inmediata de la sesión actual (no esperar al evento)
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (resolved) return;
+      if (error) {
+        console.error('[Auth] Error obteniendo sesión inicial:', error);
+      }
+      console.log('[Auth] getSession() respondió. Hay sesión?', !!session);
+      resolved = true;
+      clearTimeout(timeoutId);
+      setHasSession(!!session);
+      if (!session) {
+        setIsLoading(false);
+      }
+    }).catch(err => {
+      console.error('[Auth] Excepción en getSession:', err);
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeoutId);
+        setHasSession(false);
+        setIsLoading(false);
+      }
+    });
+
+    // Listener para cambios POSTERIORES (login, logout, token refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'INITIAL_SESSION') {
-        // Primera carga: tenemos la respuesta inicial de Supabase
-        setHasSession(!!session);
-        if (!session) {
-          // Sin sesión → ir al login directamente, sin splash innecesario
-          setIsLoading(false);
-        }
-        // Con sesión → handleRouting se encargará de enrutar y poner isLoading=false
-      } else if (event === 'SIGNED_IN') {
-        // El usuario acaba de hacer login → activar splash mientras enrutamos
+      console.log('[Auth] Evento:', event, 'Sesión?', !!session);
+      if (event === 'SIGNED_IN') {
         setHasSession(true);
         setSplashMsg('Iniciando sesión...');
         setIsLoading(true);
@@ -457,34 +491,44 @@ function InnerLayout() {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(timeoutId);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handleRouting = useCallback(async () => {
-    if (hasSession === null) return;
+    console.log('[Routing] handleRouting llamado. hasSession:', hasSession, 'segments:', segments);
+    
+    if (hasSession === null) {
+      console.log('[Routing] hasSession es null, esperando...');
+      return;
+    }
 
     const inAuthGroup = segments[0] === 'login';
+    console.log('[Routing] inAuthGroup:', inAuthGroup);
 
     if (!hasSession && !inAuthGroup) {
+      console.log('[Routing] Sin sesión y no estoy en login → navegando a /login');
       router.replace('/login' as never);
     } else if (hasSession) {
       const { data: { user } } = await supabase.auth.getUser();
       const isAdmin = user?.email === ADMIN_EMAIL;
+      console.log('[Routing] Con sesión. isAdmin:', isAdmin);
 
       if (inAuthGroup) {
-        // Recién hizo login → redirigir al destino correcto según rol
+        console.log('[Routing] En login con sesión → redirigir a app');
         router.replace(isAdmin ? '/(drawer)' : '/(drawer)/Panel' as never);
       } else if (!isAdmin) {
-        // Chofer aterrizando en la raíz del drawer → mandarlo a su panel
         const isIndex = segments.length === 1 && segments[0] === '(drawer)';
         if (isIndex) {
+          console.log('[Routing] Chofer en raíz → mandando a Panel');
           router.replace('/(drawer)/Panel' as never);
         }
       }
     }
 
-    // Delay mínimo para que el splash no desaparezca en <350ms
-    // (evita el flash raro si la red es muy rápida)
+    console.log('[Routing] Aplicando delay de 350ms y desactivando loading');
     await new Promise<void>(res => setTimeout(res, 350));
     setIsLoading(false);
     setSplashMsg('Verificando sesión...');
@@ -494,6 +538,7 @@ function InnerLayout() {
     handleRouting();
   }, [handleRouting]);
 
+  console.log('[InnerLayout] Render. isLoading:', isLoading, 'hasSession:', hasSession, 'splashMsg:', splashMsg);
   if (isLoading) return <SplashLoader message={splashMsg} />;
 
   return (
@@ -510,14 +555,31 @@ function InnerLayout() {
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
   });
 
-  if (!fontsLoaded) return null;
+  console.log('[RootLayout] fontsLoaded:', fontsLoaded, 'fontError:', fontError);
+
+  // Ocultar splash nativo de Expo cuando las fuentes terminan (carguen o fallen)
+  useEffect(() => {
+    if (fontsLoaded || fontError) {
+      console.log('[RootLayout] Ocultando splash nativo de Expo');
+      SplashScreen.hideAsync().catch(err => {
+        console.warn('[RootLayout] Error al ocultar splash:', err);
+      });
+    }
+  }, [fontsLoaded, fontError]);
+
+  if (fontError) {
+    console.warn('[RootLayout] ⚠️ Error cargando fuentes, continuando sin ellas:', fontError);
+    // Continuar igual aunque las fuentes fallen
+  } else if (!fontsLoaded) {
+    return null;
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
