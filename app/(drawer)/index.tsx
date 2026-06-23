@@ -44,7 +44,7 @@ async function registerForPushNotificationsAsync(): Promise<Notifications.ExpoPu
   } catch (err) { console.log('Aviso (Push Token):', err instanceof Error ? err.message : err); return undefined; }
 }
 
-interface Chofer { id: number; orden?: number | null; nombre: string; dni: string; celular: string; direccion: string; fechaIngreso: string; zona: string[]; vehiculo: string[]; condicion: string; }
+interface Chofer { id: number; orden?: number | null; nombre: string; dni: string; celular: string; direccion: string; fecha_ingreso: string; zona: string[]; vehiculo: string[]; condicion: string; }
 interface Recorrido { id?: number; orden?: number | null; localidad: string; idChofer: number; chofer: string; pqteDia: number; porFuera: number; entregados: number; zona: string; }
 type ZonaKey = 'ZONA OESTE' | 'ZONA SUR' | 'ZONA NORTE' | 'CABA';
 type TipoDia = 'semana' | 'sabado';
@@ -249,7 +249,7 @@ export default function RecorridosScreen() {
     try {
       const { data, error } = await supabase
         .from('Choferes')
-        .select('id, orden, nombre, dni, celular, direccion, fechaIngreso, zona, vehiculo, condicion')
+        .select('id, orden, nombre, dni, celular, direccion, fecha_ingreso, zona, vehiculo, condicion')
         .order('orden', { ascending: true, nullsFirst: false });
       if (error) throw error;
       setChoferes(ordenarChoferesPorOrden(data || []));
