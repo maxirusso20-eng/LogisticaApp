@@ -1,485 +1,542 @@
 // app/(drawer)/personal.tsx
+// ─────────────────────────────────────────────────────────────────────────
+// Choferes (admin) — port fiel de la pantalla web "Gestión de Choferes".
+//   - Buscador (nombre / DNI / celular)
+//   - Filtros por condición con contadores: Todos, Titulares, Semititulares,
+//     Suplentes, Colectadores
+//   - Tarjeta: avatar (color por zona), celular → WhatsApp, dirección → Maps,
+//     badges de zona y condición, vehículo, DNI, fecha de ingreso
+//   - Alta/edición con Email de acceso autocompletado (nombre.apellido@hogareno.com)
+// Lee/escribe la tabla Choferes (mismo backend que la web). zona/vehiculo son
+// jsonb (mezcla de string/array en datos viejos): se leen con getArr y se
+// guardan como string, igual que la web. id es identity → no se envía al alta.
+// ─────────────────────────────────────────────────────────────────────────
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  KeyboardAvoidingView,
-  Linking,
-  Modal,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+  ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Linking, Modal,
+  Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput,
+  TouchableOpacity, View,
 } from 'react-native';
-import { Swipeable } from 'react-native-gesture-handler';
-import { SkeletonChoferCard } from '../../lib/skeleton';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 import { useToast } from '../../lib/toast';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
 
+// ─── Tipos ──────────────────────────────────────────────────────────────────
 interface Chofer {
-  id: number; nombre: string; dni: string; celular: string; condicion: string;
-  vehiculo: string | string[]; zona: string | string[]; orden?: number | null;
-  direccion?: string; fechaIngreso?: string;
+  id: number; nombre: string; dni: string | null; celular: string | null;
+  condicion: string | null; vehiculo: any; zona: any;
+  direccion?: string | null; fecha_ingreso?: string | null; email?: string | null;
+}
+interface FormChofer {
+  nombre: string; dni: string; celular: string; email: string;
+  direccion: string; fecha_ingreso: string; zona: string; vehiculo: string; condicion: string;
 }
 
+// ─── Constantes (mismas opciones que la web) ─────────────────────────────────
 const ZONAS = ['ZONA OESTE', 'ZONA SUR', 'ZONA NORTE', 'CABA'];
-const VEHICULOS = ['SUV', 'UTILITARIO', 'AUTO'];
-const CONDICIONES = ['TITULAR', 'SUPLENTE', 'COLECTADOR'];
-const AVATAR_COLORS = ['#4F8EF7', '#34D399', '#F59E0B', '#A78BFA', '#F472B6', '#FB923C'];
+const VEHICULOS = ['Moto', 'Auto', 'Camioneta', 'Furgón', 'Camión'];
+const CONDICIONES = ['Titular', 'Semititular', 'Suplente', 'Colectador'];
 
-const getCondicionCfg = (condicion: string) => {
-  const c = (condicion || '').toUpperCase();
-  if (c === 'TITULAR') return { label: 'Titular', color: '#4F8EF7', bg: 'rgba(79,142,247,0.12)' };
-  if (c === 'COLECTADOR') return { label: 'Colectador', color: '#F59E0B', bg: 'rgba(245,158,11,0.12)' };
-  return { label: 'Suplente', color: '#34D399', bg: 'rgba(52,211,153,0.12)' };
+const FILTROS = [
+  { key: 'TODOS', label: 'Todos', color: '#6366f1' },
+  { key: 'TITULAR', label: 'Titulares', color: '#3b82f6' },
+  { key: 'SEMITITULAR', label: 'Semititulares', color: '#f59e0b' },
+  { key: 'SUPLENTE', label: 'Suplentes', color: '#64748b' },
+  { key: 'COLECTADOR', label: 'Colectadores', color: '#10b981' },
+] as const;
+type FiltroKey = (typeof FILTROS)[number]['key'];
+
+const DOMINIO_CHOFER = '@hogareno.com';
+// Deriva el email desde el nombre: "Juan Pérez" → juan.perez@hogareno.com
+const emailDesdeNombre = (nombre: string) => {
+  const sinTildes = (nombre || '')
+    .replace(/[áàäâ]/gi, 'a').replace(/[éèëê]/gi, 'e').replace(/[íìïî]/gi, 'i')
+    .replace(/[óòöô]/gi, 'o').replace(/[úùüû]/gi, 'u').replace(/ñ/gi, 'n');
+  const slug = sinTildes
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    .split(/\s+/).filter(Boolean).join('.');
+  return slug ? `${slug}${DOMINIO_CHOFER}` : '';
 };
-const getArr = (v: string | string[]): string[] => Array.isArray(v) ? v : (v ? [v] : []);
-const getVehiculo = (v: string | string[]): string => { const arr = getArr(v); return arr.length ? arr.join(', ') : '—'; };
-const formatearFecha = (texto: string): string => {
-  const nums = texto.replace(/\D/g, '');
-  if (nums.length <= 2) return nums;
-  if (nums.length <= 4) return `${nums.slice(0, 2)}/${nums.slice(2)}`;
-  return `${nums.slice(0, 2)}/${nums.slice(2, 4)}/${nums.slice(4, 8)}`;
-};
 
-// ─── SelectorChips ────────────────────────────────────────────────────────────
+const norm = (s: any) => (s ?? '').toString().toUpperCase().trim();
+const getArr = (v: any): string[] => Array.isArray(v) ? v.map(String) : (v || v === 0 ? [String(v)] : []);
+const zonaTexto = (z: any) => getArr(z).join(', ') || 'N/A';
+const vehiculoTexto = (v: any) => getArr(v).join(', ') || 'N/A';
 
-interface SelectorChipsProps {
-  opciones: string[]; seleccionados: string | string[]; multi?: boolean;
-  onToggle: (valor: string) => void; colorActivo?: string;
+// Color del avatar/badge según la zona (tolera datos viejos: "OESTE", arrays, etc.)
+function zonaColor(z: any): string {
+  const t = norm(zonaTexto(z));
+  if (t.includes('OESTE') && t.includes('SUR')) return '#818cf8';
+  if (t.includes('OESTE')) return '#60a5fa';
+  if (t.includes('SUR')) return '#a78bfa';
+  if (t.includes('NORTE')) return '#f472b6';
+  if (t.includes('CABA')) return '#34d399';
+  return '#94a3b8';
 }
+function condCfg(c: any): { label: string; color: string; bg: string } {
+  const t = norm(c);
+  if (t === 'TITULAR') return { label: 'Titular', color: '#4F8EF7', bg: 'rgba(79,142,247,0.14)' };
+  if (t === 'SEMITITULAR') return { label: 'Semititular', color: '#F59E0B', bg: 'rgba(245,158,11,0.14)' };
+  if (t === 'COLECTADOR') return { label: 'Colectador', color: '#34D399', bg: 'rgba(52,211,153,0.14)' };
+  if (t === 'SUPLENTE') return { label: 'Suplente', color: '#94A3B8', bg: 'rgba(148,163,184,0.14)' };
+  return { label: (c || 'N/A').toString(), color: '#94A3B8', bg: 'rgba(148,163,184,0.14)' };
+}
+const formatearFecha = (texto: string): string => {
+  const n = (texto || '').replace(/\D/g, '');
+  if (n.length <= 2) return n;
+  if (n.length <= 4) return `${n.slice(0, 2)}/${n.slice(2)}`;
+  return `${n.slice(0, 2)}/${n.slice(2, 4)}/${n.slice(4, 8)}`;
+};
 
-const SelectorChips: React.FC<SelectorChipsProps> = ({ opciones, seleccionados, multi = false, onToggle, colorActivo = '#4F8EF7' }) => {
+// ─── Chips de selección única (zona / vehículo / condición) ──────────────────
+function ChipsUnico({ opciones, valor, onSelect, colorActivo = '#4F8EF7' }: {
+  opciones: string[]; valor: string; onSelect: (v: string) => void; colorActivo?: string;
+}) {
   const { colors } = useTheme();
-  const isActivo = (op: string) => multi ? getArr(seleccionados as string[]).includes(op) : seleccionados === op;
   return (
-    <View style={M.selectorRow}>
-      {opciones.map(op => (
-        <TouchableOpacity key={op}
-          style={[M.chip, { backgroundColor: colors.bgInput, borderColor: colors.border }, isActivo(op) && { backgroundColor: colorActivo, borderColor: colorActivo }]}
-          onPress={() => onToggle(op)} activeOpacity={0.75}>
-          <Text style={[M.chipTexto, { color: colors.textMuted }, isActivo(op) && { color: '#fff' }]}>{op}</Text>
-        </TouchableOpacity>
-      ))}
+    <View style={M.chipsRow}>
+      {opciones.map(op => {
+        const activo = norm(valor) === norm(op);
+        return (
+          <TouchableOpacity key={op} activeOpacity={0.75} onPress={() => onSelect(op)}
+            style={[M.chip, { backgroundColor: colors.bgInput, borderColor: colors.border },
+              activo && { backgroundColor: colorActivo, borderColor: colorActivo }]}>
+            <Text style={[M.chipTxt, { color: colors.textMuted }, activo && { color: '#fff' }]}>{op}</Text>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
-};
-
-// ─── FormularioChofer ─────────────────────────────────────────────────────────
-
-interface FormChofer {
-  id: string; nombre: string; dni: string; celular: string;
-  direccion: string; fechaIngreso: string; zona: string[]; vehiculo: string[]; condicion: string;
 }
 
-interface FormularioChoferProps {
-  form: FormChofer; esEdicion: boolean;
-  onChange: (campo: keyof FormChofer, valor: string | string[]) => void;
-  onGuardar: () => void; guardando: boolean;
-}
-
-const FormularioChofer: React.FC<FormularioChoferProps> = ({ form, esEdicion, onChange, onGuardar, guardando }) => {
+// ─── Tarjeta de chofer (fiel a TarjetaChofer de la web) ──────────────────────
+function ChoferCard({ item, onEditar, onEliminar }: {
+  item: Chofer; onEditar: (c: Chofer) => void; onEliminar: (c: Chofer) => void;
+}) {
   const { colors } = useTheme();
-  const inputStyle = [M.input, { color: colors.textPrimary }];
-  const wrapStyle = [M.inputWrap, { backgroundColor: colors.bgCard, borderColor: colors.border }];
+  const cfg = condCfg(item.condicion);
+  const zColor = zonaColor(item.zona);
+  const initials = (item.nombre || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const cel = (item.celular || '').replace(/\D/g, '');
+
   return (
-    <View style={M.formContent}>
-      <View style={M.fieldRow}>
-        {!esEdicion && (
-          <View style={[M.fieldGroup, { flex: 1, marginRight: 10 }]}>
-            <Text style={[M.fieldLabel, { color: colors.textMuted }]}>ID</Text>
-            <View style={wrapStyle}><TextInput style={inputStyle} keyboardType="numeric" value={form.id} onChangeText={v => onChange('id', v)} placeholderTextColor={colors.textPlaceholder} placeholder="00" selectTextOnFocus /></View>
+    <View style={[P.card, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+      {/* Cabecera */}
+      <View style={P.cardTop}>
+        <View style={[P.avatar, { backgroundColor: zColor + '22', borderColor: zColor + '55' }]}>
+          <Text style={[P.avatarTxt, { color: zColor }]}>{initials}</Text>
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[P.nombre, { color: colors.textPrimary }]} numberOfLines={1}>{item.nombre}</Text>
+          {item.celular ? (
+            <TouchableOpacity activeOpacity={0.7} onPress={() => cel && Linking.openURL(`https://wa.me/${cel}`)} style={P.cel}>
+              <Ionicons name="logo-whatsapp" size={12} color="#25D366" />
+              <Text style={{ fontSize: 12, color: colors.textMuted }}>{item.celular}</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={{ fontSize: 12, color: colors.textPlaceholder, marginTop: 2 }}>Sin celular</Text>
+          )}
+        </View>
+        <View style={P.cardBtns}>
+          <TouchableOpacity onPress={() => onEditar(item)} style={[P.iconBtn, { backgroundColor: colors.bgInput }]} activeOpacity={0.7}>
+            <Ionicons name="pencil" size={15} color={colors.blue} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => onEliminar(item)} style={[P.iconBtn, { backgroundColor: colors.bgInput }]} activeOpacity={0.7}>
+            <Ionicons name="trash-outline" size={15} color={colors.red} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Badges zona + condición */}
+      <View style={P.badgesRow}>
+        <View style={[P.badge, { backgroundColor: zColor + '1a', borderColor: zColor + '40' }]}>
+          <Ionicons name="location-outline" size={11} color={zColor} />
+          <Text style={[P.badgeTxt, { color: zColor }]}>{zonaTexto(item.zona)}</Text>
+        </View>
+        <View style={[P.badge, { backgroundColor: cfg.bg, borderColor: cfg.color + '40' }]}>
+          <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: cfg.color }} />
+          <Text style={[P.badgeTxt, { color: cfg.color }]}>{cfg.label}</Text>
+        </View>
+      </View>
+
+      <View style={[P.divider, { backgroundColor: colors.borderSubtle }]} />
+
+      {/* Datos */}
+      <View style={P.details}>
+        <View style={P.detailRow}>
+          <Ionicons name="car-outline" size={14} color={colors.textMuted} />
+          <Text style={[P.detailTxt, { color: colors.textSecondary }]}>{vehiculoTexto(item.vehiculo)}</Text>
+        </View>
+        <View style={P.detailRow}>
+          <Ionicons name="card-outline" size={14} color={colors.textMuted} />
+          <Text style={[P.detailTxt, { color: colors.textSecondary, fontVariant: ['tabular-nums'] }]}>DNI {item.dni || '—'}</Text>
+        </View>
+        {!!item.direccion && (
+          <TouchableOpacity activeOpacity={0.7} style={P.detailRow}
+            onPress={() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.direccion || '')}`)}>
+            <Ionicons name="map-outline" size={14} color={colors.textMuted} />
+            <Text style={[P.detailTxt, { color: colors.blue }]} numberOfLines={2}>{item.direccion}</Text>
+          </TouchableOpacity>
+        )}
+        {!!item.fecha_ingreso && (
+          <View style={P.detailRow}>
+            <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
+            <Text style={[P.detailTxt, { color: colors.textMuted }]}>Ingreso: {item.fecha_ingreso}</Text>
           </View>
         )}
-        <View style={[M.fieldGroup, { flex: esEdicion ? 1 : 2 }]}>
-          <Text style={[M.fieldLabel, { color: colors.textMuted }]}>NOMBRE COMPLETO</Text>
-          <View style={wrapStyle}><TextInput style={inputStyle} value={form.nombre} onChangeText={v => onChange('nombre', v)} placeholderTextColor={colors.textPlaceholder} placeholder="Juan Pérez" /></View>
-        </View>
       </View>
-      <View style={M.fieldRow}>
-        <View style={[M.fieldGroup, { flex: 1, marginRight: 10 }]}>
-          <Text style={[M.fieldLabel, { color: colors.textMuted }]}>CELULAR</Text>
-          <View style={wrapStyle}><TextInput style={inputStyle} keyboardType="phone-pad" value={form.celular} onChangeText={v => onChange('celular', v)} placeholderTextColor={colors.textPlaceholder} placeholder="11-1234-5678" /></View>
-        </View>
-        <View style={[M.fieldGroup, { flex: 1 }]}>
-          <Text style={[M.fieldLabel, { color: colors.textMuted }]}>DNI</Text>
-          <View style={wrapStyle}><TextInput style={inputStyle} keyboardType="numeric" value={form.dni} onChangeText={v => onChange('dni', v)} placeholderTextColor={colors.textPlaceholder} placeholder="12345678" selectTextOnFocus /></View>
-        </View>
-      </View>
-      <View style={M.fieldGroup}>
-        <Text style={[M.fieldLabel, { color: colors.textMuted }]}>DIRECCIÓN</Text>
-        <View style={wrapStyle}><TextInput style={inputStyle} value={form.direccion} onChangeText={v => onChange('direccion', v)} placeholderTextColor={colors.textPlaceholder} placeholder="Av. Corrientes 1234" /></View>
-      </View>
-      <View style={M.fieldGroup}>
-        <Text style={[M.fieldLabel, { color: colors.textMuted }]}>FECHA INGRESO</Text>
-        <View style={wrapStyle}><TextInput style={inputStyle} value={form.fechaIngreso} onChangeText={v => onChange('fechaIngreso', formatearFecha(v))} maxLength={10} placeholder="DD/MM/YYYY" placeholderTextColor={colors.textPlaceholder} /></View>
-      </View>
-      <View style={M.fieldGroup}>
-        <Text style={[M.fieldLabel, { color: colors.textMuted }]}>ZONA PREFERENCIAL</Text>
-        <SelectorChips opciones={ZONAS} seleccionados={form.zona} multi onToggle={z => { const a = form.zona; onChange('zona', a.includes(z) ? a.filter(x => x !== z) : [...a, z]); }} />
-      </View>
-      <View style={M.fieldGroup}>
-        <Text style={[M.fieldLabel, { color: colors.textMuted }]}>VEHÍCULO</Text>
-        <SelectorChips opciones={VEHICULOS} seleccionados={form.vehiculo} multi onToggle={v => { const a = form.vehiculo; onChange('vehiculo', a.includes(v) ? a.filter(x => x !== v) : [...a, v]); }} colorActivo="#34D399" />
-      </View>
-      <View style={M.fieldGroup}>
-        <Text style={[M.fieldLabel, { color: colors.textMuted }]}>CONDICIÓN</Text>
-        <SelectorChips opciones={CONDICIONES} seleccionados={form.condicion} onToggle={c => onChange('condicion', c)} colorActivo="#F59E0B" />
-      </View>
-      <TouchableOpacity style={[M.btnGuardar, guardando && { opacity: 0.6 }]} onPress={onGuardar} disabled={guardando} activeOpacity={0.85}>
-        {guardando ? <ActivityIndicator color="#fff" size="small" /> : (<><Ionicons name={esEdicion ? 'checkmark-circle' : 'person-add'} size={18} color="#fff" /><Text style={M.btnGuardarTexto}>{esEdicion ? 'Guardar Cambios' : 'Agregar Chofer'}</Text></>)}
-      </TouchableOpacity>
-      <View style={{ height: 40 }} />
     </View>
   );
-};
+}
 
-// ─── ModalChofer ──────────────────────────────────────────────────────────────
-
-interface ModalChoferProps { visible: boolean; choferEditar: Chofer | null; onCerrar: () => void; onGuardado: () => void; }
-
-const ModalChofer: React.FC<ModalChoferProps> = ({ visible, choferEditar, onCerrar, onGuardado }) => {
+// ─── Modal alta/edición ──────────────────────────────────────────────────────
+function ModalChofer({ visible, choferEditar, onCerrar, onGuardado }: {
+  visible: boolean; choferEditar: Chofer | null; onCerrar: () => void; onGuardado: () => void;
+}) {
   const { colors } = useTheme();
   const esEdicion = choferEditar !== null;
-  const slideAnim = useRef(new Animated.Value(0)).current;
   const [guardando, setGuardando] = useState(false);
-  const formDefault = (): FormChofer => ({ id: '', nombre: '', dni: '', celular: '', direccion: '', fechaIngreso: '', zona: [], vehiculo: [], condicion: 'SUPLENTE' });
-
-  // Aquí esquivamos el bug del React Compiler renombrando a formData
-  const [formData, setFormData] = useState<FormChofer>(formDefault());
+  const emailTocado = useRef(false);
+  const vacio = (): FormChofer => ({ nombre: '', dni: '', celular: '', email: '', direccion: '', fecha_ingreso: '', zona: '', vehiculo: '', condicion: '' });
+  const [form, setForm] = useState<FormChofer>(vacio());
 
   useEffect(() => {
-    if (visible) {
-      if (choferEditar) {
-        setFormData({ id: choferEditar.id.toString(), nombre: choferEditar.nombre || '', dni: choferEditar.dni || '', celular: choferEditar.celular || '', direccion: (choferEditar as any).direccion || '', fechaIngreso: (choferEditar as any).fechaIngreso || '', zona: getArr(choferEditar.zona), vehiculo: getArr(choferEditar.vehiculo), condicion: choferEditar.condicion || 'SUPLENTE' });
-      } else { setFormData(formDefault()); }
-      slideAnim.setValue(60);
-      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 65, friction: 11 }).start();
+    if (!visible) return;
+    if (choferEditar) {
+      setForm({
+        nombre: choferEditar.nombre || '',
+        dni: choferEditar.dni || '',
+        celular: choferEditar.celular || '',
+        email: choferEditar.email || '',
+        direccion: choferEditar.direccion || '',
+        fecha_ingreso: choferEditar.fecha_ingreso || '',
+        zona: getArr(choferEditar.zona)[0] || '',
+        vehiculo: getArr(choferEditar.vehiculo)[0] || '',
+        condicion: choferEditar.condicion || '',
+      });
+      emailTocado.current = true; // al editar, no pisar el email existente
+    } else {
+      setForm(vacio());
+      emailTocado.current = false;
     }
   }, [visible, choferEditar]);
 
-  const onChange = (campo: keyof FormChofer, valor: string | string[]) => setFormData(prev => ({ ...prev, [campo]: valor }));
-
-  const handleGuardar = async () => {
-    if (!formData.nombre.trim()) { Alert.alert('Campo requerido', 'El nombre es obligatorio.'); return; }
-    if (!esEdicion && !formData.id) { Alert.alert('Campo requerido', 'El ID es obligatorio para un chofer nuevo.'); return; }
-    setGuardando(true);
-    try {
-      const payload = { nombre: formData.nombre.trim(), dni: formData.dni.trim(), celular: formData.celular.trim(), direccion: formData.direccion.trim(), fechaIngreso: formData.fechaIngreso.trim(), zona: formData.zona, vehiculo: formData.vehiculo, condicion: formData.condicion };
-      if (esEdicion) { const { error } = await supabase.from('Choferes').update(payload).eq('id', choferEditar!.id); if (error) throw error; }
-      else { const { error } = await supabase.from('Choferes').insert([{ id: parseInt(formData.id), ...payload }]); if (error) throw error; }
-      onGuardado(); onCerrar();
-    } catch (err: any) { Alert.alert(esEdicion ? 'Error al actualizar' : 'Error al agregar', err?.message || 'Ocurrió un error inesperado.'); }
-    finally { setGuardando(false); }
+  const set = (campo: keyof FormChofer, valor: string) => {
+    setForm(prev => {
+      const next = { ...prev, [campo]: valor };
+      if (campo === 'email') emailTocado.current = true;
+      if (campo === 'nombre' && !emailTocado.current) next.email = emailDesdeNombre(valor);
+      return next;
+    });
   };
 
+  const guardar = async () => {
+    if (!form.nombre.trim()) { Alert.alert('Falta el nombre', 'El nombre es obligatorio.'); return; }
+    if (!form.dni.trim()) { Alert.alert('Falta el DNI', 'El DNI es obligatorio.'); return; }
+    if (!form.zona) { Alert.alert('Falta la zona', 'Seleccioná una zona.'); return; }
+    if (!form.vehiculo) { Alert.alert('Falta el vehículo', 'Seleccioná un vehículo.'); return; }
+    if (!form.condicion) { Alert.alert('Falta la condición', 'Seleccioná una condición.'); return; }
+    setGuardando(true);
+    try {
+      const payload = {
+        nombre: form.nombre.trim(),
+        dni: form.dni.trim(),
+        zona: form.zona,
+        vehiculo: form.vehiculo,
+        condicion: form.condicion,
+        celular: form.celular.trim() || null,
+        email: form.email.trim().toLowerCase() || null,
+        direccion: form.direccion.trim() || null,
+        fecha_ingreso: form.fecha_ingreso.trim() || null,
+      };
+      if (esEdicion) {
+        const { error } = await supabase.from('Choferes').update(payload).eq('id', choferEditar!.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('Choferes').insert([payload]); // id es identity
+        if (error) throw error;
+      }
+      onGuardado();
+      onCerrar();
+    } catch (err: any) {
+      Alert.alert(esEdicion ? 'Error al actualizar' : 'Error al agregar', err?.message || 'Ocurrió un error.');
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const wrap = [M.inputWrap, { backgroundColor: colors.bgCard, borderColor: colors.border }];
+  const inp = [M.input, { color: colors.textPrimary }];
+
   return (
-    <Modal visible={visible} animationType="slide" transparent={false}>
-      <View style={[M.modalRoot, { backgroundColor: colors.bg }]}>
-        <View style={[M.modalHeader, { borderBottomColor: colors.borderSubtle, backgroundColor: colors.bgModal }]}>
-          <View style={M.modalHeaderLeft}>
-            <View style={[M.modalIconBox, { backgroundColor: esEdicion ? 'rgba(245,158,11,0.12)' : 'rgba(79,142,247,0.12)' }]}>
+    <Modal visible={visible} animationType="slide" onRequestClose={onCerrar}>
+      <View style={[M.root, { backgroundColor: colors.bg }]}>
+        <View style={[M.header, { borderBottomColor: colors.borderSubtle, backgroundColor: colors.bgModal }]}>
+          <View style={M.headerLeft}>
+            <View style={[M.iconBox, { backgroundColor: esEdicion ? 'rgba(245,158,11,0.12)' : 'rgba(79,142,247,0.12)' }]}>
               <Ionicons name={esEdicion ? 'create-outline' : 'person-add-outline'} size={22} color={esEdicion ? '#F59E0B' : '#4F8EF7'} />
             </View>
             <View>
-              <Text style={[M.modalTitulo, { color: colors.textPrimary }]}>{esEdicion ? 'Editar Chofer' : 'Nuevo Chofer'}</Text>
-              {esEdicion && <Text style={[M.modalSubtitulo, { color: colors.textMuted }]}>{choferEditar?.nombre}</Text>}
+              <Text style={[M.titulo, { color: colors.textPrimary }]}>{esEdicion ? 'Editar Chofer' : 'Nuevo Chofer'}</Text>
+              <Text style={[M.subtitulo, { color: colors.textMuted }]} numberOfLines={1}>
+                {esEdicion ? choferEditar?.nombre : 'Completá los datos del chofer'}
+              </Text>
             </View>
           </View>
           <TouchableOpacity onPress={onCerrar} style={[M.btnCerrar, { backgroundColor: colors.bgInput }]} activeOpacity={0.7}>
             <Ionicons name="close" size={18} color={colors.textMuted} />
           </TouchableOpacity>
         </View>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <Animated.View style={{ flex: 1, transform: [{ translateY: slideAnim }] }}>
-            <FormularioChofer form={formData} esEdicion={esEdicion} onChange={onChange} onGuardar={handleGuardar} guardando={guardando} />
-          </Animated.View>
+
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView contentContainerStyle={M.content} keyboardShouldPersistTaps="handled">
+            <View style={M.field}>
+              <Text style={[M.label, { color: colors.textMuted }]}>NOMBRE COMPLETO *</Text>
+              <View style={wrap}><TextInput style={inp} value={form.nombre} onChangeText={v => set('nombre', v)} placeholder="Juan Pérez" placeholderTextColor={colors.textPlaceholder} /></View>
+            </View>
+
+            <View style={M.field}>
+              <Text style={[M.label, { color: colors.textMuted }]}>EMAIL DE ACCESO</Text>
+              <View style={wrap}><TextInput style={inp} value={form.email} onChangeText={v => set('email', v)} placeholder="nombre.apellido@hogareno.com" placeholderTextColor={colors.textPlaceholder} autoCapitalize="none" keyboardType="email-address" /></View>
+              <Text style={[M.hint, { color: colors.textMuted }]}>
+                Se autocompleta desde el nombre; podés editarlo. Con este email el chofer entra y ve su rendimiento (contraseña inicial: Logistica123!).
+              </Text>
+            </View>
+
+            <View style={M.row}>
+              <View style={[M.field, { flex: 1, marginRight: 10 }]}>
+                <Text style={[M.label, { color: colors.textMuted }]}>CELULAR</Text>
+                <View style={wrap}><TextInput style={inp} value={form.celular} onChangeText={v => set('celular', v)} placeholder="11-1234-5678" placeholderTextColor={colors.textPlaceholder} keyboardType="phone-pad" /></View>
+              </View>
+              <View style={[M.field, { flex: 1 }]}>
+                <Text style={[M.label, { color: colors.textMuted }]}>DNI *</Text>
+                <View style={wrap}><TextInput style={inp} value={form.dni} onChangeText={v => set('dni', v)} placeholder="12345678" placeholderTextColor={colors.textPlaceholder} keyboardType="numeric" /></View>
+              </View>
+            </View>
+
+            <View style={M.field}>
+              <Text style={[M.label, { color: colors.textMuted }]}>DIRECCIÓN</Text>
+              <View style={wrap}><TextInput style={inp} value={form.direccion} onChangeText={v => set('direccion', v)} placeholder="Av. Corrientes 1234" placeholderTextColor={colors.textPlaceholder} /></View>
+            </View>
+
+            <View style={M.field}>
+              <Text style={[M.label, { color: colors.textMuted }]}>FECHA DE INGRESO</Text>
+              <View style={wrap}><TextInput style={inp} value={form.fecha_ingreso} onChangeText={v => set('fecha_ingreso', formatearFecha(v))} maxLength={10} placeholder="DD/MM/YYYY" placeholderTextColor={colors.textPlaceholder} keyboardType="numeric" /></View>
+            </View>
+
+            <View style={M.field}>
+              <Text style={[M.label, { color: colors.textMuted }]}>ZONA *</Text>
+              <ChipsUnico opciones={ZONAS} valor={form.zona} onSelect={v => set('zona', v)} />
+            </View>
+            <View style={M.field}>
+              <Text style={[M.label, { color: colors.textMuted }]}>VEHÍCULO *</Text>
+              <ChipsUnico opciones={VEHICULOS} valor={form.vehiculo} onSelect={v => set('vehiculo', v)} colorActivo="#34D399" />
+            </View>
+            <View style={M.field}>
+              <Text style={[M.label, { color: colors.textMuted }]}>CONDICIÓN *</Text>
+              <ChipsUnico opciones={CONDICIONES} valor={form.condicion} onSelect={v => set('condicion', v)} colorActivo="#F59E0B" />
+            </View>
+
+            <TouchableOpacity style={[M.btnGuardar, guardando && { opacity: 0.6 }]} onPress={guardar} disabled={guardando} activeOpacity={0.85}>
+              {guardando ? <ActivityIndicator color="#fff" size="small" /> : (
+                <><Ionicons name={esEdicion ? 'checkmark-circle' : 'person-add'} size={18} color="#fff" /><Text style={M.btnGuardarTxt}>{esEdicion ? 'Guardar Cambios' : 'Agregar Chofer'}</Text></>
+              )}
+            </TouchableOpacity>
+            <View style={{ height: 40 }} />
+          </ScrollView>
         </KeyboardAvoidingView>
       </View>
     </Modal>
   );
-};
-
-// ─── ChoferCard ───────────────────────────────────────────────────────────────
-
-function ChoferCard({ item, index, onEditar, onEliminar }: { item: Chofer; index: number; onEditar: (chofer: Chofer) => void; onEliminar: (chofer: Chofer) => void }) {
-  const { colors } = useTheme();
-  const fade = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.96)).current;
-  const swipeableRef = useRef<Swipeable>(null);
-  const cfg = getCondicionCfg(item.condicion);
-  const initials = (item.nombre || '?').split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
-  const vehiculoTexto = getVehiculo(item.vehiculo);
-  const zonaTexto = getArr(item.zona).join(', ') || '—';
-  const avatarColor = AVATAR_COLORS[index % AVATAR_COLORS.length];
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fade, { toValue: 1, duration: 380, delay: Math.min(index * 60, 400), useNativeDriver: true }),
-      Animated.spring(scale, { toValue: 1, delay: Math.min(index * 60, 400), useNativeDriver: true, tension: 70, friction: 12 }),
-    ]).start();
-  }, []);
-
-  const renderRightActions = () => (
-    <View style={P.swipeActions}>
-      <TouchableOpacity
-        style={[P.swipeBtn, { backgroundColor: '#10B981' }]}
-        onPress={() => {
-          swipeableRef.current?.close();
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          if (item.celular) Linking.openURL(`tel:${item.celular}`);
-        }}
-      >
-        <Ionicons name="call" size={20} color="#fff" />
-        <Text style={P.swipeBtnText}>Llamar</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[P.swipeBtn, { backgroundColor: '#4F8EF7' }]}
-        onPress={() => {
-          swipeableRef.current?.close();
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onEditar(item);
-        }}
-      >
-        <Ionicons name="pencil" size={18} color="#fff" />
-        <Text style={P.swipeBtnText}>Editar</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderLeftActions = () => (
-    <TouchableOpacity
-      style={[P.swipeBtn, { backgroundColor: '#EF4444', minWidth: 80, borderRadius: 16, marginBottom: 12, marginLeft: 0, justifyContent: 'center', alignItems: 'center' }]}
-      onPress={() => {
-        swipeableRef.current?.close();
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        onEliminar(item);
-      }}
-    >
-      <Ionicons name="trash" size={20} color="#fff" />
-      <Text style={P.swipeBtnText}>Borrar</Text>
-    </TouchableOpacity>
-  );
-
-  return (
-    <Swipeable ref={swipeableRef} renderRightActions={renderRightActions} renderLeftActions={renderLeftActions} overshootRight={false} overshootLeft={false} friction={2}>
-      <Animated.View style={[P.card, { backgroundColor: colors.bgCard, borderColor: colors.border, opacity: fade, transform: [{ scale }] }]}>
-        <View style={P.cardTop}>
-          <View style={[P.avatar, { backgroundColor: avatarColor + '20', borderColor: avatarColor + '40' }]}>
-            <Text style={[P.avatarText, { color: avatarColor }]}>{initials}</Text>
-          </View>
-          <View style={P.info}>
-            <Text style={[P.nombre, { color: colors.textPrimary }]}>{item.nombre}</Text>
-            <Text style={[P.dni, { color: colors.textMuted }]}>DNI {item.dni}  ·  ID {item.id}</Text>
-          </View>
-          <View style={[P.badge, { backgroundColor: cfg.bg }]}>
-            <Text style={[P.badgeText, { color: cfg.color }]}>{cfg.label}</Text>
-          </View>
-        </View>
-        <View style={[P.divider, { backgroundColor: colors.borderSubtle }]} />
-        <View style={P.details}>
-          {[{ icon: 'car-outline', val: vehiculoTexto }, { icon: 'call-outline', val: item.celular || '—' }, { icon: 'map-outline', val: zonaTexto }].map((d, i) => (
-            <View key={i} style={P.detailRow}>
-              <Ionicons name={d.icon as any} size={14} color={colors.textMuted} />
-              <Text style={[P.detailText, { color: colors.textSecondary }]}>{d.val}</Text>
-            </View>
-          ))}
-        </View>
-        <Text style={[P.swipeHint, { color: colors.textMuted }]}>← Deslizá para acciones</Text>
-      </Animated.View>
-    </Swipeable>
-  );
 }
 
-// ─── PersonalScreen ───────────────────────────────────────────────────────────
-
+// ─── Pantalla ────────────────────────────────────────────────────────────────
 export default function PersonalScreen() {
   const { colors } = useTheme();
   const toast = useToast();
   const { autorizado, verificando } = useRoleGuard('admin');
-  const [search, setSearch] = useState('');
-  const [filtro, setFiltro] = useState<'todos' | 'TITULAR' | 'SUPLENTE' | 'COLECTADOR'>('todos');
   const [choferes, setChoferes] = useState<Chofer[]>([]);
   const [cargando, setCargando] = useState(true);
   const [refrescando, setRefrescando] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filtro, setFiltro] = useState<FiltroKey>('TODOS');
   const [modalVisible, setModalVisible] = useState(false);
   const [choferEditar, setChoferEditar] = useState<Chofer | null>(null);
-  const fabScale = useRef(new Animated.Value(0)).current;
-  const fabRotate = useRef(new Animated.Value(0)).current;
-  const headerFade = useRef(new Animated.Value(0)).current;
 
-  const fetchChoferes = useCallback(async (mostrarLoader = false) => {
-    if (mostrarLoader) setCargando(true);
+  const fetchChoferes = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('Choferes').select('*').order('orden', { ascending: true, nullsFirst: false });
       if (error) throw error;
-      setChoferes(data || []);
-    } catch (err) { console.error('Error cargando choferes:', err); }
+      setChoferes((data || []) as Chofer[]);
+    } catch (err) { console.warn('[personal] error', err); }
     finally { setCargando(false); setRefrescando(false); }
   }, []);
 
   useEffect(() => {
-    fetchChoferes(true);
-    Animated.parallel([
-      Animated.timing(headerFade, { toValue: 1, duration: 500, useNativeDriver: true }),
-      Animated.spring(fabScale, { toValue: 1, delay: 400, tension: 65, friction: 10, useNativeDriver: true }),
-    ]).start();
-    const channel = supabase.channel('personal-choferes-sync')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Choferes' }, () => fetchChoferes())
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'Choferes' }, () => fetchChoferes())
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'Choferes' }, () => fetchChoferes())
+    fetchChoferes();
+    const ch = supabase.channel('personal-choferes-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Choferes' }, () => fetchChoferes())
       .subscribe();
-    return () => { void supabase.removeChannel(channel); };
+    return () => { void supabase.removeChannel(ch); };
   }, [fetchChoferes]);
 
-  const abrirAgregar = () => {
-    Animated.timing(fabRotate, { toValue: 1, duration: 200, useNativeDriver: true }).start(() => Animated.timing(fabRotate, { toValue: 0, duration: 200, useNativeDriver: true }).start());
-    setChoferEditar(null); setModalVisible(true);
+  // Filtrado por búsqueda (paso 1)
+  const porBusqueda = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return choferes;
+    return choferes.filter(c =>
+      (c.nombre || '').toLowerCase().includes(q) ||
+      (c.dni || '').toString().includes(q) ||
+      (c.celular || '').toString().includes(q));
+  }, [choferes, search]);
+
+  // Conteos por condición (sobre el set ya buscado), como la web
+  const conteos = useMemo(() => {
+    const acc: Record<string, number> = { TODOS: porBusqueda.length, TITULAR: 0, SEMITITULAR: 0, SUPLENTE: 0, COLECTADOR: 0 };
+    porBusqueda.forEach(c => { const k = norm(c.condicion); if (acc[k] !== undefined) acc[k]++; });
+    return acc;
+  }, [porBusqueda]);
+
+  // Filtrado final por condición (paso 2)
+  const filtrados = useMemo(() => {
+    if (filtro === 'TODOS') return porBusqueda;
+    return porBusqueda.filter(c => norm(c.condicion) === filtro);
+  }, [porBusqueda, filtro]);
+
+  const eliminar = (c: Chofer) => {
+    Alert.alert('Eliminar chofer', `¿Eliminar a ${c.nombre}?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar', style: 'destructive', onPress: async () => {
+          const { error } = await supabase.from('Choferes').delete().eq('id', c.id);
+          if (error) { toast.error('No se pudo eliminar'); return; }
+          toast.success(`${c.nombre} eliminado`);
+        },
+      },
+    ]);
   };
 
-  const titulares = choferes.filter(c => (c.condicion || '').toUpperCase() === 'TITULAR').length;
-  const suplentes = choferes.filter(c => (c.condicion || '').toUpperCase() === 'SUPLENTE').length;
-  const colectadores = choferes.filter(c => (c.condicion || '').toUpperCase() === 'COLECTADOR').length;
-
-  const filtrados = choferes.filter(c => {
-    const q = search.toLowerCase();
-    const matchSearch = (c.nombre || '').toLowerCase().includes(q) || (c.dni || '').includes(q) || (c.celular || '').includes(q);
-    const matchFiltro = filtro === 'todos' || (c.condicion || '').toUpperCase() === filtro;
-    return matchSearch && matchFiltro;
-  });
-
-  const fabRotateInterp = fabRotate.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] });
-
-  // Role guard: si el usuario no es admin, el hook ya redirigió a /Panel
-  if (verificando) return (
-    <ScrollView style={[P.container, { backgroundColor: colors.bg }]} contentContainerStyle={P.content}
-      scrollEnabled={false}>
-      {[0, 1, 2, 3].map(i => <SkeletonChoferCard key={i} />)}
-    </ScrollView>
-  );
+  if (verificando) return <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: 'center' }}><ActivityIndicator color={colors.blue} /></View>;
   if (!autorizado) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
-
-  if (cargando) return (
-    <ScrollView style={[P.container, { backgroundColor: colors.bg }]} contentContainerStyle={P.content}
-      scrollEnabled={false}>
-      {[0, 1, 2, 3].map(i => <SkeletonChoferCard key={i} />)}
-    </ScrollView>
-  );
+  if (cargando) return <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: 'center' }}><ActivityIndicator color={colors.blue} /></View>;
 
   return (
-    <View style={[P.root, { backgroundColor: colors.bg }]}>
-      <ScrollView style={P.container} contentContainerStyle={P.content} showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refrescando} onRefresh={() => { setRefrescando(true); fetchChoferes(); }} tintColor="#4F8EF7" colors={['#4F8EF7']} />}>
-        <Animated.View style={[P.statsRow, { backgroundColor: colors.bgCard, borderColor: colors.border, opacity: headerFade }]}>
-          {[{ v: choferes.length, c: colors.textPrimary, l: 'Total' }, { v: titulares, c: '#4F8EF7', l: 'Titulares' }, { v: suplentes, c: '#34D399', l: 'Suplentes' }, { v: colectadores, c: '#F59E0B', l: 'Colectad.' }].map((s, i) => (
-            <View key={i} style={[P.statBox, i > 0 && { borderLeftWidth: 1, borderColor: colors.border }]}>
-              <Text style={[P.statNum, { color: s.c }]}>{s.v}</Text>
-              <Text style={[P.statLabel, { color: colors.textMuted }]}>{s.l}</Text>
-            </View>
-          ))}
-        </Animated.View>
-        <Animated.View style={[P.searchRow, { backgroundColor: colors.bgCard, borderColor: colors.border, opacity: headerFade }]}>
-          <Ionicons name="search-outline" size={16} color={colors.textMuted} style={{ marginRight: 10 }} />
-          <TextInput style={[P.searchInput, { color: colors.textPrimary }]} placeholder="Nombre, DNI o celular..." placeholderTextColor={colors.textPlaceholder} value={search} onChangeText={setSearch} />
-          {search.length > 0 && (<TouchableOpacity onPress={() => setSearch('')} activeOpacity={0.7}><Ionicons name="close-circle" size={16} color={colors.textMuted} /></TouchableOpacity>)}
-        </Animated.View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={P.filtrosScroll}>
-          {([{ key: 'todos', label: 'Todos' }, { key: 'TITULAR', label: 'Titulares' }, { key: 'SUPLENTE', label: 'Suplentes' }, { key: 'COLECTADOR', label: 'Colectadores' }] as { key: typeof filtro; label: string }[]).map(f => (
-            <TouchableOpacity key={f.key} style={[P.filtroBtn, { backgroundColor: colors.bgCard, borderColor: colors.border }, filtro === f.key && { backgroundColor: '#4F8EF7', borderColor: '#4F8EF7' }]} onPress={() => setFiltro(f.key)} activeOpacity={0.75}>
-              <Text style={[P.filtroText, { color: colors.textMuted }, filtro === f.key && { color: '#FFFFFF' }]}>{f.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-        <Text style={[P.count, { color: colors.textMuted }]}>{filtrados.length} chofer{filtrados.length !== 1 ? 'es' : ''}</Text>
-        {filtrados.length === 0
-          ? <View style={P.emptyState}><Ionicons name="people-outline" size={48} color={colors.borderSubtle} /><Text style={[P.emptyText, { color: colors.textMuted }]}>Sin resultados</Text></View>
-          : filtrados.map((c, i) => <ChoferCard key={c.id} item={c} index={i}
-            onEditar={(ch) => { setChoferEditar(ch); setModalVisible(true); }}
-            onEliminar={(ch) => {
-              Alert.alert('Eliminar chofer', `¿Eliminar a ${ch.nombre}?`, [
-                { text: 'Cancelar', style: 'cancel' },
-                {
-                  text: 'Eliminar', style: 'destructive', onPress: async () => {
-                    const { error } = await supabase.from('Choferes').delete().eq('id', ch.id);
-                    if (error) { toast.error('No se pudo eliminar'); return; }
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    toast.success(`${ch.nombre} eliminado`);
-                  }
-                },
-              ]);
-            }}
-          />)
-        }<View style={{ height: 100 }} />
-      </ScrollView>
-      <Animated.View style={[P.fab, { transform: [{ scale: fabScale }] }]}>
-        <TouchableOpacity style={P.fabBtn} onPress={abrirAgregar} activeOpacity={0.85}>
-          <Animated.View style={{ transform: [{ rotate: fabRotateInterp }] }}>
-            <Ionicons name="add" size={28} color="#FFFFFF" />
-          </Animated.View>
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      {/* Header: título + total + agregar */}
+      <View style={P.headerBar}>
+        <View style={{ flex: 1 }}>
+          <Text style={[P.h1, { color: colors.textPrimary }]}>Gestión de Choferes</Text>
+          <Text style={[P.h1sub, { color: colors.textMuted }]}>
+            {(search || filtro !== 'TODOS') ? `Mostrando ${filtrados.length} de ${choferes.length}` : `Total: ${choferes.length} choferes`}
+          </Text>
+        </View>
+        <TouchableOpacity onPress={() => { setChoferEditar(null); setModalVisible(true); }} style={[P.addBtn, { backgroundColor: colors.blue }]} activeOpacity={0.85}>
+          <Ionicons name="add" size={18} color="#fff" />
+          <Text style={P.addBtnTxt}>Agregar</Text>
         </TouchableOpacity>
-      </Animated.View>
-      <ModalChofer visible={modalVisible} choferEditar={choferEditar} onCerrar={() => setModalVisible(false)} onGuardado={() => fetchChoferes()} />
+      </View>
+
+      {/* Buscador */}
+      <View style={[P.search, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+        <Ionicons name="search" size={16} color={colors.textMuted} />
+        <TextInput style={{ flex: 1, color: colors.textPrimary, fontSize: 14, padding: 0 }}
+          placeholder="Buscar por nombre, DNI o celular…" placeholderTextColor={colors.textPlaceholder}
+          value={search} onChangeText={setSearch} />
+        {search ? <TouchableOpacity onPress={() => setSearch('')}><Ionicons name="close-circle" size={18} color={colors.textMuted} /></TouchableOpacity> : null}
+      </View>
+
+      {/* Filtros por condición con contadores */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={P.filtros} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
+        {FILTROS.map(f => {
+          const activo = filtro === f.key;
+          const n = conteos[f.key] ?? 0;
+          return (
+            <TouchableOpacity key={f.key} activeOpacity={0.8} onPress={() => setFiltro(f.key)}
+              style={[P.filtroChip, { borderColor: activo ? f.color : colors.border, backgroundColor: activo ? f.color + '1a' : 'transparent' }]}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: f.color }} />
+              <Text style={[P.filtroTxt, { color: activo ? f.color : colors.textMuted }]}>{f.label}</Text>
+              <View style={[P.filtroCount, { backgroundColor: activo ? f.color : colors.border }]}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{n}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      <FlatList
+        data={filtrados}
+        keyExtractor={(c) => String(c.id)}
+        contentContainerStyle={{ padding: 16, paddingTop: 6 }}
+        refreshControl={<RefreshControl refreshing={refrescando} onRefresh={() => { setRefrescando(true); fetchChoferes(); }} tintColor={colors.blue} />}
+        ListEmptyComponent={
+          <View style={{ alignItems: 'center', paddingVertical: 50, gap: 10 }}>
+            <Ionicons name="people-outline" size={46} color={colors.borderSubtle} />
+            <Text style={{ color: colors.textMuted, fontSize: 14 }}>
+              {(search || filtro !== 'TODOS') ? 'No hay choferes con esos filtros' : 'No hay choferes registrados'}
+            </Text>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <ChoferCard item={item} onEditar={(c) => { setChoferEditar(c); setModalVisible(true); }} onEliminar={eliminar} />
+        )}
+      />
+
+      <ModalChofer visible={modalVisible} choferEditar={choferEditar}
+        onCerrar={() => setModalVisible(false)} onGuardado={fetchChoferes} />
     </View>
   );
 }
 
 // ─── Estilos ──────────────────────────────────────────────────────────────────
-
 const P = StyleSheet.create({
-  root: { flex: 1 }, container: { flex: 1 }, content: { padding: 20 },
-  loader: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }, loaderText: { fontSize: 13, fontWeight: '500' },
-  statsRow: { flexDirection: 'row', borderRadius: 18, marginBottom: 16, borderWidth: 1, overflow: 'hidden' },
-  statBox: { flex: 1, alignItems: 'center', paddingVertical: 18 },
-  statNum: { fontSize: 20, fontWeight: '800' }, statLabel: { fontSize: 10, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.3, marginTop: 2 },
-  searchRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, paddingHorizontal: 16, height: 48, marginBottom: 14 },
-  searchInput: { flex: 1, fontSize: 14 },
-  filtrosScroll: { marginBottom: 16 },
-  filtroBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8, borderWidth: 1 },
-  filtroText: { fontSize: 13, fontWeight: '600' },
-  count: { fontSize: 12, fontWeight: '700', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
-  emptyState: { alignItems: 'center', paddingVertical: 40, gap: 10 }, emptyText: { fontSize: 14 },
-  card: { borderRadius: 18, padding: 18, marginBottom: 12, borderWidth: 1 },
-  cardTop: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
-  avatar: { width: 44, height: 44, borderRadius: 13, justifyContent: 'center', alignItems: 'center', marginRight: 12, borderWidth: 1 },
-  avatarText: { fontSize: 14, fontWeight: '800' }, info: { flex: 1 },
-  nombre: { fontSize: 15, fontWeight: '700' }, dni: { fontSize: 12, marginTop: 2, fontWeight: '500' },
-  cardActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  badge: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 }, badgeText: { fontSize: 11, fontWeight: '700' },
-  editBtn: { width: 30, height: 30, borderRadius: 9, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
-  divider: { height: 1, marginBottom: 14 }, details: { gap: 8 },
-  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8 }, detailText: { fontSize: 13, fontWeight: '500', flex: 1 },
-  swipeActions: { flexDirection: 'row', alignItems: 'center', paddingRight: 8, gap: 8, marginBottom: 12 },
-  swipeBtn: { borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', gap: 4 },
-  swipeBtnText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  swipeHint: { fontSize: 10, fontWeight: '500', textAlign: 'right', marginTop: 8, opacity: 0.6 },
-  fab: { position: 'absolute', bottom: 28, right: 20 },
-  fabBtn: { width: 58, height: 58, borderRadius: 18, backgroundColor: '#4F8EF7', justifyContent: 'center', alignItems: 'center', shadowColor: '#4F8EF7', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 10 },
+  headerBar: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 },
+  h1: { fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
+  h1sub: { fontSize: 12.5, fontWeight: '600', marginTop: 2 },
+  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
+  addBtnTxt: { color: '#fff', fontSize: 13.5, fontWeight: '800' },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 1 },
+  filtros: { marginTop: 12, marginBottom: 2, flexGrow: 0 },
+  filtroChip: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 13, paddingVertical: 7, borderRadius: 999, borderWidth: 1.5 },
+  filtroTxt: { fontSize: 13, fontWeight: '700' },
+  filtroCount: { minWidth: 20, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 999, alignItems: 'center' },
+
+  card: { borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  avatar: { width: 44, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5 },
+  avatarTxt: { fontSize: 15, fontWeight: '800', letterSpacing: -0.5 },
+  nombre: { fontSize: 15, fontWeight: '700' },
+  cel: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
+  cardBtns: { flexDirection: 'row', gap: 6 },
+  iconBtn: { width: 32, height: 32, borderRadius: 9, justifyContent: 'center', alignItems: 'center' },
+  badgesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, borderWidth: 1 },
+  badgeTxt: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
+  divider: { height: 1, marginVertical: 12 },
+  details: { gap: 8 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  detailTxt: { fontSize: 13, fontWeight: '500', flex: 1 },
 });
 
 const M = StyleSheet.create({
-  modalRoot: { flex: 1 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: Platform.OS === 'ios' ? 56 : 24, paddingBottom: 20, borderBottomWidth: 1 },
-  modalHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  modalIconBox: { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  modalTitulo: { fontSize: 18, fontWeight: '800' }, modalSubtitulo: { fontSize: 12, marginTop: 2 },
+  root: { flex: 1 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: Platform.OS === 'ios' ? 56 : 24, paddingBottom: 18, borderBottomWidth: 1 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1 },
+  iconBox: { width: 42, height: 42, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  titulo: { fontSize: 18, fontWeight: '800' },
+  subtitulo: { fontSize: 12, marginTop: 2 },
   btnCerrar: { width: 34, height: 34, borderRadius: 17, justifyContent: 'center', alignItems: 'center' },
-  formScroll: { flex: 1 }, formContent: { padding: 20 },
-  fieldRow: { flexDirection: 'row', marginBottom: 0 }, fieldGroup: { marginBottom: 16 },
-  fieldLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 8 },
-  inputWrap: { borderRadius: 12, borderWidth: 1.5, height: 50, justifyContent: 'center', paddingHorizontal: 14 },
-  input: { fontSize: 14, flex: 1 },
-  selectorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  content: { padding: 20 },
+  field: { marginBottom: 16 },
+  row: { flexDirection: 'row' },
+  label: { fontSize: 11, fontWeight: '700', letterSpacing: 0.8, marginBottom: 8 },
+  hint: { fontSize: 11, marginTop: 6, lineHeight: 15 },
+  inputWrap: { borderRadius: 12, borderWidth: 1.5, minHeight: 50, justifyContent: 'center', paddingHorizontal: 14 },
+  input: { fontSize: 14, paddingVertical: 12 },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, borderWidth: 1.5 },
-  chipTexto: { fontSize: 12, fontWeight: '700' },
-  btnGuardar: { backgroundColor: '#4F8EF7', height: 56, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 8, shadowColor: '#4F8EF7', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 14, elevation: 8 },
-  btnGuardarTexto: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  chipTxt: { fontSize: 12.5, fontWeight: '700' },
+  btnGuardar: { backgroundColor: '#4F8EF7', height: 54, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 8 },
+  btnGuardarTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });
