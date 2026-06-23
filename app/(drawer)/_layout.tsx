@@ -163,6 +163,7 @@ const ITEMS_ADMIN = [
 ];
 const ITEMS_CHOFER = [
   { name: 'Panel', label: 'Panel del Dia', icon: 'clipboard-outline', route: '/(drawer)/Panel' },
+  { name: 'rendimiento', label: 'Mi Rendimiento', icon: 'stats-chart-outline', route: '/(drawer)/rendimiento' },
   { name: 'colectas', label: 'Mis Colectas', icon: 'archive-outline', route: '/(drawer)/colectas' },
   { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
   { name: 'escaner', label: 'Escanear QR', icon: 'qr-code-outline', route: '/(drawer)/escaner' },
@@ -373,6 +374,10 @@ export default function DrawerLayout() {
       <Drawer.Screen name="colectas" options={{ title: 'Colectas de Hoy' }} />
       <Drawer.Screen name="chat" options={{ title: 'Chat' }} />
       <Drawer.Screen name="Panel" options={{ title: 'Panel del Dia' }} />
+      <Drawer.Screen
+        name="rendimiento"
+        options={{ title: 'Mi Rendimiento', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
+      />
       <Drawer.Screen
         name="escaner"
         options={{
