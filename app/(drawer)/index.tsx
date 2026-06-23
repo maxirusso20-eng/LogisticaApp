@@ -81,6 +81,29 @@ const SelectorChips: React.FC<SelectorChipsProps> = ({ opciones, seleccionados, 
 
 // ─── TablaZona (sin cambios) ──────────────────────────────────────────────────
 
+// Fila memoizada: solo se re-renderiza si CAMBIA su propio `rec` (referencia).
+// Al editar una celda, setRecorridos reemplaza solo ese row → las demás filas
+// no se vuelven a dibujar. Clave para que el tipeo sea fluido.
+interface FilaRecorridoProps { rec: Recorrido; zona: ZonaKey; index: number; impar: boolean; choferes: Chofer[]; onActualizar: (zona: ZonaKey, index: number, campo: string, valor: string) => void; }
+const FilaRecorrido = React.memo<FilaRecorridoProps>(({ rec, zona, index, impar, choferes, onActualizar }) => {
+  const { colors } = useTheme();
+  const color = ZONA_COLORES[zona];
+  return (
+    <View style={[S.filaTabla, impar && { backgroundColor: colors.bgCard }]}>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { color: colors.textSecondary }]}>{rec.localidad}</Text></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: '#60a5fa' }]} keyboardType="numeric" value={rec.idChofer?.toString() || '0'} onChangeText={v => onActualizar(zona, index, 'idChofer', v)} selectTextOnFocus /></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { color: colors.textSecondary }]}>{nombreChoferVisible(rec, choferes)}</Text></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={rec.pqteDia?.toString() || '0'} onChangeText={v => onActualizar(zona, index, 'pqteDia', v)} selectTextOnFocus /></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={rec.porFuera?.toString() || '0'} onChangeText={v => onActualizar(zona, index, 'porFuera', v)} selectTextOnFocus /></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { color: '#a78bfa', fontWeight: '800' }]}>{calcularTotal(rec)}</Text></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={rec.entregados?.toString() || '0'} onChangeText={v => onActualizar(zona, index, 'entregados', v)} selectTextOnFocus /></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { fontWeight: '800', color: calcularRestante(rec) === 0 ? '#34D399' : calcularRestante(rec) <= 10 ? '#f59e0b' : '#f87171' }]}>{calcularRestante(rec)}</Text></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.porcentaje, { color }]}>{calcularPorcentaje(rec)}</Text></View>
+    </View>
+  );
+});
+FilaRecorrido.displayName = 'FilaRecorrido';
+
 interface TablaZonaProps { zona: ZonaKey; datos: Recorrido[]; choferes: Chofer[]; visible: boolean; onToggle: (zona: ZonaKey) => void; onActualizar: (zona: ZonaKey, index: number, campo: string, valor: string) => void; }
 const TablaZona = React.memo<TablaZonaProps>(({ zona, datos, choferes, visible, onToggle, onActualizar }) => {
   const { colors } = useTheme();
@@ -105,17 +128,7 @@ const TablaZona = React.memo<TablaZonaProps>(({ zona, datos, choferes, visible, 
               ))}
             </View>
             {datos.map((rec, i) => (
-              <View key={i} style={[S.filaTabla, i % 2 === 1 && { backgroundColor: colors.bgCard }]}>
-                <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { color: colors.textSecondary }]}>{rec.localidad}</Text></View>
-                <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: '#60a5fa' }]} keyboardType="numeric" value={rec.idChofer?.toString() || '0'} onChangeText={v => onActualizar(zona, i, 'idChofer', v)} selectTextOnFocus /></View>
-                <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { color: colors.textSecondary }]}>{nombreChoferVisible(rec, choferes)}</Text></View>
-                <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={rec.pqteDia?.toString() || '0'} onChangeText={v => onActualizar(zona, i, 'pqteDia', v)} selectTextOnFocus /></View>
-                <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={rec.porFuera?.toString() || '0'} onChangeText={v => onActualizar(zona, i, 'porFuera', v)} selectTextOnFocus /></View>
-                <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { color: '#a78bfa', fontWeight: '800' }]}>{calcularTotal(rec)}</Text></View>
-                <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={rec.entregados?.toString() || '0'} onChangeText={v => onActualizar(zona, i, 'entregados', v)} selectTextOnFocus /></View>
-                <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { fontWeight: '800', color: calcularRestante(rec) === 0 ? '#34D399' : calcularRestante(rec) <= 10 ? '#f59e0b' : '#f87171' }]}>{calcularRestante(rec)}</Text></View>
-                <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.porcentaje, { color }]}>{calcularPorcentaje(rec)}</Text></View>
-              </View>
+              <FilaRecorrido key={i} rec={rec} zona={zona} index={i} impar={i % 2 === 1} choferes={choferes} onActualizar={onActualizar} />
             ))}
           </View>
         </ScrollView>
@@ -321,16 +334,21 @@ export default function RecorridosScreen() {
   // ─────────────────────────────────────────────────────────────────────────
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ventana para ignorar el eco del realtime de NUESTRA propia escritura: ya
+  // tenemos el cambio optimista, así que re-fetchear todo justo después solo
+  // generaba un flash/jank. Los cambios de OTROS equipos sí refrescan.
+  const suppressEchoRef = useRef(0);
   useEffect(() => {
     const schedule = (fn: () => void) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(fn, 320);
     };
+    const onRecorridoEco = () => { if (Date.now() < suppressEchoRef.current) return; schedule(refreshRecorridos); };
 
     const channel = supabase
       .channel('logistica-public-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'Recorridos' }, () => schedule(refreshRecorridos))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'recorridos_sabados' }, () => schedule(refreshRecorridos))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Recorridos' }, onRecorridoEco)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'recorridos_sabados' }, onRecorridoEco)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'Choferes' }, () => schedule(refreshChoferes))
       .subscribe();
 
@@ -387,6 +405,7 @@ export default function RecorridosScreen() {
     const key = `${tablaActiva}:${idDb ?? copia.localidad}:${campo}`;
     if (writeTimers.current[key]) clearTimeout(writeTimers.current[key]);
     writeTimers.current[key] = setTimeout(async () => {
+      suppressEchoRef.current = Date.now() + 2500; // ignorar el eco de esta escritura
       try {
         const payload: Record<string, any> = { [campo]: copia[campo] };
         if (campo === 'idChofer') payload.chofer = copia.chofer;
