@@ -162,6 +162,7 @@ const ITEMS_ADMIN = [
   { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas' },
   { name: 'estadisticas', label: 'Estadísticas', icon: 'bar-chart-outline', route: '/(drawer)/estadisticas' },
   { name: 'desempeno', label: 'Desempeño', icon: 'speedometer-outline', route: '/(drawer)/desempeno' },
+  { name: 'ausencias', label: 'Ausencias', icon: 'calendar-clear-outline', route: '/(drawer)/ausencias' },
   { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
   { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
 ];
@@ -395,6 +396,10 @@ export default function DrawerLayout() {
       <Drawer.Screen
         name="desempeno"
         options={{ title: 'Desempeño', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
+      />
+      <Drawer.Screen
+        name="ausencias"
+        options={{ title: 'Ausencias', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
       />
       <Drawer.Screen
         name="escaner"
