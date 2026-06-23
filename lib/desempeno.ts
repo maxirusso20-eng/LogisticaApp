@@ -55,6 +55,15 @@ export function penalidadAusencia(hora?: string | null): number {
 export function penalidadAusencias(ausencias: any[]): number {
   return r2((ausencias || []).reduce((s, a) => s + penalidadAusencia(a.hora), 0));
 }
+// Mapa { chofer: penalidadTotal } desde filas de la tabla `ausencias`.
+export function penalAusenciasPorChofer(ausencias: any[]): Record<string, number> {
+  const m: Record<string, number> = {};
+  for (const a of ausencias || []) {
+    if (!a.chofer) continue;
+    m[a.chofer] = r2((m[a.chofer] || 0) + penalidadAusencia(a.hora));
+  }
+  return m;
+}
 
 export type ChoferKpi = {
   chofer: string; total: number; entregados: number; fallos: number;

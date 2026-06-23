@@ -159,6 +159,7 @@ const ITEMS_ADMIN = [
   { name: 'personal', label: 'Choferes', icon: 'people-outline', route: '/(drawer)/personal' },
   { name: 'mapa', label: 'Mapa de Rutas', icon: 'map-outline', route: '/(drawer)/mapa' },
   { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas' },
+  { name: 'estadisticas', label: 'Estadísticas', icon: 'bar-chart-outline', route: '/(drawer)/estadisticas' },
   { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
   { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
 ];
@@ -381,6 +382,10 @@ export default function DrawerLayout() {
         options={{ title: 'Mi Rendimiento', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
       />
       <Drawer.Screen name="ranking" options={{ title: 'Ranking de la flota' }} />
+      <Drawer.Screen
+        name="estadisticas"
+        options={{ title: 'Estadísticas', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
+      />
       <Drawer.Screen
         name="escaner"
         options={{
