@@ -156,14 +156,16 @@ function HeaderRight() {
 
 const ITEMS_ADMIN = [
   { name: 'index', label: 'Recorridos', icon: 'bus-outline', route: '/(drawer)/' },
-  { name: 'personal', label: 'Personal', icon: 'people-outline', route: '/(drawer)/personal' },
+  { name: 'personal', label: 'Choferes', icon: 'people-outline', route: '/(drawer)/personal' },
   { name: 'mapa', label: 'Mapa de Rutas', icon: 'map-outline', route: '/(drawer)/mapa' },
   { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas' },
+  { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
   { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
 ];
 const ITEMS_CHOFER = [
   { name: 'Panel', label: 'Panel del Dia', icon: 'clipboard-outline', route: '/(drawer)/Panel' },
   { name: 'rendimiento', label: 'Mi Rendimiento', icon: 'stats-chart-outline', route: '/(drawer)/rendimiento' },
+  { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
   { name: 'colectas', label: 'Mis Colectas', icon: 'archive-outline', route: '/(drawer)/colectas' },
   { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
   { name: 'escaner', label: 'Escanear QR', icon: 'qr-code-outline', route: '/(drawer)/escaner' },
@@ -378,6 +380,7 @@ export default function DrawerLayout() {
         name="rendimiento"
         options={{ title: 'Mi Rendimiento', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
       />
+      <Drawer.Screen name="ranking" options={{ title: 'Ranking de la flota' }} />
       <Drawer.Screen
         name="escaner"
         options={{
