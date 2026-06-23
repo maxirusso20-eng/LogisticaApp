@@ -498,12 +498,19 @@ const CardChoferAdmin: React.FC<{ grupo: GrupoChofer; index: number }> = ({ grup
 const VistaAdmin: React.FC<{ clientes: Cliente[]; refrescando: boolean; onRefresh: () => void }> = ({ clientes, refrescando, onRefresh }) => {
   const { colors } = useTheme();
   const [busqueda, setBusqueda] = useState('');
+  // Selector Semana/Sábados (como la web). Arranca en el tipo del día de hoy.
+  const [tabDia, setTabDia] = useState<'SEMANA' | 'SÁBADOS'>(new Date().getDay() === 6 ? 'SÁBADOS' : 'SEMANA');
+  // Filtra por el día elegido: así no se mezclan ni aparecen choferes repetidos.
+  const clientesTab = useMemo(() => clientes.filter(c => {
+    const t = (c.tipo_dia || '').toString().trim().toUpperCase();
+    return tabDia === 'SÁBADOS' ? t === 'SÁBADOS' : t !== 'SÁBADOS';
+  }), [clientes, tabDia]);
   const grupos = useMemo(() => {
-    const lista = busqueda.trim() ? clientes.filter(c => (c.cliente || '').toLowerCase().includes(busqueda.toLowerCase()) || (c.chofer || '').toLowerCase().includes(busqueda.toLowerCase()) || (c.direccion || '').toLowerCase().includes(busqueda.toLowerCase())) : clientes;
+    const lista = busqueda.trim() ? clientesTab.filter(c => (c.cliente || '').toLowerCase().includes(busqueda.toLowerCase()) || (c.chofer || '').toLowerCase().includes(busqueda.toLowerCase()) || (c.direccion || '').toLowerCase().includes(busqueda.toLowerCase())) : clientesTab;
     return agruparPorChofer(lista);
-  }, [clientes, busqueda]);
-  const totalGlobal = clientes.length;
-  const hechasGlobal = clientes.filter(c => c.completado).length;
+  }, [clientesTab, busqueda]);
+  const totalGlobal = clientesTab.length;
+  const hechasGlobal = clientesTab.filter(c => c.completado).length;
   const pendientesGlobal = totalGlobal - hechasGlobal;
   const progresoGlobal = totalGlobal > 0 ? hechasGlobal / totalGlobal : 0;
 
@@ -533,6 +540,19 @@ const VistaAdmin: React.FC<{ clientes: Cliente[]; refrescando: boolean; onRefres
           <Text style={[ST.progressLabel, { color: colors.textMuted, marginTop: 5 }]}>{Math.round(progresoGlobal * 100)}% del día completado</Text>
         </View>
       </View>
+      {/* Selector Semana / Sábados (como la web) */}
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+        {(['SEMANA', 'SÁBADOS'] as const).map(t => {
+          const activo = tabDia === t;
+          return (
+            <TouchableOpacity key={t} onPress={() => setTabDia(t)} activeOpacity={0.8}
+              style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', borderWidth: 1, backgroundColor: activo ? colors.blue : colors.bgInput, borderColor: activo ? colors.blue : colors.border }}>
+              <Text style={{ fontSize: 13, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{t === 'SEMANA' ? 'Lunes a Viernes' : 'Sábados'}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       <View style={[ST.searchRow, { backgroundColor: colors.bgInput, borderColor: colors.border }]}>
         <Ionicons name="search-outline" size={16} color={colors.textMuted} style={{ marginRight: 10 }} />
         <TextInput style={[ST.searchInput, { color: colors.textPrimary }]} placeholder="Buscar cliente, chofer o dirección..." placeholderTextColor={colors.textPlaceholder} value={busqueda} onChangeText={setBusqueda} />
@@ -643,8 +663,9 @@ export default function ColectasScreen() {
       if (!esAdminRef.current) query = query.eq('email_chofer', user.email);
       const { data, error } = await query;
       if (error) throw error;
-      // Solo las colectas del tipo de día de hoy (no mezclar Semana con Sábados).
-      setClientes((data || []).filter((c: any) => esTipoDeHoy(c.tipo_dia)));
+      // Chofer: solo el tipo del día de hoy (no mezclar Semana con Sábados).
+      // Admin: todas — el panel de supervisión tiene su propio selector Semana/Sábados.
+      setClientes(esAdminRef.current ? (data || []) : (data || []).filter((c: any) => esTipoDeHoy(c.tipo_dia)));
     } catch (err) { console.error('Error cargando clientes:', err); }
     finally { setCargando(false); setRefrescando(false); }
   }, []);
@@ -671,7 +692,7 @@ export default function ColectasScreen() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Clientes' }, (payload) => {
         const registro = payload.new as Cliente & { email_chofer?: string };
         if (!esAdminRef.current && emailUsuarioRef.current && registro.email_chofer && registro.email_chofer !== emailUsuarioRef.current) return;
-        if (!esTipoDeHoy(registro.tipo_dia)) return; // ignorar colectas de otro tipo de día
+        if (!esAdminRef.current && !esTipoDeHoy(registro.tipo_dia)) return; // chofer: solo el día de hoy
         setClientes(prev => { if (prev.some(c => c.id === registro.id)) return prev; return [...prev, registro].sort((a, b) => (a.horario || '').localeCompare(b.horario || '')); });
         if (!esAdminRef.current) notificarCambioDesdecentral({ tipo: 'INSERT', clienteNombre: registro.cliente, clienteDireccion: registro.direccion });
       })
