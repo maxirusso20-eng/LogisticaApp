@@ -183,7 +183,6 @@ export default function MapaScreen() {
   const {
     vehiculos,
     paradas,
-    cargando,
     ultimaActualizacion,
     esAdmin,
     choferSeleccionado,

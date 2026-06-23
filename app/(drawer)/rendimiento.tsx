@@ -12,13 +12,13 @@ import {
 } from 'react-native';
 import {
   acumularPorChofer, calcularDesempenoConducta, calcularRendimientoKPI,
-  colorDesempeno, cumpleSLA, fmtPct, NEGATIVOS, penalidadAusencias, POSITIVOS, SLA_MINIMO,
+  colorDesempeno, type ChoferKpi, cumpleSLA, fmtPct, NEGATIVOS, penalidadAusencias, POSITIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 
 export default function RendimientoScreen() {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const [registros, setRegistros] = useState<any[]>([]);
   const [ausencias, setAusencias] = useState<any[]>([]);
   const [miNombre, setMiNombre] = useState('');
@@ -55,7 +55,7 @@ export default function RendimientoScreen() {
   const ranking = useMemo(() => {
     const porChofer = acumularPorChofer(registros);
     return Object.values(porChofer)
-      .map((k) => {
+      .map((k): ChoferKpi => {
         const kpi = calcularRendimientoKPI(k);
         return { ...k, reputacion: kpi.pct, demorados: kpi.demorados, pctObservacion: kpi.pctObservacion };
       })
