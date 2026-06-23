@@ -166,6 +166,7 @@ const ITEMS_ADMIN = [
   { name: 'ausencias', label: 'Ausencias', icon: 'calendar-clear-outline', route: '/(drawer)/ausencias' },
   { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
   { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
+  { name: 'ayuda', label: 'Guía de la app', icon: 'book-outline', route: '/(drawer)/ayuda' },
 ];
 const ITEMS_CHOFER = [
   { name: 'Panel', label: 'Panel del Dia', icon: 'clipboard-outline', route: '/(drawer)/Panel' },
@@ -403,6 +404,10 @@ export default function DrawerLayout() {
       <Drawer.Screen
         name="ausencias"
         options={{ title: 'Ausencias', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
+      />
+      <Drawer.Screen
+        name="ayuda"
+        options={{ title: 'Guía de la app', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
       />
       <Drawer.Screen
         name="mis-ausencias"
