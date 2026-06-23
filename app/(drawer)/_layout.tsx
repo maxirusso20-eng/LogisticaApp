@@ -161,6 +161,7 @@ const ITEMS_ADMIN = [
   { name: 'mapa', label: 'Mapa de Rutas', icon: 'map-outline', route: '/(drawer)/mapa' },
   { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas' },
   { name: 'estadisticas', label: 'Estadísticas', icon: 'bar-chart-outline', route: '/(drawer)/estadisticas' },
+  { name: 'desempeno', label: 'Desempeño', icon: 'speedometer-outline', route: '/(drawer)/desempeno' },
   { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
   { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
 ];
@@ -390,6 +391,10 @@ export default function DrawerLayout() {
       <Drawer.Screen
         name="clientes"
         options={{ title: 'Clientes', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
+      />
+      <Drawer.Screen
+        name="desempeno"
+        options={{ title: 'Desempeño', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
       />
       <Drawer.Screen
         name="escaner"
