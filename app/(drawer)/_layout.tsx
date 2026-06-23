@@ -171,6 +171,8 @@ const ITEMS_CHOFER = [
   { name: 'Panel', label: 'Panel del Dia', icon: 'clipboard-outline', route: '/(drawer)/Panel' },
   { name: 'rendimiento', label: 'Mi Rendimiento', icon: 'stats-chart-outline', route: '/(drawer)/rendimiento' },
   { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
+  { name: 'mis-ausencias', label: 'Mis Ausencias', icon: 'calendar-clear-outline', route: '/(drawer)/mis-ausencias' },
+  { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia' },
   { name: 'colectas', label: 'Mis Colectas', icon: 'archive-outline', route: '/(drawer)/colectas' },
   { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
   { name: 'escaner', label: 'Escanear QR', icon: 'qr-code-outline', route: '/(drawer)/escaner' },
@@ -401,6 +403,14 @@ export default function DrawerLayout() {
       <Drawer.Screen
         name="ausencias"
         options={{ title: 'Ausencias', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
+      />
+      <Drawer.Screen
+        name="mis-ausencias"
+        options={{ title: 'Mis Ausencias', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
+      />
+      <Drawer.Screen
+        name="guia"
+        options={{ title: 'Cómo se mide', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
       />
       <Drawer.Screen
         name="escaner"
