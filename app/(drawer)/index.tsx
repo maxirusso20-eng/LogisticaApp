@@ -271,7 +271,11 @@ export default function RecorridosScreen() {
   const [tipoDia, setTipoDia] = useState<TipoDia>('semana');
 
   const [choferes, setChoferes] = useState<Chofer[]>([]);
-  const [recorridos, setRecorridos] = useState<Record<ZonaKey, Recorrido[]>>({ 'ZONA OESTE': [], 'ZONA SUR': [], 'ZONA NORTE': [], 'CABA': [] });
+  const emptyZonas = { 'ZONA OESTE': [] as Recorrido[], 'ZONA SUR': [] as Recorrido[], 'ZONA NORTE': [] as Recorrido[], 'CABA': [] as Recorrido[] };
+  const [dataSemana, setDataSemana] = useState<Record<ZonaKey, Recorrido[]>>({ ...emptyZonas });
+  const [dataSabado, setDataSabado] = useState<Record<ZonaKey, Recorrido[]>>({ ...emptyZonas });
+  // Vista activa derivada del tab — cambiar de tab NO hace fetch
+  const recorridos = tipoDia === 'semana' ? dataSemana : dataSabado;
   const [zonasVisibles, setZonasVisibles] = useState<Record<ZonaKey, boolean>>({ 'ZONA OESTE': true, 'ZONA SUR': true, 'ZONA NORTE': true, 'CABA': true });
   const [refrescando, setRefrescando] = useState(false);
   const [modalRecorrido, setModalRecorrido] = useState(false);
@@ -292,21 +296,25 @@ export default function RecorridosScreen() {
     } catch (err) { console.error('Error cargando choferes:', err); }
   }, []);
 
-  // refreshRecorridos depende de tipoDia: al cambiar la pestaña se recarga
-  const refreshRecorridos = useCallback(async () => {
-    const tablaActiva = tipoDia === 'semana' ? 'Recorridos' : 'recorridos_sabados';
+  // Carga una tabla específica y guarda en el setter correspondiente
+  const loadTabla = useCallback(async (tabla: 'Recorridos' | 'recorridos_sabados', setter: React.Dispatch<React.SetStateAction<Record<ZonaKey, Recorrido[]>>>) => {
     try {
-      const { data, error } = await supabase
-        .from(tablaActiva)
-        .select('*')
-        .order('orden', { ascending: true, nullsFirst: false });
+      const { data, error } = await supabase.from(tabla).select('*').order('orden', { ascending: true, nullsFirst: false });
       if (error) throw error;
       const porZona: Record<ZonaKey, Recorrido[]> = { 'ZONA OESTE': [], 'ZONA SUR': [], 'ZONA NORTE': [], 'CABA': [] };
       (data || []).forEach(rec => { const zona = rec.zona as ZonaKey; if (zona in porZona) porZona[zona].push(rec); });
       (Object.keys(porZona) as ZonaKey[]).forEach(z => porZona[z].sort(compararRecorridoPorOrden));
-      setRecorridos(porZona);
-    } catch (err) { console.error('Error cargando recorridos:', err); }
-  }, [tipoDia]); // ← se recrea (y por tanto re-ejecuta) al cambiar de pestaña
+      setter(porZona);
+    } catch (err) { console.error(`Error cargando ${tabla}:`, err); }
+  }, []);
+
+  // Carga AMBAS tablas — no depende de tipoDia → identidad estable
+  const refreshRecorridos = useCallback(async () => {
+    await Promise.all([
+      loadTabla('Recorridos', setDataSemana),
+      loadTabla('recorridos_sabados', setDataSabado),
+    ]);
+  }, [loadTabla]);
 
   const fetchColectasPendientes = useCallback(async () => {
     try {
@@ -365,12 +373,13 @@ export default function RecorridosScreen() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(fn, 320);
     };
-    const onRecorridoEco = () => { if (Date.now() < suppressEchoRef.current) return; schedule(refreshRecorridos); };
+    const onSemanaEco = () => { if (Date.now() < suppressEchoRef.current) return; schedule(() => loadTabla('Recorridos', setDataSemana)); };
+    const onSabadoEco = () => { if (Date.now() < suppressEchoRef.current) return; schedule(() => loadTabla('recorridos_sabados', setDataSabado)); };
 
     const channel = supabase
       .channel('logistica-public-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'Recorridos' }, onRecorridoEco)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'recorridos_sabados' }, onRecorridoEco)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Recorridos' }, onSemanaEco)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'recorridos_sabados' }, onSabadoEco)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'Choferes' }, () => schedule(refreshChoferes))
       .subscribe();
 
@@ -378,7 +387,7 @@ export default function RecorridosScreen() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       void supabase.removeChannel(channel);
     };
-  }, [refreshRecorridos, refreshChoferes]);
+  }, [loadTabla, refreshChoferes]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Mutaciones — usan tablaActiva dinámicamente
@@ -387,8 +396,11 @@ export default function RecorridosScreen() {
   // Refs para que actualizarRecorrido/toggle tengan identidad ESTABLE (no se
   // recrean en cada render) → React.memo de TablaZona funciona y solo
   // re-renderiza la zona editada, no las 4.
-  const recorridosRef = useRef(recorridos);
-  useEffect(() => { recorridosRef.current = recorridos; }, [recorridos]);
+  // Ref siempre apunta a la data de AMBOS tabs para que actualizarRecorrido lea la correcta
+  const dataSemanaRef = useRef(dataSemana);
+  useEffect(() => { dataSemanaRef.current = dataSemana; }, [dataSemana]);
+  const dataSabadoRef = useRef(dataSabado);
+  useEffect(() => { dataSabadoRef.current = dataSabado; }, [dataSabado]);
   const tipoDiaRef = useRef(tipoDia);
   useEffect(() => { tipoDiaRef.current = tipoDia; }, [tipoDia]);
   const choferesRef = useRef(choferes);
@@ -408,8 +420,9 @@ export default function RecorridosScreen() {
   // persistimos a la base con debounce por celda (sin setRecorridos → el padre
   // no se re-renderiza en cada tecla).
   const actualizarRecorrido = useCallback((zona: ZonaKey, index: number, campo: string, valor: string) => {
-    const tablaActiva = tipoDiaRef.current === 'semana' ? 'Recorridos' : 'recorridos_sabados';
-    const anterior = recorridosRef.current[zona]?.[index];
+    const esSemana = tipoDiaRef.current === 'semana';
+    const tablaActiva = esSemana ? 'Recorridos' : 'recorridos_sabados';
+    const anterior = (esSemana ? dataSemanaRef.current : dataSabadoRef.current)[zona]?.[index];
     if (!anterior) return;
     const idDb = anterior.id;
 
@@ -441,9 +454,11 @@ export default function RecorridosScreen() {
   }, []);
 
   const agregarRecorrido = async (zona: ZonaKey, localidad: string) => {
-    const tablaActiva = tipoDia === 'semana' ? 'Recorridos' : 'recorridos_sabados';
+    const esSemana = tipoDia === 'semana';
+    const tablaActiva = esSemana ? 'Recorridos' : 'recorridos_sabados';
+    const setter = esSemana ? setDataSemana : setDataSabado;
     const nuevo = { zona, localidad, idChofer: 0, chofer: 'Sin Asignar', pqteDia: 0, porFuera: 0, entregados: 0 };
-    setRecorridos(prev => ({ ...prev, [zona]: [...prev[zona], nuevo].sort(compararRecorridoPorOrden) }));
+    setter(prev => ({ ...prev, [zona]: [...prev[zona], nuevo].sort(compararRecorridoPorOrden) }));
     setModalRecorrido(false);
     try { await supabase.from(tablaActiva).insert([nuevo]); } catch (err) { console.error('Error insertando recorrido:', err); }
   };

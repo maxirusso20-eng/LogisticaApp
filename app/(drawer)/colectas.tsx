@@ -676,18 +676,45 @@ export default function ColectasScreen() {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'Clientes' }, (payload) => {
         const registro = payload.new as Cliente & { email_chofer?: string };
         const registroOld = payload.old as Cliente & { email_chofer?: string };
+        const miEmail = emailUsuarioRef.current;
+
+        if (esAdminRef.current) {
+          // Admin: siempre actualizar in-place (ve todas las colectas)
+          setClientes(prev => prev.map(c => c.id === registro.id ? { ...c, ...registro } : c));
+          return;
+        }
+
+        // ── Chofer: manejar reasignación de chofer ──
+        const emailViejo = (registroOld.email_chofer || '').trim();
+        const emailNuevo = (registro.email_chofer || '').trim();
+        const choferCambio = emailViejo !== emailNuevo;
+
+        if (choferCambio) {
+          if (emailNuevo === miEmail && esTipoDeHoy(registro.tipo_dia)) {
+            // Me asignaron esta colecta → agregar si no existe
+            setClientes(prev => {
+              if (prev.some(c => c.id === registro.id)) return prev.map(c => c.id === registro.id ? { ...c, ...registro } : c);
+              return [...prev, registro].sort((a, b) => (a.horario || '').localeCompare(b.horario || ''));
+            });
+            notificarCambioDesdecentral({ tipo: 'INSERT', clienteNombre: registro.cliente, clienteDireccion: registro.direccion });
+          } else if (emailViejo === miEmail) {
+            // Me sacaron esta colecta → remover de mi lista
+            setClientes(prev => prev.filter(c => c.id !== registro.id));
+            notificarCambioDesdecentral({ tipo: 'DELETE', clienteNombre: registro.cliente });
+          }
+          return;
+        }
+
+        // ── Sin cambio de chofer: actualizar in-place si es mía ──
+        if (emailNuevo !== miEmail) return;
         setClientes(prev => prev.map(c => c.id === registro.id ? { ...c, ...registro } : c));
-        if (esAdminRef.current) return;
+
         const idStr = String(registro.id);
         const ts = ignorarNotificacionesCache.get(idStr);
         if (ts !== undefined) { const edad = Date.now() - ts; ignorarNotificacionesCache.delete(idStr); if (edad < CACHE_TTL_MS) return; }
-        const ev = registroOld.email_chofer?.trim() || '';
-        const en = registro.email_chofer?.trim() || '';
-        if (!en || en !== emailUsuarioRef.current) return;
-        const esNueva = !ev && !!en;
-        if (!esNueva && registro.completado === registroOld.completado) return;
-        if (esNueva) { notificarCambioDesdecentral({ tipo: 'INSERT', clienteNombre: registro.cliente, clienteDireccion: registro.direccion }); return; }
-        notificarCambioDesdecentral({ tipo: 'UPDATE', clienteNombre: registro.cliente, clienteDireccion: registro.direccion, nuevoEstado: registro.completado });
+        if (registro.completado !== registroOld.completado) {
+          notificarCambioDesdecentral({ tipo: 'UPDATE', clienteNombre: registro.cliente, clienteDireccion: registro.direccion, nuevoEstado: registro.completado });
+        }
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Clientes' }, (payload) => {
         const registro = payload.new as Cliente & { email_chofer?: string };
