@@ -88,17 +88,39 @@ interface FilaRecorridoProps { rec: Recorrido; zona: ZonaKey; index: number; imp
 const FilaRecorrido = React.memo<FilaRecorridoProps>(({ rec, zona, index, impar, choferes, onActualizar }) => {
   const { colors } = useTheme();
   const color = ZONA_COLORES[zona];
+
+  // Estado LOCAL de los campos editables: tipear actualiza SOLO esta fila y no
+  // toca el estado del padre → no re-renderiza la pantalla entera (ese era el
+  // lag). La persistencia a la base la hace onActualizar con debounce. Si el rec
+  // cambia desde afuera (refresh / otro equipo), se re-sincroniza.
+  const [idChofer, setIdChofer] = useState(rec.idChofer?.toString() ?? '0');
+  const [pqteDia, setPqteDia] = useState(rec.pqteDia?.toString() ?? '0');
+  const [porFuera, setPorFuera] = useState(rec.porFuera?.toString() ?? '0');
+  const [entregados, setEntregados] = useState(rec.entregados?.toString() ?? '0');
+  useEffect(() => { setIdChofer(rec.idChofer?.toString() ?? '0'); }, [rec.idChofer]);
+  useEffect(() => { setPqteDia(rec.pqteDia?.toString() ?? '0'); }, [rec.pqteDia]);
+  useEffect(() => { setPorFuera(rec.porFuera?.toString() ?? '0'); }, [rec.porFuera]);
+  useEffect(() => { setEntregados(rec.entregados?.toString() ?? '0'); }, [rec.entregados]);
+
+  const nPqte = parseInt(pqteDia) || 0, nFuera = parseInt(porFuera) || 0, nEnt = parseInt(entregados) || 0;
+  const total = nPqte + nFuera;
+  const restante = total - nEnt;
+  const pct = total > 0 ? `${Math.round((nEnt / total) * 100)}%` : '0%';
+  const nombreCh = choferes.find(c => c.id === (parseInt(idChofer) || 0))?.nombre ?? 'Sin Asignar';
+
+  const onCh = (set: (v: string) => void, campo: string) => (v: string) => { set(v); onActualizar(zona, index, campo, v); };
+
   return (
     <View style={[S.filaTabla, impar && { backgroundColor: colors.bgCard }]}>
       <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { color: colors.textSecondary }]}>{rec.localidad}</Text></View>
-      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: '#60a5fa' }]} keyboardType="numeric" value={rec.idChofer?.toString() || '0'} onChangeText={v => onActualizar(zona, index, 'idChofer', v)} selectTextOnFocus /></View>
-      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { color: colors.textSecondary }]}>{nombreChoferVisible(rec, choferes)}</Text></View>
-      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={rec.pqteDia?.toString() || '0'} onChangeText={v => onActualizar(zona, index, 'pqteDia', v)} selectTextOnFocus /></View>
-      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={rec.porFuera?.toString() || '0'} onChangeText={v => onActualizar(zona, index, 'porFuera', v)} selectTextOnFocus /></View>
-      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { color: '#a78bfa', fontWeight: '800' }]}>{calcularTotal(rec)}</Text></View>
-      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={rec.entregados?.toString() || '0'} onChangeText={v => onActualizar(zona, index, 'entregados', v)} selectTextOnFocus /></View>
-      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { fontWeight: '800', color: calcularRestante(rec) === 0 ? '#34D399' : calcularRestante(rec) <= 10 ? '#f59e0b' : '#f87171' }]}>{calcularRestante(rec)}</Text></View>
-      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.porcentaje, { color }]}>{calcularPorcentaje(rec)}</Text></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: '#60a5fa' }]} keyboardType="numeric" value={idChofer} onChangeText={onCh(setIdChofer, 'idChofer')} selectTextOnFocus /></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { color: colors.textSecondary }]}>{nombreCh}</Text></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={pqteDia} onChangeText={onCh(setPqteDia, 'pqteDia')} selectTextOnFocus /></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={porFuera} onChangeText={onCh(setPorFuera, 'porFuera')} selectTextOnFocus /></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { color: '#a78bfa', fontWeight: '800' }]}>{total}</Text></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><TextInput style={[S.inputTabla, { color: colors.textSecondary }]} keyboardType="numeric" value={entregados} onChangeText={onCh(setEntregados, 'entregados')} selectTextOnFocus /></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.textoCelda, { fontWeight: '800', color: restante === 0 ? '#34D399' : restante <= 10 ? '#f59e0b' : '#f87171' }]}>{restante}</Text></View>
+      <View style={[S.celda, { borderBottomColor: colors.borderSubtle }]}><Text style={[S.porcentaje, { color }]}>{pct}</Text></View>
     </View>
   );
 });
@@ -382,36 +404,34 @@ export default function RecorridosScreen() {
     setZonasVisibles(prev => ({ ...prev, [z]: !prev[z] }));
   }, []);
 
+  // El valor mientras se tipea lo mantiene la fila (estado local). Acá SOLO
+  // persistimos a la base con debounce por celda (sin setRecorridos → el padre
+  // no se re-renderiza en cada tecla).
   const actualizarRecorrido = useCallback((zona: ZonaKey, index: number, campo: string, valor: string) => {
     const tablaActiva = tipoDiaRef.current === 'semana' ? 'Recorridos' : 'recorridos_sabados';
     const anterior = recorridosRef.current[zona]?.[index];
     if (!anterior) return;
-    const copia: any = { ...anterior };
+    const idDb = anterior.id;
 
+    let val: any = valor;
+    let choferNombre: string | undefined;
     if (['pqteDia', 'porFuera', 'entregados'].includes(campo)) {
-      copia[campo] = parseInt(valor) || 0;
+      val = parseInt(valor) || 0;
     } else if (campo === 'idChofer') {
-      copia.idChofer = parseInt(valor) || 0;
-      copia.chofer = choferesRef.current.find(c => c.id === copia.idChofer)?.nombre ?? 'Sin Asignar';
-    } else {
-      copia[campo] = valor;
+      val = parseInt(valor) || 0;
+      choferNombre = choferesRef.current.find(c => c.id === val)?.nombre ?? 'Sin Asignar';
     }
 
-    // Optimistic update inmediato (tipeo fluido).
-    setRecorridos(prev => { const lista = [...prev[zona]]; lista[index] = copia; return { ...prev, [zona]: lista }; });
-
-    // Persistir con debounce por celda.
-    const idDb = anterior.id;
-    const key = `${tablaActiva}:${idDb ?? copia.localidad}:${campo}`;
+    const key = `${tablaActiva}:${idDb ?? anterior.localidad}:${campo}`;
     if (writeTimers.current[key]) clearTimeout(writeTimers.current[key]);
     writeTimers.current[key] = setTimeout(async () => {
       suppressEchoRef.current = Date.now() + 2500; // ignorar el eco de esta escritura
       try {
-        const payload: Record<string, any> = { [campo]: copia[campo] };
-        if (campo === 'idChofer') payload.chofer = copia.chofer;
+        const payload: Record<string, any> = { [campo]: val };
+        if (campo === 'idChofer' && choferNombre !== undefined) payload.chofer = choferNombre;
         const query = idDb
           ? supabase.from(tablaActiva).update(payload).eq('id', idDb)
-          : supabase.from(tablaActiva).update(payload).match({ zona, localidad: copia.localidad });
+          : supabase.from(tablaActiva).update(payload).match({ zona, localidad: anterior.localidad });
         const { error } = await query;
         if (error) throw error;
       } catch (err) {
