@@ -157,6 +157,7 @@ function HeaderRight() {
 const ITEMS_ADMIN = [
   { name: 'index', label: 'Recorridos', icon: 'bus-outline', route: '/(drawer)/' },
   { name: 'personal', label: 'Choferes', icon: 'people-outline', route: '/(drawer)/personal' },
+  { name: 'clientes', label: 'Clientes', icon: 'business-outline', route: '/(drawer)/clientes' },
   { name: 'mapa', label: 'Mapa de Rutas', icon: 'map-outline', route: '/(drawer)/mapa' },
   { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas' },
   { name: 'estadisticas', label: 'Estadísticas', icon: 'bar-chart-outline', route: '/(drawer)/estadisticas' },
@@ -385,6 +386,10 @@ export default function DrawerLayout() {
       <Drawer.Screen
         name="estadisticas"
         options={{ title: 'Estadísticas', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
+      />
+      <Drawer.Screen
+        name="clientes"
+        options={{ title: 'Clientes', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
       />
       <Drawer.Screen
         name="escaner"
