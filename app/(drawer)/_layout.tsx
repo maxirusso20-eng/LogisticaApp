@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { ADMIN_EMAIL, APP_NAME, APP_VERSION } from '../../lib/constants';
+import { forceStopTracking } from '../../lib/locationTracker';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 
@@ -124,7 +125,7 @@ function HeaderRight() {
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Salir', style: 'destructive', onPress: async () => {
-          try { await supabase.auth.signOut(); router.replace('/login' as any); }
+          try { await forceStopTracking(); await supabase.auth.signOut(); router.replace('/login' as any); }
           catch { Alert.alert('Error', 'No se pudo cerrar la sesion.'); }
         },
       },

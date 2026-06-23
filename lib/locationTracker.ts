@@ -1,170 +1,103 @@
 // lib/locationTracker.ts
+// ─────────────────────────────────────────────────────────────────────────
+// Tracker de ubicación en SEGUNDO PLANO (background) para el chofer.
 //
-// Tracker de ubicación en PRIMER PLANO con REFERENCE COUNTING.
+// A diferencia de la web (PWA, solo foreground) y de la versión anterior de
+// este archivo (watchPositionAsync, también foreground), esto usa
+// expo-task-manager + Location.startLocationUpdatesAsync: la posición se sigue
+// reportando AUNQUE la app esté minimizada o el celular bloqueado, hasta que
+// el chofer cierra sesión (forceStopTracking).
 //
-// Problema original: colectas.tsx llamaba startTracking() al montar y
-// stopTracking() al desmontar. Pero mapa.tsx también usa el tracker.
-// Si el chofer estaba en colectas (tracker activo) y navegaba a mapa:
-//   - mapa llama startTracking() → OK, ya está corriendo
-//   - al salir de colectas, se llamaba stopTracking() → mataba el tracker
-//     aunque mapa lo seguía necesitando.
+// Escribe via RPC seguro `actualizar_mi_ubicacion` (SECURITY DEFINER, toma el
+// email del JWT) — la RLS de Choferes es admin-only para escritura, así que un
+// UPDATE directo del chofer NO funcionaría.
 //
-// Solución: contador de referencias. stopTracking() solo detiene cuando
-// refCount llega a 0. Cada pantalla debe balancear sus start/stop.
-
+// Requisitos (ya configurados en app.json): permisos de background location
+// (iOS UIBackgroundModes=location, Android ACCESS_BACKGROUND_LOCATION) + plugin
+// expo-location con isAndroidBackgroundLocationEnabled. NO funciona en Expo Go:
+// necesita un dev build / build de EAS para que corra la tarea de fondo.
+// ─────────────────────────────────────────────────────────────────────────
 import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
 import { supabase } from './supabase';
-
-// Estado interno del singleton
-let watcherSubscription: Location.LocationSubscription | null = null;
-let refCount = 0;
-let choferIdCache: number | null = null;
-let emailActivo: string | null = null;
 
 export type GpsStatus = 'off' | 'foreground' | 'background' | 'denied';
 
-/**
- * Inicia el rastreo de ubicación en foreground y actualiza Supabase.
- * Ref-counted: llamadas múltiples incrementan el contador, stopTracking()
- * solo detiene el watcher cuando el contador llega a 0.
- *
- * @param emailChofer  Email del chofer logueado
- * @returns            Estado del GPS
- */
-export async function startTracking(emailChofer: string): Promise<GpsStatus> {
-  // Si ya hay tracker activo para OTRO email, detenerlo y reiniciar
-  // (caso edge: logout + login con otro usuario sin cerrar la app)
-  if (watcherSubscription && emailActivo && emailActivo !== emailChofer) {
-    console.log('[GPS] Cambio de usuario → reiniciando tracker');
-    watcherSubscription.remove();
-    watcherSubscription = null;
-    refCount = 0;
-    choferIdCache = null;
-  }
+const TASK = 'hogareno-background-location';
 
-  // Incrementar ref count
-  refCount++;
-
-  // Si ya hay un watcher activo para este mismo email → no-op
-  if (watcherSubscription && emailActivo === emailChofer) {
-    console.log(`[GPS] Ya activo, refCount=${refCount}`);
-    return 'foreground';
-  }
-
-  // Pedir permiso de foreground
-  const { status } = await Location.requestForegroundPermissionsAsync();
-  if (status !== 'granted') {
-    console.warn('[GPS] Permiso denegado');
-    refCount = Math.max(0, refCount - 1); // rollback del increment
-    return 'denied';
-  }
-
-  // Buscar ID del chofer (cache)
+// Tarea de fondo: corre en su propio contexto (incluso con la app cerrada/
+// bloqueada). Toma la última posición del lote y la manda con el RPC seguro.
+TaskManager.defineTask(TASK, async ({ data, error }) => {
+  if (error || !data) return;
+  const { locations } = data as { locations: Location.LocationObject[] };
+  const loc = locations?.[locations.length - 1];
+  if (!loc) return;
   try {
-    const { data } = await supabase
-      .from('Choferes')
-      .select('id')
-      .eq('email', emailChofer)
-      .maybeSingle();
-    choferIdCache = data?.id ?? null;
-  } catch (err) {
-    console.warn('[GPS] No se pudo obtener el ID del chofer:', err);
-  }
-
-  emailActivo = emailChofer;
-
-  // Posición inicial (no bloqueante)
-  try {
-    const pos = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
+    await supabase.rpc('actualizar_mi_ubicacion', {
+      p_lat: loc.coords.latitude,
+      p_lng: loc.coords.longitude,
     });
-    if (choferIdCache) {
-      void supabase.from('Choferes').update({
-        latitud: pos.coords.latitude,
-        longitud: pos.coords.longitude,
-        ultima_actualizacion: new Date().toISOString(),
-      }).eq('id', choferIdCache);
-    }
   } catch {
-    // silencioso — el watcher se encarga
+    // Sin sesión/red en este tick: el próximo intento reescribe igual.
   }
+});
 
-  // Iniciar watcher
+let estado: GpsStatus = 'off';
+
+/**
+ * Inicia el seguimiento en segundo plano. Idempotente (si ya está corriendo,
+ * no lo duplica). El `email` se mantiene por compatibilidad con quienes lo
+ * llaman; la identidad real la resuelve el RPC desde el JWT.
+ */
+export async function startTracking(email?: string): Promise<GpsStatus> {
+  void email;
+  const fg = await Location.requestForegroundPermissionsAsync();
+  if (fg.status !== 'granted') { estado = 'denied'; return 'denied'; }
+
+  // Permiso "en todo momento". Si lo deniegan, igual se trackea en foreground.
+  let bgOk = false;
   try {
-    watcherSubscription = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.Balanced,
-        distanceInterval: 20,
-        timeInterval: 15000,
-        mayShowUserSettingsDialog: false,
-      },
-      async (location) => {
-        if (!choferIdCache) return;
-        const { latitude, longitude } = location.coords;
-        try {
-          await supabase.from('Choferes').update({
-            latitud: latitude,
-            longitud: longitude,
-            ultima_actualizacion: new Date().toISOString(),
-          }).eq('id', choferIdCache);
-        } catch (err) {
-          console.warn('[GPS] Error actualizando posición:', err);
-        }
-      }
-    );
-  } catch (err) {
-    console.warn('[GPS] watchPositionAsync no disponible:', err);
-    refCount = Math.max(0, refCount - 1);
-    emailActivo = null;
-    return 'denied';
-  }
+    const bg = await Location.requestBackgroundPermissionsAsync();
+    bgOk = bg.status === 'granted';
+  } catch { /* algunos devices no piden background por separado */ }
 
-  console.log(`[GPS] Tracker iniciado para ${emailChofer}, refCount=${refCount}`);
-  return 'foreground';
+  const yaCorre = await Location.hasStartedLocationUpdatesAsync(TASK).catch(() => false);
+  if (!yaCorre) {
+    await Location.startLocationUpdatesAsync(TASK, {
+      accuracy: Location.Accuracy.Balanced,
+      timeInterval: 15000,      // ~cada 15s
+      distanceInterval: 20,     // o cada 20 m
+      pausesUpdatesAutomatically: false,
+      showsBackgroundLocationIndicator: true, // iOS: indicador azul
+      foregroundService: {       // Android: notificación persistente (obligatoria)
+        notificationTitle: 'Logística Hogareño',
+        notificationBody: 'Compartiendo tu ubicación con la logística.',
+      },
+    });
+  }
+  estado = bgOk ? 'background' : 'foreground';
+  return estado;
 }
 
 /**
- * Decrementa el contador. Solo detiene el watcher cuando llega a 0.
- * Cada startTracking() debe tener su stopTracking() correspondiente.
+ * NO detiene el seguimiento. En la versión foreground anterior, salir de una
+ * pantalla lo apagaba; para tracking de flota queremos que SIGA en segundo
+ * plano. El corte real es al cerrar sesión (forceStopTracking). Se deja como
+ * no-op para no romper a colectas/mapa que lo llaman al desmontar.
  */
 export async function stopTracking(): Promise<void> {
-  if (refCount <= 0) return;
-
-  refCount--;
-  console.log(`[GPS] stopTracking llamado, refCount=${refCount}`);
-
-  if (refCount === 0 && watcherSubscription) {
-    console.log('[GPS] Sin referencias activas → deteniendo watcher');
-    watcherSubscription.remove();
-    watcherSubscription = null;
-    choferIdCache = null;
-    emailActivo = null;
-  }
+  // intencionalmente vacío — el tracking persiste hasta el logout.
 }
 
-/**
- * Detiene forzadamente el tracker y resetea el contador.
- * Usar solo en logout para limpiar estado.
- */
+/** Detiene de verdad el seguimiento. Llamar en el LOGOUT. */
 export async function forceStopTracking(): Promise<void> {
-  if (watcherSubscription) {
-    watcherSubscription.remove();
-    watcherSubscription = null;
-  }
-  refCount = 0;
-  choferIdCache = null;
-  emailActivo = null;
-  console.log('[GPS] Force stop — estado limpio');
+  try {
+    const yaCorre = await Location.hasStartedLocationUpdatesAsync(TASK);
+    if (yaCorre) await Location.stopLocationUpdatesAsync(TASK);
+  } catch { /* ignore */ }
+  estado = 'off';
 }
 
-/**
- * Devuelve el estado actual (útil para debug / UI).
- */
 export function getTrackerState() {
-  return {
-    activo: watcherSubscription !== null,
-    refCount,
-    emailActivo,
-    choferId: choferIdCache,
-  };
+  return { activo: estado === 'foreground' || estado === 'background', status: estado };
 }
