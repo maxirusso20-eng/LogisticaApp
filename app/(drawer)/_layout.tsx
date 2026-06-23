@@ -19,6 +19,7 @@ import { ADMIN_EMAIL, APP_NAME, APP_VERSION } from '../../lib/constants';
 import { forceStopTracking } from '../../lib/locationTracker';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
+import { usePushTokenSync } from '../_hooks/usePushTokenSync';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -340,6 +341,12 @@ function DrawerContent(props: any) {
 export default function DrawerLayout() {
   const { esAdmin } = useEsAdmin();
   const { colors, isDark } = useTheme();
+
+  // Registra/refresca el push token al entrar a la app, para CUALQUIER usuario
+  // (admin o chofer), sin depender de qué pantalla abra. Sin esto, un chofer que
+  // aterriza en "Mis Colectas" y no entra a Chat nunca guardaba su push_token y
+  // jamás recibía las notificaciones de colectas. Detecta solo admin vs chofer.
+  usePushTokenSync();
 
   useEffect(() => {
     if (esAdmin !== null) SplashScreen.hideAsync();

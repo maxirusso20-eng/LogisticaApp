@@ -20,7 +20,6 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
-import { ADMIN_EMAIL } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
 
 async function obtenerPushToken(): Promise<string | null> {
@@ -68,13 +67,13 @@ export function usePushTokenSync(): void {
         const token = await obtenerPushToken();
         if (!token) return;
 
-        const tabla = user.email === ADMIN_EMAIL ? 'Admins' : 'Choferes';
-        const { error } = await supabase
-          .from(tabla)
-          .update({ push_token: token })
-          .eq('email', user.email);
+        // Guardado vía RPC SECURITY DEFINER: el chofer NO puede UPDATE su fila en
+        // Choferes (RLS solo admite admin). La RPC actualiza la fila propia del
+        // caller (match por email del JWT), salteando RLS de forma acotada. Sirve
+        // tanto para chofer (Choferes) como admin (Admins).
+        const { error } = await supabase.rpc('guardar_mi_push_token', { p_token: token });
 
-        if (error) console.warn(`[PushToken] No se pudo guardar en ${tabla}:`, error.message);
+        if (error) console.warn('[PushToken] No se pudo guardar (RPC):', error.message);
       } catch (err) {
         console.warn('[PushToken] Error general:', err);
       }
