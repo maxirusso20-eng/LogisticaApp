@@ -447,8 +447,8 @@ export default function PersonalScreen() {
         {search ? <TouchableOpacity onPress={() => setSearch('')}><Ionicons name="close-circle" size={18} color={colors.textMuted} /></TouchableOpacity> : null}
       </View>
 
-      {/* Filtros por condición con contadores */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={P.filtros} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
+      {/* Filtros por condición con contadores (envuelven en varias líneas) */}
+      <View style={P.filtros}>
         {FILTROS.map(f => {
           const activo = filtro === f.key;
           const n = conteos[f.key] ?? 0;
@@ -463,7 +463,7 @@ export default function PersonalScreen() {
             </TouchableOpacity>
           );
         })}
-      </ScrollView>
+      </View>
 
       <FlatList
         data={filtrados}
@@ -497,7 +497,7 @@ const P = StyleSheet.create({
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 11 },
   addBtnTxt: { color: '#fff', fontSize: 13.5, fontWeight: '800' },
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 1 },
-  filtros: { marginTop: 12, marginBottom: 2, flexGrow: 0 },
+  filtros: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, marginTop: 12, marginBottom: 4 },
   filtroChip: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 13, paddingVertical: 7, borderRadius: 999, borderWidth: 1.5 },
   filtroTxt: { fontSize: 13, fontWeight: '700' },
   filtroCount: { minWidth: 20, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 999, alignItems: 'center' },

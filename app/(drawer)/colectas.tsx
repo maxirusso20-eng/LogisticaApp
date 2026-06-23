@@ -93,9 +93,18 @@ async function enviarMensajeAutoChatColecta(emailChofer: string, nombreColecta: 
 interface Cliente {
   id: number | string; cliente: string; direccion: string; horario: string;
   chofer: string; completado: boolean; foto_url?: string | null; firma_url?: string | null; email_chofer?: string;
+  tipo_dia?: string | null;
 }
 interface GrupoChofer { nombre: string; colectas: Cliente[]; hechas: number; total: number; }
 type FiltroColecta = 'todas' | 'pendientes' | 'completadas';
+
+// "Colectas de Hoy" muestra SOLO las del tipo de día actual, así no se mezclan
+// las de Semana con las de Sábados. Sábado = getDay()===6; el resto = Semana
+// (incluye tipo_dia null/'' como semana, igual que la pantalla Clientes).
+const esTipoDeHoy = (td?: string | null) => {
+  const t = (td || '').toString().trim().toUpperCase();
+  return new Date().getDay() === 6 ? t === 'SÁBADOS' : t !== 'SÁBADOS';
+};
 
 const parsearHorario = (horario: string): number | null => {
   if (!horario) return null;
@@ -630,11 +639,12 @@ export default function ColectasScreen() {
         if (cd?.nombre) setNombre(cd.nombre.split(' ')[0]);
         else { const fb: string = user.user_metadata?.full_name || user.user_metadata?.name || user.email.split('@')[0]; setNombre(fb.split(' ')[0]); }
       } catch { const fb = user.user_metadata?.full_name || user.email.split('@')[0]; setNombre(fb.split(' ')[0]); }
-      let query = supabase.from('Clientes').select('id, cliente, direccion, horario, chofer, completado, foto_url, firma_url, email_chofer').order('horario', { ascending: true });
+      let query = supabase.from('Clientes').select('id, cliente, direccion, horario, chofer, completado, foto_url, firma_url, email_chofer, tipo_dia').order('horario', { ascending: true });
       if (!esAdminRef.current) query = query.eq('email_chofer', user.email);
       const { data, error } = await query;
       if (error) throw error;
-      setClientes(data || []);
+      // Solo las colectas del tipo de día de hoy (no mezclar Semana con Sábados).
+      setClientes((data || []).filter((c: any) => esTipoDeHoy(c.tipo_dia)));
     } catch (err) { console.error('Error cargando clientes:', err); }
     finally { setCargando(false); setRefrescando(false); }
   }, []);
@@ -661,6 +671,7 @@ export default function ColectasScreen() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Clientes' }, (payload) => {
         const registro = payload.new as Cliente & { email_chofer?: string };
         if (!esAdminRef.current && emailUsuarioRef.current && registro.email_chofer && registro.email_chofer !== emailUsuarioRef.current) return;
+        if (!esTipoDeHoy(registro.tipo_dia)) return; // ignorar colectas de otro tipo de día
         setClientes(prev => { if (prev.some(c => c.id === registro.id)) return prev; return [...prev, registro].sort((a, b) => (a.horario || '').localeCompare(b.horario || '')); });
         if (!esAdminRef.current) notificarCambioDesdecentral({ tipo: 'INSERT', clienteNombre: registro.cliente, clienteDireccion: registro.direccion });
       })

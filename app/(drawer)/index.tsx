@@ -82,7 +82,7 @@ const SelectorChips: React.FC<SelectorChipsProps> = ({ opciones, seleccionados, 
 // ─── TablaZona (sin cambios) ──────────────────────────────────────────────────
 
 interface TablaZonaProps { zona: ZonaKey; datos: Recorrido[]; choferes: Chofer[]; visible: boolean; onToggle: (zona: ZonaKey) => void; onActualizar: (zona: ZonaKey, index: number, campo: string, valor: string) => void; }
-const TablaZona: React.FC<TablaZonaProps> = ({ zona, datos, choferes, visible, onToggle, onActualizar }) => {
+const TablaZona = React.memo<TablaZonaProps>(({ zona, datos, choferes, visible, onToggle, onActualizar }) => {
   const { colors } = useTheme();
   const color = ZONA_COLORES[zona];
   return (
@@ -122,7 +122,8 @@ const TablaZona: React.FC<TablaZonaProps> = ({ zona, datos, choferes, visible, o
       )}
     </View>
   );
-};
+});
+TablaZona.displayName = 'TablaZona';
 
 // ─── ModalAgregarRecorrido (sin cambios) ──────────────────────────────────────
 
@@ -343,40 +344,62 @@ export default function RecorridosScreen() {
   // Mutaciones — usan tablaActiva dinámicamente
   // ─────────────────────────────────────────────────────────────────────────
 
-  const actualizarRecorrido = async (zona: ZonaKey, index: number, campo: string, valor: string) => {
-    const tablaActiva = tipoDia === 'semana' ? 'Recorridos' : 'recorridos_sabados';
-    const anterior = recorridos[zona][index];
-    const copia = { ...anterior };
+  // Refs para que actualizarRecorrido/toggle tengan identidad ESTABLE (no se
+  // recrean en cada render) → React.memo de TablaZona funciona y solo
+  // re-renderiza la zona editada, no las 4.
+  const recorridosRef = useRef(recorridos);
+  useEffect(() => { recorridosRef.current = recorridos; }, [recorridos]);
+  const tipoDiaRef = useRef(tipoDia);
+  useEffect(() => { tipoDiaRef.current = tipoDia; }, [tipoDia]);
+  const choferesRef = useRef(choferes);
+  useEffect(() => { choferesRef.current = choferes; }, [choferes]);
+
+  // Debounce del guardado: antes se hacía un UPDATE a Supabase en CADA tecla
+  // (lag + spam de red + eco del realtime). Ahora el estado se actualiza
+  // optimista al instante y la escritura va recién 600ms después de soltar.
+  const writeTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  useEffect(() => () => { Object.values(writeTimers.current).forEach(clearTimeout); }, []);
+
+  const toggleZona = useCallback((z: ZonaKey) => {
+    setZonasVisibles(prev => ({ ...prev, [z]: !prev[z] }));
+  }, []);
+
+  const actualizarRecorrido = useCallback((zona: ZonaKey, index: number, campo: string, valor: string) => {
+    const tablaActiva = tipoDiaRef.current === 'semana' ? 'Recorridos' : 'recorridos_sabados';
+    const anterior = recorridosRef.current[zona]?.[index];
+    if (!anterior) return;
+    const copia: any = { ...anterior };
 
     if (['pqteDia', 'porFuera', 'entregados'].includes(campo)) {
-      (copia as any)[campo] = parseInt(valor) || 0;
+      copia[campo] = parseInt(valor) || 0;
     } else if (campo === 'idChofer') {
       copia.idChofer = parseInt(valor) || 0;
-      copia.chofer = choferes.find(c => c.id === copia.idChofer)?.nombre ?? 'Sin Asignar';
+      copia.chofer = choferesRef.current.find(c => c.id === copia.idChofer)?.nombre ?? 'Sin Asignar';
     } else {
-      (copia as any)[campo] = valor;
+      copia[campo] = valor;
     }
 
-    // Optimistic update
+    // Optimistic update inmediato (tipeo fluido).
     setRecorridos(prev => { const lista = [...prev[zona]]; lista[index] = copia; return { ...prev, [zona]: lista }; });
 
-    try {
-      const idDb = anterior.id;
-      const payload: Record<string, any> = { [campo]: (copia as any)[campo] };
-      if (campo === 'idChofer') payload['chofer'] = copia.chofer;
-
-      const query = idDb
-        ? supabase.from(tablaActiva).update(payload).eq('id', idDb)
-        : supabase.from(tablaActiva).update(payload).match({ zona, localidad: copia.localidad });
-
-      const { error } = await query;
-      if (error) throw error;
-    } catch (err) {
-      console.error('Error actualizando recorrido:', err);
-      // Rollback
-      setRecorridos(prev => { const lista = [...prev[zona]]; lista[index] = anterior; return { ...prev, [zona]: lista }; });
-    }
-  };
+    // Persistir con debounce por celda.
+    const idDb = anterior.id;
+    const key = `${tablaActiva}:${idDb ?? copia.localidad}:${campo}`;
+    if (writeTimers.current[key]) clearTimeout(writeTimers.current[key]);
+    writeTimers.current[key] = setTimeout(async () => {
+      try {
+        const payload: Record<string, any> = { [campo]: copia[campo] };
+        if (campo === 'idChofer') payload.chofer = copia.chofer;
+        const query = idDb
+          ? supabase.from(tablaActiva).update(payload).eq('id', idDb)
+          : supabase.from(tablaActiva).update(payload).match({ zona, localidad: copia.localidad });
+        const { error } = await query;
+        if (error) throw error;
+      } catch (err) {
+        console.error('Error actualizando recorrido:', err);
+      }
+    }, 600);
+  }, []);
 
   const agregarRecorrido = async (zona: ZonaKey, localidad: string) => {
     const tablaActiva = tipoDia === 'semana' ? 'Recorridos' : 'recorridos_sabados';
@@ -493,7 +516,7 @@ export default function RecorridosScreen() {
             datos={recorridos[zona] || []}
             choferes={choferes}
             visible={zonasVisibles[zona]}
-            onToggle={z => setZonasVisibles(prev => ({ ...prev, [z]: !prev[z] }))}
+            onToggle={toggleZona}
             onActualizar={actualizarRecorrido}
           />
         ))}

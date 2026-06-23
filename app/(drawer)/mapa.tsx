@@ -233,10 +233,13 @@ export default function MapaScreen() {
 
         // Delegar al tracker singleton (ref-counted)
         const ok = await startTracking(user.email);
-        if (!ok && montado) setErrorPermiso('GPS no disponible en este modo. El mapa sigue activo.');
+        // startTracking devuelve 'denied' | 'foreground' | 'background'. Solo
+        // avisamos si el permiso fue denegado (los otros dos ya comparten).
+        if (ok === 'denied' && montado) setErrorPermiso('Permiso de ubicación denegado. Activalo para compartir tu posición — el mapa sigue activo.');
       } catch (err) {
         console.warn('[Mapa GPS]', err);
-        if (montado) setErrorPermiso('GPS no disponible en este modo. El mapa sigue activo.');
+        // Típico en Expo Go: el tracking en segundo plano necesita la app compilada.
+        if (montado) setErrorPermiso('El GPS en segundo plano necesita la app instalada (no Expo Go). El mapa sigue activo.');
       }
     };
     iniciar();
