@@ -343,6 +343,8 @@ export default function PanelScreen() {
     const [refrescando, setRefrescando] = useState(false);
     const [guardandoCampo, setGuardandoCampo] = useState<{ id: number; campo: string } | null>(null);
     const [saludo] = useState(getSaludo);
+    // Id del chofer logueado, para el realtime (closure estable, sin stale).
+    const miIdChoferRef = useRef<number | null>(null);
 
     const cargarDatos = useCallback(async (mostrarLoader = false) => {
         if (mostrarLoader) setCargando(true);
@@ -359,6 +361,7 @@ export default function PanelScreen() {
             if (choferError) throw choferError;
             if (!choferData) { setCargando(false); setRefrescando(false); return; }
             setChoferInfo(choferData as ChoferInfo);
+            miIdChoferRef.current = (choferData as ChoferInfo).id;
 
             const { data: recData, error: recError } = await supabase
                 .from('Recorridos')
@@ -380,14 +383,31 @@ export default function PanelScreen() {
         cargarDatos(true);
         const channel = supabase
             .channel('panel-recorridos-sync')
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'Recorridos' }, (payload) => {
-                const rec = payload.new as Recorrido;
-                setRecorridos(prev =>
-                    prev.map(r => r.id === rec.id
-                        ? { ...r, ...rec, entregadosFuera: rec.entregadosFuera ?? r.entregadosFuera ?? 0 }
-                        : r
-                    )
-                );
+            // event:'*' para que las modificaciones de la web lleguen en vivo:
+            // alta, baja y reasignación de recorridos del chofer, no solo la edición.
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'Recorridos' }, (payload) => {
+                const miId = miIdChoferRef.current;
+                if (miId == null) return;
+                const nuevo = payload.new as Recorrido;
+                const viejo = payload.old as Partial<Recorrido>;
+                const idRow = nuevo.id ?? viejo.id;
+                if (idRow == null) return;
+
+                if (payload.eventType === 'DELETE') {
+                    setRecorridos(prev => prev.filter(r => r.id !== idRow));
+                    return;
+                }
+                if (nuevo.idChofer === miId) {
+                    // Alta / reasignado a mí / edición de uno mío → upsert in-place.
+                    const norm = { ...nuevo, entregadosFuera: nuevo.entregadosFuera ?? 0 };
+                    setRecorridos(prev => prev.some(r => r.id === nuevo.id)
+                        ? prev.map(r => r.id === nuevo.id ? { ...r, ...norm } : r)
+                        : [...prev, norm]
+                    );
+                } else if (viejo.idChofer === miId) {
+                    // Reasignado a otro chofer → sacarlo de mi lista.
+                    setRecorridos(prev => prev.filter(r => r.id !== idRow));
+                }
             })
             .subscribe();
         return () => { void supabase.removeChannel(channel); };

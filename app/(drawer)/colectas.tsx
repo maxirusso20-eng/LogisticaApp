@@ -696,7 +696,8 @@ export default function ColectasScreen() {
               if (prev.some(c => c.id === registro.id)) return prev.map(c => c.id === registro.id ? { ...c, ...registro } : c);
               return [...prev, registro].sort((a, b) => (a.horario || '').localeCompare(b.horario || ''));
             });
-            notificarCambioDesdecentral({ tipo: 'INSERT', clienteNombre: registro.cliente, clienteDireccion: registro.direccion });
+            // Sin notif local: el push del server (Edge notificar_chofer) ya avisa
+            // la asignación → evita doble notificación (local + push).
           } else if (emailViejo === miEmail) {
             // Me sacaron esta colecta → remover de mi lista
             setClientes(prev => prev.filter(c => c.id !== registro.id));
@@ -721,7 +722,8 @@ export default function ColectasScreen() {
         if (!esAdminRef.current && emailUsuarioRef.current && registro.email_chofer && registro.email_chofer !== emailUsuarioRef.current) return;
         if (!esAdminRef.current && !esTipoDeHoy(registro.tipo_dia)) return; // chofer: solo el día de hoy
         setClientes(prev => { if (prev.some(c => c.id === registro.id)) return prev; return [...prev, registro].sort((a, b) => (a.horario || '').localeCompare(b.horario || '')); });
-        if (!esAdminRef.current) notificarCambioDesdecentral({ tipo: 'INSERT', clienteNombre: registro.cliente, clienteDireccion: registro.direccion });
+        // Sin notif local en alta: el push del server (Edge notificar_chofer) ya
+        // avisa la nueva colecta → evita doble notificación (local + push).
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'Clientes' }, (payload) => {
         const eliminado = payload.old as { id: number | string; cliente?: string };
