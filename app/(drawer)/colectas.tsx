@@ -265,7 +265,7 @@ function ColectaCard({ item, index, onToggle, toggling }: {
   const { colors } = useTheme();
   const fade = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(1)).current;
-  useEffect(() => { Animated.timing(fade, { toValue: 1, duration: 350, delay: index * 55, useNativeDriver: true }).start(); }, []);
+  useEffect(() => { Animated.timing(fade, { toValue: 1, duration: 350, delay: index * 55, useNativeDriver: true }).start(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const handlePress = () => {
     Animated.sequence([Animated.timing(scale, { toValue: 0.96, duration: 70, useNativeDriver: true }), Animated.timing(scale, { toValue: 1, duration: 70, useNativeDriver: true })]).start();
     onToggle(item.id, item.completado, item.cliente);
@@ -449,7 +449,7 @@ const CardChoferAdmin: React.FC<{ grupo: GrupoChofer; index: number }> = ({ grup
   const [expandido, setExpandido] = useState(true);
   const fade = useRef(new Animated.Value(0)).current;
   const rotacion = useRef(new Animated.Value(1)).current;
-  useEffect(() => { Animated.timing(fade, { toValue: 1, duration: 400, delay: index * 80, useNativeDriver: true }).start(); }, []);
+  useEffect(() => { Animated.timing(fade, { toValue: 1, duration: 400, delay: index * 80, useNativeDriver: true }).start(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const toggleExpandido = () => {
     const v = !expandido; setExpandido(v);
     Animated.timing(rotacion, { toValue: v ? 1 : 0, duration: 220, useNativeDriver: true }).start();

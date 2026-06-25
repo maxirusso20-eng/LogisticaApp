@@ -6,7 +6,6 @@ import { useNavigation } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  LayoutAnimation,
   Platform,
   StyleSheet,
   Text,
@@ -145,14 +144,6 @@ const POLIGONO_FLEX = [
   { latitude: -34.0950, longitude: -59.0240 }, // Cierre en Zárate
 ];
 
-// ─── LayoutAnimation config ───────────────────────────────────────────────────
-
-const expandAnim = {
-  duration: 260,
-  create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-  update: { type: LayoutAnimation.Types.easeInEaseOut },
-  delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

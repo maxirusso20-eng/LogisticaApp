@@ -5,7 +5,6 @@ import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Animated,
     AppState,
     AppStateStatus,
@@ -232,7 +231,7 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
 
     useEffect(() => {
         Animated.timing(fade, { toValue: 1, duration: 380, delay: index * 80, useNativeDriver: true }).start();
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const pctDia = porcentajeDia(recorrido);
     const pctFuera = porcentajeFuera(recorrido);

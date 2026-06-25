@@ -1,4 +1,5 @@
 // lib/toast.tsx
+/* eslint-disable react-hooks/exhaustive-deps -- efectos de animación/montaje intencionales (corren una sola vez) */
 // Toast deslizable con react-native-reanimated + react-native-gesture-handler
 // API pública sin cambios: toast.success() | toast.error() | toast.warning() | toast.info()
 

@@ -138,7 +138,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       }
       setHydrated(true);
     }).catch(() => setHydrated(true));
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setTheme = useCallback((dark: boolean) => {
     setIsDark(dark);

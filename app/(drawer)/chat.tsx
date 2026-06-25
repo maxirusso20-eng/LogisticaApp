@@ -245,7 +245,7 @@ const IndicadorEscribiendo: React.FC<{ nombre: string }> = ({ nombre }) => {
                 Animated.delay(600),
             ])).start();
         animar(dot1, 0); animar(dot2, 200); animar(dot3, 400);
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
     return (
         <View style={SS.typingWrapper}>
             <View style={[SS.typingBurbuja, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>

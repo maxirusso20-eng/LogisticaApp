@@ -1,4 +1,5 @@
 // lib/skeleton.tsx
+/* eslint-disable react-hooks/exhaustive-deps -- efectos de animación/montaje intencionales (corren una sola vez) */
 // Componentes Skeleton Loader reutilizables con efecto shimmer.
 // Sin dependencias externas — solo Animated de React Native.
 

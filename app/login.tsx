@@ -1,4 +1,5 @@
 // app/login.tsx
+/* eslint-disable react-hooks/exhaustive-deps -- efectos de animación/montaje intencionales (corren una sola vez) */
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
 import {

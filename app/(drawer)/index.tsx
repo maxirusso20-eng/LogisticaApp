@@ -7,8 +7,6 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Modal,
   Platform,
   RefreshControl,
   ScrollView,
@@ -53,33 +51,11 @@ const ZONAS: ZonaKey[] = ['ZONA OESTE', 'ZONA SUR', 'ZONA NORTE', 'CABA'];
 const ZONA_COLORES: Record<ZonaKey, string> = { 'ZONA OESTE': '#3b82f6', 'ZONA SUR': '#10b981', 'ZONA NORTE': '#f59e0b', 'CABA': '#8b5cf6' };
 const ZONA_ICONOS: Record<ZonaKey, string> = { 'ZONA OESTE': '⬅️', 'ZONA SUR': '⬇️', 'ZONA NORTE': '⬆️', 'CABA': '🏙️' };
 
-const calcularPorcentaje = (r: Recorrido): string => { const suma = (r.pqteDia || 0) + (r.porFuera || 0); if (suma === 0) return '0%'; return (((r.entregados || 0) / suma) * 100).toFixed(1) + '%'; };
-const calcularTotal = (r: Recorrido): number => (r.pqteDia || 0) + (r.porFuera || 0);
-const calcularRestante = (r: Recorrido): number => Math.max(0, calcularTotal(r) - (r.entregados || 0));
-const formatearFecha = (texto: string): string => { const nums = texto.replace(/\D/g, ''); if (nums.length <= 2) return nums; if (nums.length <= 4) return `${nums.slice(0, 2)}/${nums.slice(2)}`; return `${nums.slice(0, 2)}/${nums.slice(2, 4)}/${nums.slice(4, 8)}`; };
-const nombreChoferVisible = (rec: Recorrido, choferes: Chofer[]): string => { const id = rec.idChofer; if (id == null || id === 0) return 'Sin Asignar'; const encontrado = choferes.find(c => c.id === id); if (encontrado?.nombre) return encontrado.nombre; return (rec.chofer ?? '').trim() || 'Sin Asignar'; };
 const ordenNumerico = (o: number | null | undefined) => o == null || Number.isNaN(Number(o)) ? Number.MAX_SAFE_INTEGER : Number(o);
 const compararRecorridoPorOrden = (a: Recorrido, b: Recorrido): number => { const d = ordenNumerico(a.orden) - ordenNumerico(b.orden); if (d !== 0) return d; return (a.id ?? Number.MAX_SAFE_INTEGER) - (b.id ?? Number.MAX_SAFE_INTEGER); };
 const ordenarChoferesPorOrden = (lista: Chofer[]): Chofer[] => [...lista].sort((a, b) => { const d = ordenNumerico(a.orden) - ordenNumerico(b.orden); return d !== 0 ? d : a.id - b.id; });
 
-// ─── SelectorChips (sin cambios) ──────────────────────────────────────────────
-
-interface SelectorChipsProps { opciones: string[]; seleccionados: string | string[]; multi?: boolean; onToggle: (valor: string) => void; colorActivo?: string; }
-const SelectorChips: React.FC<SelectorChipsProps> = ({ opciones, seleccionados, multi = false, onToggle, colorActivo = '#3b82f6' }) => {
-  const { colors } = useTheme();
-  const isActivo = (op: string) => multi ? (seleccionados as string[]).includes(op) : seleccionados === op;
-  return (
-    <View style={S.selectorRow}>
-      {opciones.map(op => (
-        <TouchableOpacity key={op} style={[S.chip, { backgroundColor: colors.bgInput, borderColor: colors.border }, isActivo(op) && { backgroundColor: colorActivo, borderColor: colorActivo }]} onPress={() => onToggle(op)}>
-          <Text style={[S.chipTexto, { color: colors.textSecondary }, isActivo(op) && { color: '#fff' }]}>{op}</Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-};
-
-// ─── TablaZona (sin cambios) ──────────────────────────────────────────────────
+// ─── TablaZona ────────────────────────────────────────────────────────────────
 
 // Fila memoizada: solo se re-renderiza si CAMBIA su propio `rec` (referencia).
 // Al editar una celda, setRecorridos reemplaza solo ese row → las demás filas
