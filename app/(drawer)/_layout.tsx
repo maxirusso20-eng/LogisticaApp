@@ -188,7 +188,6 @@ const GRUPOS_CHOFER = [
     label: 'MI DÍA', items: [
       { name: 'Panel', label: 'Panel del Día', icon: 'clipboard-outline', route: '/(drawer)/Panel' },
       { name: 'colectas', label: 'Mis Colectas', icon: 'archive-outline', route: '/(drawer)/colectas' },
-      { name: 'escaner', label: 'Escanear QR', icon: 'qr-code-outline', route: '/(drawer)/escaner' },
     ],
   },
   {
@@ -454,14 +453,6 @@ export default function DrawerLayout() {
       <Drawer.Screen
         name="guia"
         options={{ title: 'Cómo se mide', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
-      />
-      <Drawer.Screen
-        name="escaner"
-        options={{
-          title: 'Escanear QR',
-          headerShown: false,
-          drawerItemStyle: esAdmin ? { display: 'none' } : undefined,
-        }}
       />
     </Drawer>
   );
