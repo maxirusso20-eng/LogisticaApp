@@ -110,7 +110,7 @@ export default function EstadisticasScreen() {
             ⚠️ {totales.demorados} envíos demorados / con problema
           </Text>
           <Text style={{ fontSize: 12, color: colors.textMuted }}>
-            {totales.enCamino} en camino · {totales.nadie} "nadie en domicilio" +21hs
+            {totales.enCamino} en camino · {totales.nadie} &quot;nadie en domicilio&quot; +21hs
           </Text>
         </View>
       )}
