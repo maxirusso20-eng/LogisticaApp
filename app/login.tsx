@@ -21,6 +21,8 @@ import {
 } from 'react-native';
 import { useTheme } from '../lib/ThemeContext';
 import { supabase } from '../lib/supabase';
+import { startTracking } from '../lib/locationTracker';
+import { ADMIN_EMAIL } from '../lib/constants';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -125,6 +127,11 @@ export default function LoginScreen() {
       if (error) {
         const isNetworkError = error.message.toLowerCase().includes('network');
         Alert.alert('Acceso denegado', isNetworkError ? 'Sin conexión. Revisá tu red e intentá de nuevo.' : 'Email o contraseña incorrectos.');
+      } else if (email.trim().toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+        // Login OK y es chofer: pedir la ubicación YA (prompt apenas entra) y
+        // arrancar el seguimiento, así aparece en el mapa sin tener que abrir
+        // Colectas/Mapa primero. Para el admin no pedimos ubicación.
+        startTracking(email.trim()).catch(() => { });
       }
     } catch {
       Alert.alert('Error', 'Ocurrió un error inesperado.');

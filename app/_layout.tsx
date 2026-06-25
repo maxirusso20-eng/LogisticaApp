@@ -185,23 +185,10 @@ const PARTICLES = [
 // ─── SplashLoader ─────────────────────────────────────────────────────────────
 
 function SplashLoader({ message = 'Verificando sesión...' }: { message?: string }) {
+  // Sigue el tema de la app (claro/oscuro) → sin salto dark→claro al entrar.
+  const { colors } = useTheme();
 
-  // Vibración de motor (micro-jitter en X, JS driver porque es muy sutil)
-  const vibrateX = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(vibrateX, { toValue: 1.2, duration: 60, useNativeDriver: true }),
-        Animated.timing(vibrateX, { toValue: -1.2, duration: 60, useNativeDriver: true }),
-        Animated.timing(vibrateX, { toValue: 0.8, duration: 55, useNativeDriver: true }),
-        Animated.timing(vibrateX, { toValue: -0.8, duration: 55, useNativeDriver: true }),
-        Animated.timing(vibrateX, { toValue: 0, duration: 50, useNativeDriver: true }),
-        Animated.delay(1300),
-      ])
-    ).start();
-  }, []);
-
-  // Flotación suave
+  // Flotación suave (sin vibración: antes "temblaba")
   const floatY = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.loop(
@@ -263,7 +250,7 @@ function SplashLoader({ message = 'Verificando sesión...' }: { message?: string
   }, []);
 
   return (
-    <View style={splash.container}>
+    <View style={[splash.container, { backgroundColor: colors.bg }]}>
 
       {/* Partículas de fondo */}
       {PARTICLES.map((p, i) => <Particle key={i} {...p} />)}
@@ -289,7 +276,7 @@ function SplashLoader({ message = 'Verificando sesión...' }: { message?: string
           <Animated.View
             style={[
               splash.iconCircle,
-              { transform: [{ translateX: vibrateX }, { translateY: floatY }] },
+              { transform: [{ translateY: floatY }] },
             ]}
           >
             <Ionicons name="bus" size={38} color={C.blue} />
@@ -300,17 +287,17 @@ function SplashLoader({ message = 'Verificando sesión...' }: { message?: string
         <Animated.Text
           style={[
             splash.brand,
-            { opacity: brandOp, letterSpacing: brandLS as any },
+            { opacity: brandOp, letterSpacing: brandLS as any, color: colors.textPrimary },
           ]}
         >
           Logística Hogareño
         </Animated.Text>
 
         {/* Línea separadora */}
-        <Animated.View style={[splash.lineAccent, { opacity: tagOp }]} />
+        <Animated.View style={[splash.lineAccent, { opacity: tagOp, backgroundColor: colors.border }]} />
 
         {/* Tagline */}
-        <Animated.Text style={[splash.taglineText, { opacity: tagOp }]}>
+        <Animated.Text style={[splash.taglineText, { opacity: tagOp, color: colors.blue }]}>
           PANEL DE CONTROL
         </Animated.Text>
 
@@ -326,7 +313,7 @@ function SplashLoader({ message = 'Verificando sesión...' }: { message?: string
 
         <Animated.View style={[splash.statusRow, { opacity: statusOp }]}>
           <Animated.View style={[splash.statusDot, { opacity: statusDotOp }]} />
-          <Text style={splash.statusText}>{message}</Text>
+          <Text style={[splash.statusText, { color: colors.textMuted }]}>{message}</Text>
         </Animated.View>
       </View>
 
