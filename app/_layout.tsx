@@ -441,10 +441,19 @@ function InnerLayout() {
     }, 5000);
 
     // Forzar lectura inmediata de la sesión actual (no esperar al evento)
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
+    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
       if (resolved) return;
       if (error) {
-        console.error('[Auth] Error obteniendo sesión inicial:', error);
+        // Sesión guardada inválida/corrupta (p. ej. "AuthApiError: Invalid
+        // Refresh Token" al abrir): la limpiamos para caer al login sin mostrar
+        // el error, en vez de quedar trabados con un token que ya no sirve.
+        console.warn('[Auth] Sesión inicial inválida, limpiando:', error.message);
+        await supabase.auth.signOut().catch(() => {});
+        resolved = true;
+        clearTimeout(timeoutId);
+        setHasSession(false);
+        setIsLoading(false);
+        return;
       }
       console.log('[Auth] getSession() respondió. Hay sesión?', !!session);
       resolved = true;
@@ -453,8 +462,9 @@ function InnerLayout() {
       if (!session) {
         setIsLoading(false);
       }
-    }).catch(err => {
+    }).catch(async err => {
       console.error('[Auth] Excepción en getSession:', err);
+      await supabase.auth.signOut().catch(() => {});
       if (!resolved) {
         resolved = true;
         clearTimeout(timeoutId);
@@ -500,7 +510,21 @@ function InnerLayout() {
       console.log('[Routing] Sin sesión y no estoy en login → navegando a /login');
       router.replace('/login' as never);
     } else if (hasSession) {
-      const { data: { user } } = await supabase.auth.getUser();
+      let user: { email?: string } | null = null;
+      try {
+        const res = await supabase.auth.getUser();
+        if (res.error) throw res.error;
+        user = res.data.user;
+      } catch (e: any) {
+        // El token guardado ya no es válido (sesión vencida/corrupta). Limpiamos
+        // y mandamos al login en vez de romper con el AuthApiError.
+        console.warn('[Routing] getUser falló, limpiando sesión:', e?.message);
+        await supabase.auth.signOut().catch(() => {});
+        setHasSession(false);
+        router.replace('/login' as never);
+        setIsLoading(false);
+        return;
+      }
       const isAdmin = user?.email === ADMIN_EMAIL;
       console.log('[Routing] Con sesión. isAdmin:', isAdmin);
 
