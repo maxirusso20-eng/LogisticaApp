@@ -12,6 +12,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import { ADMIN_EMAIL } from '../lib/constants';
 import { supabase } from '../lib/supabase';
+import '../lib/locationTracker'; // registra el background task de GPS al arrancar
 import { ThemeProvider, useTheme } from '../lib/ThemeContext';
 import { ToastProvider } from '../lib/toast';
 import * as SplashScreen from 'expo-splash-screen';
