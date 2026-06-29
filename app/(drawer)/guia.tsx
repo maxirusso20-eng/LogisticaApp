@@ -8,7 +8,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  AVISOS, HORA_CORTE_AUSENCIA, NEGATIVOS, POSITIVOS, SLA_MINIMO,
+  AVISOS, HORA_CORTE_AUSENCIA, NEGATIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { useTheme } from '../../lib/ThemeContext';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
@@ -56,7 +56,8 @@ export default function GuiaScreen() {
           { label: 'Cada envío demorado', val: '−0,5%', color: colors.red },
           { label: 'Nadie post 21hs', val: '−0,5% + −0,2%', color: colors.red },
           { label: 'Entrega post 21hs', val: '−0,05%', color: colors.amber },
-          { label: 'Observación cargada', val: '+0,1%', color: colors.green },
+          { label: 'Demorado CON observación', val: '+0,1%', color: colors.green },
+          { label: 'Demorado SIN observación', val: '−0,1%', color: colors.red },
         ].map((r) => (
           <View key={r.label} style={[styles.penalRow, { backgroundColor: `${r.color}14`, borderColor: `${r.color}33` }]}>
             <Text style={[styles.penalLabel, { color: colors.textSecondary }]}>{r.label}</Text>
@@ -68,19 +69,8 @@ export default function GuiaScreen() {
       {/* Desempeño */}
       <Card color={colors.green}>
         <Title icon="speedometer-outline" text="2) Desempeño (conducta)" color={colors.green} />
-        <P>Arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text>. Cada acción suma o resta <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>0,1%</Text>. El tope es 100% (los positivos de más quedan como colchón ante errores futuros) y el piso 0%.</P>
-        <P>Los demorados <Text style={{ fontWeight: '800' }}>no</Text> afectan esta nota (esos van al KPI). Las ausencias sí restan (ver abajo).</P>
-      </Card>
-
-      {/* Positivos */}
-      <Card color={colors.green}>
-        <Title icon="trending-up-outline" text="Suman (+0,1% c/u)" color={colors.green} />
-        {POSITIVOS.map((i) => (
-          <View key={i.key} style={styles.liRow}>
-            <Ionicons name="add-circle" size={15} color={colors.green} />
-            <Text style={[styles.li, { color: colors.textSecondary }]}>{i.label}</Text>
-          </View>
-        ))}
+        <P>Arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text> y cada error resta <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>0,1%</Text>. También restan los avisos y las ausencias. Piso 0%.</P>
+        <P>Los demorados <Text style={{ fontWeight: '800' }}>no</Text> afectan esta nota (esos van al KPI). Es solo tu conducta operativa.</P>
       </Card>
 
       {/* Negativos */}

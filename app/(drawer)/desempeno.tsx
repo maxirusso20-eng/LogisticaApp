@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import { CAMPOS_MANUALES, NEGATIVOS, POSITIVOS } from '../../lib/desempeno';
+import { CAMPOS_MANUALES, NEGATIVOS } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 
@@ -75,7 +75,6 @@ export default function DesempenoScreen() {
     cargar();
   };
 
-  const totalPositivos = useMemo(() => POSITIVOS.reduce((s, i) => s + (valores[i.key] || 0), 0), [valores]);
   const totalNegativos = useMemo(() => NEGATIVOS.reduce((s, i) => s + (valores[i.key] || 0), 0), [valores]);
 
   if (loading) {
@@ -135,12 +134,6 @@ export default function DesempenoScreen() {
       {choferSel ? (
         <View style={[styles.card, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
           <View style={styles.secHead}>
-            <Ionicons name="trending-up" size={15} color={colors.green} />
-            <Text style={{ fontSize: 12.5, fontWeight: '800', color: colors.green }}>Positivos ({totalPositivos})</Text>
-          </View>
-          {POSITIVOS.map((i) => <Fila key={i.key} k={i.key} label={i.label} positivo />)}
-
-          <View style={[styles.secHead, { marginTop: 16 }]}>
             <Ionicons name="trending-down" size={15} color={colors.red} />
             <Text style={{ fontSize: 12.5, fontWeight: '800', color: colors.red }}>Errores ({totalNegativos})</Text>
           </View>

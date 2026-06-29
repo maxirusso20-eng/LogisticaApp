@@ -18,15 +18,10 @@ export const fmtPct = (n: number | null) =>
 
 type Indicador = { key: string; label: string };
 
-// ── Indicadores que SUMAN al desempeño (+0,1% c/u) ─────────────────────────
-export const POSITIVOS: Indicador[] = [
-  { key: 'subir_obs_fotos', label: 'Subir observaciones y fotos a Light Data' },
-  { key: 'llego_puntual', label: 'Llegar puntual a la colecta' },
-  { key: 'buena_conducta', label: 'Buena conducta' },
-  { key: 'salida_puntual', label: 'Salir temprano de la logística (post última colecta)' },
-  { key: 'aviso_antelacion', label: 'Avisó falta con antelación' },
-  { key: 'marca_directos_ok', label: 'Marcar directos como entregado + foto a Administración' },
-];
+// ── Indicadores que SUMAN al desempeño ─────────────────────────────────────
+// Eliminados: hoy NADA suma al desempeño. Lo de "subir observaciones" pasó al
+// KPI (demorado con/sin observación). Export vacío para no romper imports.
+export const POSITIVOS: Indicador[] = [];
 
 // ── Indicadores que RESTAN al desempeño (−0,1% c/u) ────────────────────────
 export const NEGATIVOS: Indicador[] = [
@@ -55,11 +50,10 @@ export const AVISOS: Aviso[] = [
 
 // Todos los campos manuales (se guardan en kpis_lightdata).
 // entregas_post21 es solo para el KPI de rendimiento (no para desempeño).
+// entregas_post21 ya NO es manual: lo calcula el parser de Light Data.
 export const CAMPOS_MANUALES = [
-  ...POSITIVOS.map((i) => i.key),
   ...NEGATIVOS.map((i) => i.key),
   ...AVISOS.map((i) => i.key),
-  'entregas_post21',
 ];
 
 // ── Ausencias (el chofer se baja de una colecta/recorrido) ─────────────────
@@ -107,6 +101,7 @@ export function acumularPorChofer(registros: any[]): Record<string, ChoferKpi> {
       porChofer[nom] = {
         chofer: nom, total: 0, entregados: 0, fallos: 0,
         demEnCamino: 0, demNadie: 0, neutros: 0, excluidos: 0, conObservacion: 0,
+        entregas_post21: 0, dem_con_obs: 0,
         latestId: null, latestFecha: null,
         ...Object.fromEntries(CAMPOS_MANUALES.map((k) => [k, 0])),
       } as ChoferKpi;
@@ -120,6 +115,8 @@ export function acumularPorChofer(registros: any[]): Record<string, ChoferKpi> {
     k.neutros += r.neutros || 0;
     k.excluidos += r.excluidos || 0;
     k.conObservacion += r.con_observacion || 0;
+    k.entregas_post21 += r.entregas_post21 || 0;   // auto desde Light Data
+    k.dem_con_obs += r.dem_con_obs || 0;           // demorados con observación
     for (const c of CAMPOS_MANUALES) k[c] += r[c] || 0;
     if (k.latestId === null) { k.latestId = r.id; k.latestFecha = r.fecha; }
   }
@@ -138,9 +135,10 @@ export function demoradosTotal(k: ChoferKpi): number {
 export function calcularRendimientoKPI(k: ChoferKpi) {
   const entregados = k.entregados || 0;
   const demorados = demoradosTotal(k);
-  const noEntregasPost21 = k.demNadie || 0;        // nadie en domicilio post-21
-  const entregasPost21 = k.entregas_post21 || 0;   // entregados pero después de 21hs
-  const conObservacion = k.conObservacion || 0;    // observaciones cargadas en Lightdata
+  const demConObs = k.dem_con_obs || 0;                  // demorados CON observación (+)
+  const demSinObs = Math.max(0, demorados - demConObs);  // demorados SIN observación (−)
+  const noEntregasPost21 = k.demNadie || 0;              // nadie post-21 (penaliza extra)
+  const entregasPost21 = k.entregas_post21 || 0;         // entregados >= 21hs (auto desde LD)
 
   const pct = (entregados + demorados) > 0
     ? r2(Math.max(0, Math.min(100,
@@ -148,13 +146,14 @@ export function calcularRendimientoKPI(k: ChoferKpi) {
         - demorados * 0.5
         - noEntregasPost21 * 0.2
         - entregasPost21 * 0.05
-        + conObservacion * 0.1
+        + demConObs * 0.1
+        - demSinObs * 0.1
       )))
     : null;
 
   const pctObservacion = k.total > 0 && k.conObservacion > 0
     ? Math.round((k.conObservacion / k.total) * 100) : null;
-  return { pct, demorados, pctObservacion, cumpleSLA: cumpleSLA(pct) };
+  return { pct, demorados, demConObs, demSinObs, pctObservacion, cumpleSLA: cumpleSLA(pct) };
 }
 
 // ── Card 2: DESEMPEÑO ──────────────────────────────────────────────────────
