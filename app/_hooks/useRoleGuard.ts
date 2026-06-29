@@ -17,7 +17,7 @@ import { useEffect, useState } from 'react';
 import { ADMIN_EMAIL } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
 
-type Rol = 'admin' | 'chofer';
+type Rol = 'admin' | 'chofer' | 'ambos';
 
 interface RoleGuardResult {
   /** true = puede ver la pantalla; false = redirigido o sin sesión */
@@ -31,7 +31,8 @@ interface RoleGuardResult {
 /**
  * Protege una pantalla según el rol requerido.
  *
- * @param rolRequerido 'admin' = solo admin; 'chofer' = solo NO-admin
+ * @param rolRequerido 'admin' = solo admin; 'chofer' = solo NO-admin;
+ *                     'ambos' = cualquier sesión (admin o chofer)
  */
 export function useRoleGuard(rolRequerido: Rol = 'admin'): RoleGuardResult {
   const router = useRouter();

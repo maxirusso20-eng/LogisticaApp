@@ -174,6 +174,7 @@ const GRUPOS_ADMIN = [
       { name: 'desempeno', label: 'Desempeño', icon: 'speedometer-outline', route: '/(drawer)/desempeno' },
       { name: 'ausencias', label: 'Ausencias', icon: 'calendar-clear-outline', route: '/(drawer)/ausencias' },
       { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
+      { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia' },
     ],
   },
   {
@@ -452,7 +453,7 @@ export default function DrawerLayout() {
       />
       <Drawer.Screen
         name="guia"
-        options={{ title: 'Cómo se mide', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
+        options={{ title: 'Cómo se mide' }}
       />
     </Drawer>
   );
