@@ -76,23 +76,33 @@ export async function startTracking(_email?: string): Promise<GpsStatus> {
     (loc) => reportLocation(loc.coords.latitude, loc.coords.longitude)
   );
 
-  // ── Tarea de fondo (persiste cuando la app está minimizada/cerrada)
-  const yaCorre = await Location.hasStartedLocationUpdatesAsync(TASK).catch(() => false);
-  if (!yaCorre) {
-    await Location.startLocationUpdatesAsync(TASK, {
-      accuracy: Location.Accuracy.Balanced,
-      timeInterval: 15000,
-      distanceInterval: 20,
-      pausesUpdatesAutomatically: false,
-      showsBackgroundLocationIndicator: true,
-      foregroundService: {
-        notificationTitle: 'Logística Hogareño',
-        notificationBody: 'Compartiendo tu ubicación con la logística.',
-      },
-    });
+  // ── Tarea de fondo (persiste cuando la app está minimizada/cerrada).
+  // Envuelta en try/catch: en Expo Go (o si el módulo nativo de background no
+  // está) startLocationUpdatesAsync tira excepción — NO debe tumbar el watcher
+  // de foreground que ya quedó activo arriba. Si falla, seguimos solo foreground.
+  let bgRunning = false;
+  try {
+    const yaCorre = await Location.hasStartedLocationUpdatesAsync(TASK).catch(() => false);
+    if (!yaCorre) {
+      await Location.startLocationUpdatesAsync(TASK, {
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: 15000,
+        distanceInterval: 20,
+        pausesUpdatesAutomatically: false,
+        showsBackgroundLocationIndicator: true,
+        foregroundService: {
+          notificationTitle: 'Logística Hogareño',
+          notificationBody: 'Compartiendo tu ubicación con la logística.',
+        },
+      });
+    }
+    bgRunning = true;
+  } catch (e) {
+    console.warn('[GPS] background no disponible, sigo en foreground:', (e as Error)?.message);
   }
 
-  estado = bgOk ? 'background' : 'foreground';
+  // 'background' solo si el permiso "siempre" está dado Y la tarea arrancó de verdad.
+  estado = (bgOk && bgRunning) ? 'background' : 'foreground';
   return estado;
 }
 

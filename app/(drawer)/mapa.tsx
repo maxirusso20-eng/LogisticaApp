@@ -17,6 +17,7 @@ import {
 import MapView, { Marker, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../lib/ThemeContext';
+import { ADMIN_EMAIL } from '../../lib/constants';
 import { startTracking, stopTracking } from '../../lib/locationTracker';
 import { supabase } from '../../lib/supabase';
 import { useMapaData } from '../_hooks/useMapaData';
@@ -222,11 +223,14 @@ export default function MapaScreen() {
           if (montado) setMiUbicacion({ latitud: pos.coords.latitude, longitud: pos.coords.longitude });
         } catch { }
 
-        // Delegar al tracker singleton (ref-counted)
-        const ok = await startTracking(user.email);
-        // startTracking devuelve 'denied' | 'foreground' | 'background'. Solo
-        // avisamos si el permiso fue denegado (los otros dos ya comparten).
-        if (ok === 'denied' && montado) setErrorPermiso('Permiso de ubicación denegado. Activalo para compartir tu posición — el mapa sigue activo.');
+        // El admin solo MIRA el mapa: no arrancamos su tracking de fondo ni la
+        // notificación persistente "Compartiendo ubicación" (además no está en
+        // Choferes, así que no aportaría dato). Los choferes sí comparten.
+        if (user.email !== ADMIN_EMAIL) {
+          const ok = await startTracking(user.email);
+          // 'denied' | 'foreground' | 'background'. Solo avisamos si fue denegado.
+          if (ok === 'denied' && montado) setErrorPermiso('Permiso de ubicación denegado. Activalo para compartir tu posición — el mapa sigue activo.');
+        }
       } catch (err) {
         console.warn('[Mapa GPS]', err);
         // Típico en Expo Go: el tracking en segundo plano necesita la app compilada.
