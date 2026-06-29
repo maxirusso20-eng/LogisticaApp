@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  esAusenciaTardia, HORA_CORTE_AUSENCIA, penalidadAusencia, penalidadAusencias,
+  HORA_CORTE_AUSENCIA, HORA_CORTE_TEMPRANA, penalidadAusencia, penalidadAusencias,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -131,7 +131,8 @@ export default function MisAusenciasScreen() {
       {/* Explicación */}
       <View style={[styles.info, { backgroundColor: colors.bgInput, borderColor: colors.border }]}>
         <Text style={{ fontSize: 12.5, color: colors.textMuted, lineHeight: 19 }}>
-          Bajarte antes de las <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>{HORA_CORTE_AUSENCIA}:00</Text> resta{' '}
+          Bajarte antes de las <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>{HORA_CORTE_TEMPRANA}:00</Text> no resta nada; de{' '}
+          <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>{HORA_CORTE_TEMPRANA}:00 a {HORA_CORTE_AUSENCIA - 1}:59</Text> resta{' '}
           <Text style={{ color: colors.amber, fontWeight: '800' }}>0,1%</Text>; desde las{' '}
           <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>{HORA_CORTE_AUSENCIA}:00</Text> resta{' '}
           <Text style={{ color: colors.red, fontWeight: '800' }}>0,5%</Text> (avisar tarde desorganiza más la logística).
@@ -142,7 +143,7 @@ export default function MisAusenciasScreen() {
       <View style={{ gap: 10 }}>
         {ausencias.map((a) => {
           const penal = penalidadAusencia(a.hora);
-          const col = esAusenciaTardia(a.hora) ? colors.red : colors.amber;
+          const col = penal === 0 ? colors.green : penal >= 0.5 ? colors.red : colors.amber;
           return (
             <View key={a.id} style={[styles.item, { backgroundColor: colors.bgCard, borderColor: colors.border, borderLeftColor: col, borderLeftWidth: 3 }]}>
               <View style={[styles.itemIcon, { backgroundColor: col + '1a' }]}>

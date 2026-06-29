@@ -175,6 +175,7 @@ const GRUPOS_ADMIN = [
       { name: 'ausencias', label: 'Ausencias', icon: 'calendar-clear-outline', route: '/(drawer)/ausencias' },
       { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
       { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia' },
+      { name: 'tabla-impacto', label: 'Impacto de cada ítem', icon: 'calculator-outline', route: '/(drawer)/tabla-impacto' },
     ],
   },
   {
@@ -197,6 +198,7 @@ const GRUPOS_CHOFER = [
       { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
       { name: 'mis-ausencias', label: 'Mis Ausencias', icon: 'calendar-clear-outline', route: '/(drawer)/mis-ausencias' },
       { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia' },
+      { name: 'tabla-impacto', label: 'Impacto de cada ítem', icon: 'calculator-outline', route: '/(drawer)/tabla-impacto' },
     ],
   },
   {
@@ -455,6 +457,7 @@ export default function DrawerLayout() {
         name="guia"
         options={{ title: 'Cómo se mide' }}
       />
+      <Drawer.Screen name="tabla-impacto" options={{ title: 'Impacto de cada ítem' }} />
     </Drawer>
   );
 }

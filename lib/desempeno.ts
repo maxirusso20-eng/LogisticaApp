@@ -57,6 +57,10 @@ export const CAMPOS_MANUALES = [
 ];
 
 // ── Ausencias (el chofer se baja de una colecta/recorrido) ─────────────────
+//   • antes de las 10:00 → 0%
+//   • 10:00 a 11:59      → −0,1%
+//   • desde las 12:00    → −0,5%
+export const HORA_CORTE_TEMPRANA = 10;
 export const HORA_CORTE_AUSENCIA = 12;
 export const PESO_AUSENCIA_TEMPRANA = 0.1;
 export const PESO_AUSENCIA_TARDIA = 0.5;
@@ -67,7 +71,12 @@ export function esAusenciaTardia(hora?: string | null): boolean {
   return Number.isFinite(h) && h >= HORA_CORTE_AUSENCIA;
 }
 export function penalidadAusencia(hora?: string | null): number {
-  return esAusenciaTardia(hora) ? PESO_AUSENCIA_TARDIA : PESO_AUSENCIA_TEMPRANA;
+  if (!hora) return PESO_AUSENCIA_TEMPRANA;
+  const h = parseInt(String(hora).slice(0, 2), 10);
+  if (!Number.isFinite(h)) return PESO_AUSENCIA_TEMPRANA;
+  if (h >= HORA_CORTE_AUSENCIA) return PESO_AUSENCIA_TARDIA;
+  if (h >= HORA_CORTE_TEMPRANA) return PESO_AUSENCIA_TEMPRANA;
+  return 0;
 }
 export function penalidadAusencias(ausencias: any[]): number {
   return r2((ausencias || []).reduce((s, a) => s + penalidadAusencia(a.hora), 0));

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
-import { esAusenciaTardia, penalidadAusencia } from '../../lib/desempeno';
+import { penalidadAusencia } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 
@@ -36,7 +36,6 @@ export default function AusenciasScreen() {
 
   const hora = `${pad(hh)}:${pad(mm)}`;
   const penal = useMemo(() => penalidadAusencia(hora), [hora]);
-  const tardia = useMemo(() => esAusenciaTardia(hora), [hora]);
 
   const cargar = useCallback(async () => {
     try {
@@ -113,8 +112,8 @@ export default function AusenciasScreen() {
             <Stepper colors={colors} value={pad(mm)} onMinus={() => step(setMm, -5, 60)} onPlus={() => step(setMm, 5, 60)} />
           </View>
         </View>
-        <Text style={{ fontSize: 12, fontWeight: '700', color: tardia ? colors.red : colors.amber, marginTop: 4 }}>
-          {tardia ? `Desde el mediodía → −0,5%` : `Antes del mediodía → −0,1%`}
+        <Text style={{ fontSize: 12, fontWeight: '700', color: penal === 0 ? colors.green : penal >= 0.5 ? colors.red : colors.amber, marginTop: 4 }}>
+          {penal === 0 ? `Antes de las 10:00 → sin impacto` : penal >= 0.5 ? `Desde el mediodía → −0,5%` : `De 10:00 a 11:59 → −0,1%`}
         </Text>
 
         {/* Tipo */}
@@ -153,7 +152,7 @@ export default function AusenciasScreen() {
               {fmtFecha(a.fecha)} · {String(a.hora).slice(0, 5)} · {a.tipo}{a.detalle ? ` · ${a.detalle}` : ''}
             </Text>
           </View>
-          <Text style={{ fontSize: 12, fontWeight: '800', color: esAusenciaTardia(a.hora) ? colors.red : colors.amber }}>−{penalidadAusencia(a.hora)}%</Text>
+          <Text style={{ fontSize: 12, fontWeight: '800', color: penalidadAusencia(a.hora) === 0 ? colors.green : penalidadAusencia(a.hora) >= 0.5 ? colors.red : colors.amber }}>−{penalidadAusencia(a.hora)}%</Text>
           <TouchableOpacity onPress={() => borrar(a)} style={{ padding: 4 }}><Ionicons name="trash-outline" size={18} color={colors.red} /></TouchableOpacity>
         </View>
       ))}
