@@ -7,7 +7,9 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 export const PESO_PUNTO = 0.1;
-export const SLA_MINIMO = 99;
+
+// SLA: una nota cumple si es >= 90%.
+export const SLA_MINIMO = 90;
 export const cumpleSLA = (pct: number | null) => pct != null && pct >= SLA_MINIMO;
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -16,30 +18,51 @@ export const fmtPct = (n: number | null) =>
 
 type Indicador = { key: string; label: string };
 
+// ── Indicadores que SUMAN al desempeño (+0,1% c/u) ─────────────────────────
 export const POSITIVOS: Indicador[] = [
   { key: 'subir_obs_fotos', label: 'Subir observaciones y fotos a Light Data' },
   { key: 'llego_puntual', label: 'Llegar puntual a la colecta' },
   { key: 'buena_conducta', label: 'Buena conducta' },
-  { key: 'salida_puntual', label: 'Salir temprano de la logística' },
+  { key: 'salida_puntual', label: 'Salir temprano de la logística (post última colecta)' },
   { key: 'aviso_antelacion', label: 'Avisó falta con antelación' },
-  { key: 'marca_directos_ok', label: 'Marcar directos como entregado + foto' },
+  { key: 'marca_directos_ok', label: 'Marcar directos como entregado + foto a Administración' },
 ];
 
+// ── Indicadores que RESTAN al desempeño (−0,1% c/u) ────────────────────────
 export const NEGATIVOS: Indicador[] = [
   { key: 'salteados', label: 'Saltearse paquetes' },
-  { key: 'entregas_post21', label: 'Entregas post 21hs' },
-  { key: 'llego_tarde', label: 'Llegó tarde a la colecta' },
-  { key: 'salio_tarde', label: 'Salió tarde de la logística' },
-  { key: 'mala_conducta', label: 'Mala predisposición' },
-  { key: 'aviso_falta_tarde', label: 'Avisó falta / no colectar post 12hs' },
+  { key: 'llego_tarde', label: 'Impuntual colecta' },
+  { key: 'salio_tarde', label: 'Salida tarde Logística' },
   { key: 'no_marca_directos', label: 'No marcar envíos directos en Light Data' },
-  { key: 'mala_comunicacion', label: 'Mala comunicación nocturna' },
   { key: 'no_escanea_logistica', label: 'No escanearse los paquetes en la Logística' },
   { key: 'no_escanea_colecta', label: 'No escanear con Flex en la colecta' },
+  { key: 'no_visualiza_alternativas', label: 'No visualizar alternativa' },
+  { key: 'no_cobra_destino', label: 'No cobro alternativa' },
+  { key: 'no_asigna_envio', label: 'No asignación de envío' },
+  { key: 'error_mapeo', label: 'Error mapeo' },
+  { key: 'mal_marcado_flex', label: 'Mal marcado flex' },
+  { key: 'impuntual_recorrido', label: 'Impuntual recorrido' },
 ];
 
-export const CAMPOS_MANUALES = [...POSITIVOS.map((i) => i.key), ...NEGATIVOS.map((i) => i.key)];
+// ── Avisos (pesos variables: no entran en NEGATIVOS porque no todos son 0,1%) ─
+type Aviso = { key: string; label: string; peso: number };
+export const AVISOS: Aviso[] = [
+  { key: 'aviso_post10_no_colectar', label: 'Aviso post 10hs — no colectar', peso: 0.1 },
+  { key: 'aviso_post10_no_recorrido', label: 'Aviso post 10hs — no salir en recorrido', peso: 0.1 },
+  { key: 'aviso_post12_no_colectar', label: 'Aviso post 12hs — no colectar', peso: 0.5 },
+  { key: 'aviso_post12_no_recorrido', label: 'Aviso post 12hs — no salir en recorrido', peso: 2.0 },
+];
 
+// Todos los campos manuales (se guardan en kpis_lightdata).
+// entregas_post21 es solo para el KPI de rendimiento (no para desempeño).
+export const CAMPOS_MANUALES = [
+  ...POSITIVOS.map((i) => i.key),
+  ...NEGATIVOS.map((i) => i.key),
+  ...AVISOS.map((i) => i.key),
+  'entregas_post21',
+];
+
+// ── Ausencias (el chofer se baja de una colecta/recorrido) ─────────────────
 export const HORA_CORTE_AUSENCIA = 12;
 export const PESO_AUSENCIA_TEMPRANA = 0.1;
 export const PESO_AUSENCIA_TARDIA = 0.5;
@@ -74,6 +97,7 @@ export type ChoferKpi = {
   [k: string]: any;
 };
 
+// Acumula los registros diarios por chofer (suma entre fechas).
 export function acumularPorChofer(registros: any[]): Record<string, ChoferKpi> {
   const porChofer: Record<string, ChoferKpi> = {};
   for (const r of registros || []) {
@@ -102,32 +126,56 @@ export function acumularPorChofer(registros: any[]): Record<string, ChoferKpi> {
   return porChofer;
 }
 
+// Total de DEMORADOS (umbrella). El parser ya cuenta TODOS los demorados en
+// `fallos`; demEnCamino/demNadie son solo el desglose.
 export function demoradosTotal(k: ChoferKpi): number {
   return k.fallos || 0;
 }
 
+// ── Card 1: RENDIMIENTO (KPI) ──────────────────────────────────────────────
+// Fórmula: 100% base. Cada demorado −0,5%. Nadie post-21 −0,2% adicional.
+// Entrega post-21 −0,05%. Observaciones cargadas +0,1%. Piso 0%, tope 100%.
 export function calcularRendimientoKPI(k: ChoferKpi) {
   const entregados = k.entregados || 0;
   const demorados = demoradosTotal(k);
-  const base = entregados + demorados;
-  const pct = base > 0 ? r2((entregados / base) * 100) : null;
+  const noEntregasPost21 = k.demNadie || 0;        // nadie en domicilio post-21
+  const entregasPost21 = k.entregas_post21 || 0;   // entregados pero después de 21hs
+  const conObservacion = k.conObservacion || 0;    // observaciones cargadas en Lightdata
+
+  const pct = (entregados + demorados) > 0
+    ? r2(Math.max(0, Math.min(100,
+        100
+        - demorados * 0.5
+        - noEntregasPost21 * 0.2
+        - entregasPost21 * 0.05
+        + conObservacion * 0.1
+      )))
+    : null;
+
   const pctObservacion = k.total > 0 && k.conObservacion > 0
     ? Math.round((k.conObservacion / k.total) * 100) : null;
   return { pct, demorados, pctObservacion, cumpleSLA: cumpleSLA(pct) };
 }
 
+// ── Card 2: DESEMPEÑO ──────────────────────────────────────────────────────
+// Arranca en 100. Cada positivo +0,1; cada negativo −0,1. Tope 100, piso 0.
+// Los avisos restan según su peso individual (0,1 / 0,5 / 2,0).
+// Las ausencias restan aparte (k.penalAusencias, ya en puntos %).
 export function calcularDesempenoConducta(k: ChoferKpi) {
   const positivos = POSITIVOS.reduce((s, i) => s + (k[i.key] || 0), 0);
   const negativos = NEGATIVOS.reduce((s, i) => s + (k[i.key] || 0), 0);
   const penalAusencias = k.penalAusencias || 0;
-  const score = r2(Math.max(0, Math.min(100, 100 + (positivos - negativos) * PESO_PUNTO - penalAusencias)));
-  return { score, positivos, negativos, penalAusencias, cumpleSLA: cumpleSLA(score) };
+  const penalAvisos = r2(AVISOS.reduce((s, a) => s + (k[a.key] || 0) * a.peso, 0));
+  const score = r2(Math.max(0, Math.min(100,
+    100 + (positivos - negativos) * PESO_PUNTO - penalAusencias - penalAvisos
+  )));
+  return { score, positivos, negativos, penalAusencias, penalAvisos, cumpleSLA: cumpleSLA(score) };
 }
 
 export function colorDesempeno(score: number | null): string {
   if (score == null) return '#64748b';
   if (score >= SLA_MINIMO) return '#10b981';
-  if (score >= 95) return '#f59e0b';
-  if (score >= 85) return '#f97316';
+  if (score >= 80) return '#f59e0b';
+  if (score >= 70) return '#f97316';
   return '#ef4444';
 }

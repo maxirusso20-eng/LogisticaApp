@@ -8,7 +8,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  HORA_CORTE_AUSENCIA, NEGATIVOS, POSITIVOS, SLA_MINIMO,
+  AVISOS, HORA_CORTE_AUSENCIA, NEGATIVOS, POSITIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { useTheme } from '../../lib/ThemeContext';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
@@ -51,13 +51,18 @@ export default function GuiaScreen() {
       {/* Rendimiento (KPI) */}
       <Card color={colors.blue}>
         <Title icon="stats-chart-outline" text="1) Rendimiento (KPI)" color={colors.blue} />
-        <P>Sale de Light Data. Mide cuántos paquetes entregaste bien:</P>
-        <View style={[styles.formula, { backgroundColor: colors.bgInput, borderColor: colors.border }]}>
-          <Text style={{ color: colors.textPrimary, fontWeight: '800', fontSize: 13.5, textAlign: 'center' }}>
-            Entregados ÷ (Entregados + Demorados) × 100
-          </Text>
-        </View>
-        <P>Lo bajan los <Text style={{ color: colors.red, fontWeight: '800' }}>demorados</Text>: fallos, en camino, “nadie” pasadas las 21hs, reprogramados/cancelados tarde y no entregados.</P>
+        <P>Sale de Light Data. Arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text> y le restan los demorados y las entregas tardías:</P>
+        {[
+          { label: 'Cada envío demorado', val: '−0,5%', color: colors.red },
+          { label: 'Nadie post 21hs', val: '−0,5% + −0,2%', color: colors.red },
+          { label: 'Entrega post 21hs', val: '−0,05%', color: colors.amber },
+          { label: 'Observación cargada', val: '+0,1%', color: colors.green },
+        ].map((r) => (
+          <View key={r.label} style={[styles.penalRow, { backgroundColor: `${r.color}14`, borderColor: `${r.color}33` }]}>
+            <Text style={[styles.penalLabel, { color: colors.textSecondary }]}>{r.label}</Text>
+            <Text style={[styles.penalVal, { color: r.color }]}>{r.val}</Text>
+          </View>
+        ))}
       </Card>
 
       {/* Desempeño */}
@@ -85,6 +90,17 @@ export default function GuiaScreen() {
           <View key={i.key} style={styles.liRow}>
             <Ionicons name="remove-circle" size={15} color={colors.red} />
             <Text style={[styles.li, { color: colors.textSecondary }]}>{i.label}</Text>
+          </View>
+        ))}
+      </Card>
+
+      {/* Avisos de ausencia */}
+      <Card color={colors.amber}>
+        <Title icon="notifications-off-outline" text="Avisos de ausencia" color={colors.amber} />
+        {AVISOS.map((a) => (
+          <View key={a.key} style={styles.liRow}>
+            <Text style={{ width: 56, textAlign: 'center', color: colors.amber, fontWeight: '800', fontSize: 12 }}>−{a.peso}%</Text>
+            <Text style={[styles.li, { color: colors.textSecondary }]}>{a.label}</Text>
           </View>
         ))}
       </Card>
@@ -123,7 +139,9 @@ const styles = StyleSheet.create({
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   cardTitle: { fontSize: 16, fontWeight: '800' },
   p: { fontSize: 13, lineHeight: 19, marginBottom: 8 },
-  formula: { borderWidth: 1, borderRadius: 10, padding: 12, marginBottom: 10 },
+  penalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderRadius: 9, paddingVertical: 7, paddingHorizontal: 11, marginBottom: 6 },
+  penalLabel: { fontSize: 12.5, flex: 1 },
+  penalVal: { fontSize: 12.5, fontWeight: '800' },
   liRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 7 },
   li: { flex: 1, fontSize: 13, lineHeight: 18 },
 });
