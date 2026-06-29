@@ -15,7 +15,7 @@ import { useRoleGuard } from '../_hooks/useRoleGuard';
 
 export default function GuiaScreen() {
   const { colors } = useTheme();
-  const { autorizado, verificando } = useRoleGuard('ambos');
+  const { autorizado, verificando } = useRoleGuard('chofer');
 
   if (verificando) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
   if (!autorizado) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;

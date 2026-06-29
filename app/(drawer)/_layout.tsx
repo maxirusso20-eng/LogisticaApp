@@ -174,7 +174,6 @@ const GRUPOS_ADMIN = [
       { name: 'desempeno', label: 'Desempeño', icon: 'speedometer-outline', route: '/(drawer)/desempeno' },
       { name: 'ausencias', label: 'Ausencias', icon: 'calendar-clear-outline', route: '/(drawer)/ausencias' },
       { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
-      { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia' },
       { name: 'tabla-impacto', label: 'Impacto de cada ítem', icon: 'calculator-outline', route: '/(drawer)/tabla-impacto' },
     ],
   },
