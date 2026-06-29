@@ -136,7 +136,7 @@ export function calcularRendimientoKPI(k: ChoferKpi) {
   const entregados = k.entregados || 0;
   const demorados = demoradosTotal(k);
   const demGrave = k.demEnCamino || 0;                   // "en camino al destinatario" → −0,5%
-  const demLeve = Math.max(0, demorados - demGrave);     // nadie/cancelado/no entregado/reprog → −0,2%
+  const demLeve = Math.max(0, demorados - demGrave);     // nadie/cancelado/no entregado → −0,2%
   const demConObs = k.dem_con_obs || 0;                  // demorados CON observación (+0,1)
   const demSinObs = Math.max(0, demorados - demConObs);  // demorados SIN observación (−0,1)
   const entregasPost21 = k.entregas_post21 || 0;         // entregados 21:00–23:05hs → −0,05%
