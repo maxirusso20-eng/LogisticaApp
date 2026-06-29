@@ -135,16 +135,17 @@ export function demoradosTotal(k: ChoferKpi): number {
 export function calcularRendimientoKPI(k: ChoferKpi) {
   const entregados = k.entregados || 0;
   const demorados = demoradosTotal(k);
-  const demConObs = k.dem_con_obs || 0;                  // demorados CON observación (+)
-  const demSinObs = Math.max(0, demorados - demConObs);  // demorados SIN observación (−)
-  const noEntregasPost21 = k.demNadie || 0;              // nadie post-21 (penaliza extra)
-  const entregasPost21 = k.entregas_post21 || 0;         // entregados >= 21hs (auto desde LD)
+  const demGrave = k.demEnCamino || 0;                   // "en camino al destinatario" → −0,5%
+  const demLeve = Math.max(0, demorados - demGrave);     // nadie/cancelado/no entregado/reprog → −0,2%
+  const demConObs = k.dem_con_obs || 0;                  // demorados CON observación (+0,1)
+  const demSinObs = Math.max(0, demorados - demConObs);  // demorados SIN observación (−0,1)
+  const entregasPost21 = k.entregas_post21 || 0;         // entregados 21:00–23:05hs → −0,05%
 
   const pct = (entregados + demorados) > 0
     ? r2(Math.max(0, Math.min(100,
         100
-        - demorados * 0.5
-        - noEntregasPost21 * 0.2
+        - demGrave * 0.5
+        - demLeve * 0.2
         - entregasPost21 * 0.05
         + demConObs * 0.1
         - demSinObs * 0.1
@@ -153,7 +154,7 @@ export function calcularRendimientoKPI(k: ChoferKpi) {
 
   const pctObservacion = k.total > 0 && k.conObservacion > 0
     ? Math.round((k.conObservacion / k.total) * 100) : null;
-  return { pct, demorados, demConObs, demSinObs, pctObservacion, cumpleSLA: cumpleSLA(pct) };
+  return { pct, demorados, demGrave, demLeve, demConObs, demSinObs, pctObservacion, cumpleSLA: cumpleSLA(pct) };
 }
 
 // ── Card 2: DESEMPEÑO ──────────────────────────────────────────────────────

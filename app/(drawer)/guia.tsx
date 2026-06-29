@@ -53,9 +53,9 @@ export default function GuiaScreen() {
         <Title icon="stats-chart-outline" text="1) Rendimiento (KPI)" color={colors.blue} />
         <P>Sale de Light Data. Arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text> y le restan los demorados y las entregas tardías:</P>
         {[
-          { label: 'Cada envío demorado', val: '−0,5%', color: colors.red },
-          { label: 'Nadie post 21hs', val: '−0,5% + −0,2%', color: colors.red },
-          { label: 'Entrega post 21hs', val: '−0,05%', color: colors.amber },
+          { label: 'En camino al destinatario', val: '−0,5%', color: colors.red },
+          { label: 'Nadie / cancelado / no entregado', val: '−0,2%', color: colors.red },
+          { label: 'Entrega tardía (21–23:05hs)', val: '−0,05%', color: colors.amber },
           { label: 'Demorado CON observación', val: '+0,1%', color: colors.green },
           { label: 'Demorado SIN observación', val: '−0,1%', color: colors.red },
         ].map((r) => (
