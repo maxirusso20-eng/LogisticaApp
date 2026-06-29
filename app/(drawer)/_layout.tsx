@@ -197,7 +197,6 @@ const GRUPOS_CHOFER = [
       { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
       { name: 'mis-ausencias', label: 'Mis Ausencias', icon: 'calendar-clear-outline', route: '/(drawer)/mis-ausencias' },
       { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia' },
-      { name: 'tabla-impacto', label: 'Impacto de cada ítem', icon: 'calculator-outline', route: '/(drawer)/tabla-impacto' },
     ],
   },
   {
