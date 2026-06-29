@@ -316,18 +316,6 @@ function ColectaCard({ item, index, onToggle, toggling }: {
             <Text style={ST.doneBadgeText}>Completada</Text>
           </View>
         )}
-        {(vencida || done) && (
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-            <View style={{ flex: 1 }}>
-              <FotoColecta clienteId={item.id} fotoUrl={item.foto_url ?? null} vencida={vencida} done={done} emailChofer={item.email_chofer ?? ''} clienteNombre={item.cliente} />
-            </View>
-            {done && (
-              <View style={{ flex: 1 }}>
-                <FirmaColecta clienteId={item.id} firmaUrl={item.firma_url ?? null} vencida={vencida} done={done} />
-              </View>
-            )}
-          </View>
-        )}
       </View>
     </Animated.View>
   );
@@ -803,12 +791,6 @@ export default function ColectasScreen() {
       <View style={[ST.greetingBox, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
         <View style={ST.greetingTopRow}>
           <Text style={[ST.greetingEyebrow, { color: colors.blue }]}>COLECTAS DE HOY</Text>
-          {gpsStatus !== 'off' && gpsStatus !== 'denied' && (
-            <View style={[ST.gpsChip, gpsStatus === 'background' && ST.gpsChipBackground]}>
-              <View style={ST.gpsDot} /><Text style={ST.gpsChipText}>GPS activo</Text>
-            </View>
-          )}
-          {gpsStatus === 'denied' && (<View style={[ST.gpsChip, ST.gpsChipDenied]}><Ionicons name="location-outline" size={11} color="#F59E0B" /><Text style={[ST.gpsChipText, { color: '#F59E0B' }]}>GPS sin permiso</Text></View>)}
         </View>
         <Text style={[ST.greetingTitle, { color: colors.textPrimary }]}>{saludo}, {nombreUsuario || 'chofer'} 👋</Text>
         <Text style={[ST.greetingSubtitle, { color: colors.textMuted }]}>
