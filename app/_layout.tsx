@@ -40,6 +40,10 @@ export const unstable_settings = {
 
 // ─── Paleta ───────────────────────────────────────────────────────────────────
 
+// Fondo del splash: navy de marca (mismo color que el fondo del logo) para que
+// el isotipo del splash nativo quede flotando sin bordes de "foto cuadrada".
+const SPLASH_BG = '#1A2436';
+
 const C = {
   bg: '#060B18',
   blue: '#4F8EF7',
@@ -186,8 +190,8 @@ const PARTICLES = [
 // ─── SplashLoader ─────────────────────────────────────────────────────────────
 
 function SplashLoader({ message = 'Verificando sesión...' }: { message?: string }) {
-  // Sigue el tema de la app (claro/oscuro) → sin salto dark→claro al entrar.
-  const { colors } = useTheme();
+  // Splash de marca SIEMPRE oscuro (navy #1A2436, igual que el fondo del logo) →
+  // arranque premium y seamless con el splash nativo, sin importar el tema.
 
   // Flotación suave (sin vibración: antes "temblaba")
   const floatY = useRef(new Animated.Value(0)).current;
@@ -251,7 +255,7 @@ function SplashLoader({ message = 'Verificando sesión...' }: { message?: string
   }, []);
 
   return (
-    <View style={[splash.container, { backgroundColor: colors.bg }]}>
+    <View style={[splash.container, { backgroundColor: SPLASH_BG }]}>
 
       {/* Partículas de fondo */}
       {PARTICLES.map((p, i) => <Particle key={i} {...p} />)}
@@ -288,17 +292,17 @@ function SplashLoader({ message = 'Verificando sesión...' }: { message?: string
         <Animated.Text
           style={[
             splash.brand,
-            { opacity: brandOp, letterSpacing: brandLS as any, color: colors.textPrimary },
+            { opacity: brandOp, letterSpacing: brandLS as any },
           ]}
         >
           Logística Hogareño
         </Animated.Text>
 
         {/* Línea separadora */}
-        <Animated.View style={[splash.lineAccent, { opacity: tagOp, backgroundColor: colors.border }]} />
+        <Animated.View style={[splash.lineAccent, { opacity: tagOp }]} />
 
         {/* Tagline */}
-        <Animated.Text style={[splash.taglineText, { opacity: tagOp, color: colors.blue }]}>
+        <Animated.Text style={[splash.taglineText, { opacity: tagOp }]}>
           PANEL DE CONTROL
         </Animated.Text>
 
@@ -314,7 +318,7 @@ function SplashLoader({ message = 'Verificando sesión...' }: { message?: string
 
         <Animated.View style={[splash.statusRow, { opacity: statusOp }]}>
           <Animated.View style={[splash.statusDot, { opacity: statusDotOp }]} />
-          <Text style={[splash.statusText, { color: colors.textMuted }]}>{message}</Text>
+          <Text style={[splash.statusText]}>{message}</Text>
         </Animated.View>
       </View>
 

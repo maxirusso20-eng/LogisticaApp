@@ -339,7 +339,7 @@ function DrawerContent(props: any) {
 
 export default function DrawerLayout() {
   const { esAdmin } = useEsAdmin();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
 
   // Registra/refresca el push token al entrar a la app, para CUALQUIER usuario
   // (admin o chofer), sin depender de qué pantalla abra. Sin esto, un chofer que
@@ -351,15 +351,16 @@ export default function DrawerLayout() {
     if (esAdmin !== null) SplashScreen.hideAsync();
   }, [esAdmin]);
 
-  // Splash inteligente — respeta el tema actual, evita flash blanco en modo oscuro
+  // Splash de marca SIEMPRE navy (#1A2436, igual que el logo y el splash nativo)
+  // → arranque premium y seamless, sin importar el tema.
   if (esAdmin === null) {
     return (
-      <View style={[splashStyles.container, { backgroundColor: colors.bg }]}>
+      <View style={[splashStyles.container, { backgroundColor: '#1A2436' }]}>
         <View style={[
           splashStyles.iconBox,
           {
-            backgroundColor: isDark ? 'rgba(79,142,247,0.10)' : 'rgba(79,142,247,0.08)',
-            borderColor: isDark ? 'rgba(79,142,247,0.25)' : 'rgba(79,142,247,0.18)',
+            backgroundColor: 'rgba(79,142,247,0.12)',
+            borderColor: 'rgba(79,142,247,0.30)',
           },
         ]}>
           <Ionicons name="bus" size={44} color="#4F8EF7" />
@@ -367,7 +368,7 @@ export default function DrawerLayout() {
         <ActivityIndicator size="large" color="#4F8EF7" style={{ marginTop: 28 }} />
         <Text style={[
           splashStyles.loadingText,
-          { color: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)' },
+          { color: 'rgba(255,255,255,0.45)' },
         ]}>
           Cargando...
         </Text>
