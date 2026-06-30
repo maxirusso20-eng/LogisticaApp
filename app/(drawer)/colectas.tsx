@@ -278,25 +278,24 @@ function ColectaCard({ item, index, onToggle, toggling }: {
       ST.card,
       { backgroundColor: colors.bgCard, borderColor: colors.border },
       done && { borderColor: 'rgba(52,211,153,0.15)', backgroundColor: colors.bgCard },
-      vencida && { borderColor: 'rgba(239,68,68,0.25)', backgroundColor: colors.bgCard },
+      vencida && { borderColor: 'rgba(245,158,11,0.25)', backgroundColor: colors.bgCard },
       { opacity: fade, transform: [{ scale }] },
     ]}>
-      <View style={[ST.accent, { backgroundColor: done ? '#34D399' : vencida ? '#EF4444' : colors.blue }]} />
+      <View style={[ST.accent, { backgroundColor: done ? '#34D399' : vencida ? '#F59E0B' : colors.blue }]} />
       <View style={ST.cardBody}>
         <View style={ST.cardTop}>
           <View style={{ flex: 1 }}>
             <Text style={[ST.clienteNombre, { color: done ? colors.textMuted : colors.textPrimary }]} numberOfLines={1}>{item.cliente || '—'}</Text>
             <View style={ST.horarioRow}>
-              <Ionicons name="time-outline" size={13} color={done ? colors.textMuted : vencida ? '#EF4444' : colors.blue} />
-              <Text style={[ST.horarioText, { color: done ? colors.textMuted : vencida ? '#EF4444' : colors.blue }]}>
-                {item.horario || 'Sin horario'}{vencida && !done ? ' · Vencida' : ''}
+              <Ionicons name="time-outline" size={13} color={done ? colors.textMuted : vencida ? '#F59E0B' : colors.blue} />
+              <Text style={[ST.horarioText, { color: done ? colors.textMuted : vencida ? '#F59E0B' : colors.blue }]}>
+                {item.horario || 'Sin horario'}{vencida && !done ? ' · fuera de horario' : ''}
               </Text>
             </View>
           </View>
-          <TouchableOpacity onPress={handlePress} disabled={toggling || vencida} activeOpacity={0.7} style={ST.checkWrap}>
+          <TouchableOpacity onPress={handlePress} disabled={toggling} activeOpacity={0.7} style={ST.checkWrap}>
             {toggling ? <ActivityIndicator size="small" color={colors.blue} />
-              : vencida && !done ? <Ionicons name="alert-circle" size={30} color="#EF4444" />
-                : <Ionicons name={done ? 'checkmark-circle' : 'ellipse-outline'} size={30} color={done ? '#34D399' : colors.borderSubtle} />}
+              : <Ionicons name={done ? 'checkmark-circle' : 'ellipse-outline'} size={30} color={done ? '#34D399' : vencida ? '#F59E0B' : colors.borderSubtle} />}
           </TouchableOpacity>
         </View>
         <View>

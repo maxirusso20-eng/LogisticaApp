@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import {
   acumularPorChofer, calcularDesempenoConducta, calcularRendimientoKPI,
-  type ChoferKpi, colorDesempeno, fmtPct,
+  type ChoferKpi, colorDesempeno, demoradosTotal, fmtPct,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -61,6 +61,21 @@ export default function RankingScreen() {
   }, [registros]);
 
   const miIndex = ranking.findIndex((k) => (k.chofer || '').trim().toLowerCase() === miNombre);
+
+  // Ranking de DEMORADOS (de más a menos), igual que la web.
+  const rankingDemorados = useMemo(() => {
+    const porChofer = acumularPorChofer(registros);
+    return Object.values(porChofer)
+      .map((k) => ({
+        chofer: k.chofer,
+        demorados: demoradosTotal(k),
+        enCamino: k.demEnCamino || 0,
+        nadie: k.demNadie || 0,
+        total: k.total || 0,
+      }))
+      .filter((k) => k.demorados > 0)
+      .sort((a, b) => b.demorados - a.demorados);
+  }, [registros]);
 
   const Header = (
     <View style={styles.header}>
@@ -136,6 +151,45 @@ export default function RankingScreen() {
           })}
         </View>
       )}
+
+      {/* ── Ranking de DEMORADOS ── */}
+      {rankingDemorados.length > 0 && (
+        <View style={[styles.card, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <Ionicons name="time-outline" size={16} color="#F59E0B" />
+            <Text style={{ fontSize: 14, fontWeight: '800', color: colors.textPrimary }}>Ranking de demorados</Text>
+          </View>
+          <Text style={{ fontSize: 11.5, color: colors.textMuted, marginBottom: 14 }}>Quién acumula más demorados, de mayor a menor</Text>
+
+          {rankingDemorados.map((k, i) => {
+            const soyYo = (k.chofer || '').trim().toLowerCase() === miNombre;
+            const peor = rankingDemorados[0].demorados || 1;
+            const ratio = k.demorados / peor;
+            const col = ratio >= 0.66 ? '#EF4444' : ratio >= 0.33 ? '#F59E0B' : '#F97316';
+            return (
+              <View
+                key={k.chofer}
+                style={[styles.row, { backgroundColor: soyYo ? col + '14' : colors.bgInput, borderColor: soyYo ? col + '66' : 'transparent', borderLeftColor: col, borderLeftWidth: 3 }]}
+              >
+                <Text style={[styles.medal, { color: i === 0 ? '#EF4444' : colors.textMuted, fontSize: 14 }]}>{i + 1}°</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={{ fontSize: 13.5, fontWeight: soyYo ? '800' : '700', color: colors.textPrimary }}>
+                    {k.chofer}{soyYo ? <Text style={{ color: col, fontWeight: '800' }}> · vos</Text> : ''}
+                  </Text>
+                  <Text numberOfLines={1} style={{ fontSize: 11.5, color: colors.textMuted }}>
+                    {k.enCamino > 0 ? `🚚 ${k.enCamino} en camino  ` : ''}{k.nadie > 0 ? `🚪 ${k.nadie} nadie +21h  ` : ''}de {k.total} paq.
+                  </Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={{ fontSize: 18, fontWeight: '900', color: col }}>{k.demorados}</Text>
+                  <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textMuted }}>demorados</Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
       <View style={{ height: 30 }} />
     </ScrollView>
   );

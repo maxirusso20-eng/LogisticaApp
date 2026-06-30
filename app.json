@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "LogisticaApp",
-    "slug": "LogisticaApp",
+    "slug": "maximilianorusso",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
@@ -34,7 +34,14 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_BACKGROUND_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ],
       "splash": {
         "backgroundColor": "#1A2436"
@@ -77,9 +84,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "a525e9c2-7f71-4718-b179-ab9c09986ca1"
+        "projectId": "55c441ec-3479-438a-87d3-10489dd5ff82"
       }
     },
-    "owner": "maxirusso20"
+    "owner": "maxirussos-team"
   }
 }
