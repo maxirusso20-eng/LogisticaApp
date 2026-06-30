@@ -42,10 +42,11 @@ export const NEGATIVOS: Indicador[] = [
 // ── Avisos (pesos variables: no entran en NEGATIVOS porque no todos son 0,1%) ─
 type Aviso = { key: string; label: string; peso: number };
 export const AVISOS: Aviso[] = [
-  { key: 'aviso_post10_no_colectar', label: 'Aviso post 10hs — no colectar', peso: 0.1 },
-  { key: 'aviso_post10_no_recorrido', label: 'Aviso post 10hs — no salir en recorrido', peso: 0.1 },
-  { key: 'aviso_post12_no_colectar', label: 'Aviso post 12hs — no colectar', peso: 0.5 },
-  { key: 'aviso_post12_no_recorrido', label: 'Aviso post 12hs — no salir en recorrido', peso: 2.0 },
+  { key: 'aviso_post10_no_recorrido', label: 'Aviso 8 a 10hs — no recorrido', peso: 0.1 },
+  { key: 'aviso_recorrido_10a12', label: 'Aviso 10 a 12hs — no recorrido', peso: 0.5 },
+  { key: 'aviso_post12_no_recorrido', label: 'Aviso post 12hs — no recorrido', peso: 2.0 },
+  { key: 'aviso_post10_no_colectar', label: 'Aviso post 10hs — no colecta', peso: 0.1 },
+  { key: 'aviso_post12_no_colectar', label: 'Aviso post 12hs — no colecta', peso: 0.5 },
 ];
 
 // Todos los campos manuales (se guardan en kpis_lightdata).

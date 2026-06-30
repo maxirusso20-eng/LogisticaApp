@@ -8,7 +8,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  AVISOS, HORA_CORTE_AUSENCIA, HORA_CORTE_TEMPRANA, NEGATIVOS, PESO_PUNTO, POSITIVOS, SLA_MINIMO,
+  AVISOS, NEGATIVOS, PESO_PUNTO, POSITIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { useTheme } from '../../lib/ThemeContext';
 
@@ -90,12 +90,6 @@ export default function TablaImpactoScreen() {
 
       <Card icon="time-outline" color={colors.amber} titulo="Desempeño · Avisos" sub="No colectar / no salir en recorrido. Cuanto más tarde, más resta.">
         {AVISOS.map((a) => <Fila key={a.key} label={a.label} valor={-a.peso} />)}
-      </Card>
-
-      <Card icon="calendar-clear-outline" color={colors.amber} titulo="Desempeño · Ausencias" sub="Cuando te bajás de una colecta o recorrido, según la hora.">
-        <Fila label={`Antes de las ${HORA_CORTE_TEMPRANA}:00`} detalle="Avisaste con antelación" valor={0} valorTexto="Sin impacto" />
-        <Fila label={`De ${HORA_CORTE_TEMPRANA}:00 a ${HORA_CORTE_AUSENCIA - 1}:59`} valor={-0.1} />
-        <Fila label={`Desde las ${HORA_CORTE_AUSENCIA}:00`} detalle="Avisar tarde desorganiza más" valor={-0.5} />
       </Card>
 
       {/* SLA */}
