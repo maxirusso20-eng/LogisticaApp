@@ -171,9 +171,9 @@ export default function EstadisticasScreen() {
                         </View>
                       </View>
                     ))}
-                    {k.conObservacion > 0 && (
+                    {(k.fallos || 0) > 0 && (
                       <Text style={{ fontSize: 11.5, color: colors.purple, fontWeight: '700', marginTop: 2 }}>
-                        📝 Observaciones {k.conObservacion}/{k.total} ({k.pctObservacion}%)
+                        📝 Demorados con obs {k.dem_con_obs || 0}/{k.fallos} ({Math.round(((k.dem_con_obs || 0) / k.fallos) * 100)}%)
                       </Text>
                     )}
                     {(k.penalAusencias || 0) > 0 && (
