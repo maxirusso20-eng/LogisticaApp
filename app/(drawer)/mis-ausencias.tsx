@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  HORA_CORTE_AUSENCIA, HORA_CORTE_TEMPRANA, penalidadAusencia, penalidadAusencias,
+  AVISOS, HORA_CORTE_AUSENCIA, HORA_CORTE_TEMPRANA, penalidadAusencia, penalidadAusencias,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -25,6 +25,7 @@ export default function MisAusenciasScreen() {
   const { colors } = useTheme();
   const { autorizado, verificando } = useRoleGuard('chofer');
   const [ausencias, setAusencias] = useState<any[]>([]);
+  const [kpis, setKpis] = useState<any[]>([]);
   const [miNombre, setMiNombre] = useState('');
   const [miEmail, setMiEmail] = useState('');
   const [loading, setLoading] = useState(true);
@@ -45,8 +46,10 @@ export default function MisAusenciasScreen() {
         const { data } = await supabase.from('ausencias').select('*').eq('chofer', nombre)
           .order('fecha', { ascending: false }).order('hora', { ascending: false });
         setAusencias(data || []);
+        const { data: k } = await supabase.from('kpis_lightdata').select('*').eq('chofer', nombre).order('fecha', { ascending: false });
+        setKpis(k || []);
       } else {
-        setAusencias([]);
+        setAusencias([]); setKpis([]);
       }
     } catch (e) {
       console.warn('[mis-ausencias] error', e);
@@ -61,11 +64,26 @@ export default function MisAusenciasScreen() {
   useEffect(() => {
     const canal = supabase.channel('mis-ausencias-sync')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ausencias' }, () => cargar())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'kpis_lightdata' }, () => cargar())
       .subscribe();
     return () => { void supabase.removeChannel(canal); };
   }, [cargar]);
 
   const totalPenal = useMemo(() => penalidadAusencias(ausencias), [ausencias]);
+
+  // Avisos del chofer (desde kpis_lightdata: cada columna de aviso con count > 0).
+  const avisosChofer = useMemo(() => {
+    const out: { fecha: string; label: string; count: number; impacto: number }[] = [];
+    for (const row of kpis) {
+      for (const a of AVISOS) {
+        const count = row[a.key] || 0;
+        if (count > 0) out.push({ fecha: row.fecha, label: a.label, count, impacto: Math.round(count * a.peso * 100) / 100 });
+      }
+    }
+    return out.sort((x, y) => String(y.fecha || '').localeCompare(String(x.fecha || '')));
+  }, [kpis]);
+  const totalAvisos = useMemo(() => Math.round(avisosChofer.reduce((s, a) => s + a.impacto, 0) * 100) / 100, [avisosChofer]);
+  const totalImpacto = Math.round((totalPenal + totalAvisos) * 100) / 100;
 
   const Header = (
     <View style={styles.header}>
@@ -99,13 +117,13 @@ export default function MisAusenciasScreen() {
     );
   }
 
-  if (ausencias.length === 0) {
+  if (ausencias.length === 0 && avisosChofer.length === 0) {
     return (
       <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.container} refreshControl={refresh}>
         {Header}
         <View style={[styles.empty, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
           <Ionicons name="checkmark-circle-outline" size={40} color={colors.green} style={{ marginBottom: 12 }} />
-          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>¡Sin ausencias! 🎉</Text>
+          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>¡Sin ausencias ni avisos! 🎉</Text>
           <Text style={[styles.emptyText, { color: colors.textMuted }]}>No te bajaste de ninguna colecta ni recorrido. Seguí así.</Text>
         </View>
       </ScrollView>
@@ -119,12 +137,12 @@ export default function MisAusenciasScreen() {
       {/* Resumen */}
       <View style={[styles.resumen, { backgroundColor: colors.bgCard, borderColor: colors.red + '55' }]}>
         <View>
-          <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: '600' }}>Ausencias registradas</Text>
-          <Text style={{ fontSize: 28, fontWeight: '900', color: colors.textPrimary }}>{ausencias.length}</Text>
+          <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: '600' }}>Ausencias y avisos</Text>
+          <Text style={{ fontSize: 28, fontWeight: '900', color: colors.textPrimary }}>{ausencias.length + avisosChofer.length}</Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: '600' }}>Impacto en tu Desempeño</Text>
-          <Text style={{ fontSize: 28, fontWeight: '900', color: colors.red }}>−{totalPenal}%</Text>
+          <Text style={{ fontSize: 28, fontWeight: '900', color: colors.red }}>−{totalImpacto}%</Text>
         </View>
       </View>
 
@@ -160,6 +178,25 @@ export default function MisAusenciasScreen() {
           );
         })}
       </View>
+
+      {/* Avisos (no recorrido / no colecta) — cargados en Desempeño */}
+      {avisosChofer.length > 0 && (
+        <View style={{ gap: 10, marginTop: 18 }}>
+          <Text style={{ fontSize: 12, fontWeight: '800', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Avisos</Text>
+          {avisosChofer.map((a, idx) => (
+            <View key={idx} style={[styles.item, { backgroundColor: colors.bgCard, borderColor: colors.border, borderLeftColor: colors.amber, borderLeftWidth: 3 }]}>
+              <View style={[styles.itemIcon, { backgroundColor: colors.amber + '1a' }]}>
+                <Ionicons name="notifications-off-outline" size={18} color={colors.amber} />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={{ fontSize: 13.5, fontWeight: '700', color: colors.textPrimary }}>{a.label}{a.count > 1 ? ` ×${a.count}` : ''}</Text>
+                <Text style={{ fontSize: 12.5, color: colors.textMuted }}>{fmtFecha(a.fecha)}</Text>
+              </View>
+              <Text style={{ fontSize: 15, fontWeight: '900', color: colors.red }}>−{a.impacto}%</Text>
+            </View>
+          ))}
+        </View>
+      )}
       <View style={{ height: 30 }} />
     </ScrollView>
   );
