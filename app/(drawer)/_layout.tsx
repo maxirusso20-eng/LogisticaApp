@@ -194,7 +194,7 @@ const GRUPOS_CHOFER = [
     label: 'MI DESEMPEÑO', items: [
       { name: 'rendimiento', label: 'Mi Rendimiento', icon: 'stats-chart-outline', route: '/(drawer)/rendimiento' },
       { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
-      { name: 'mis-ausencias', label: 'Mis Ausencias', icon: 'calendar-clear-outline', route: '/(drawer)/mis-ausencias' },
+      { name: 'mis-ausencias', label: 'Mis Faltas', icon: 'calendar-clear-outline', route: '/(drawer)/mis-ausencias' },
       { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia' },
     ],
   },
@@ -440,7 +440,7 @@ export default function DrawerLayout() {
       />
       <Drawer.Screen
         name="ausencias"
-        options={{ title: 'Ausencias', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
+        options={{ title: 'Ausencias', drawerItemStyle: { display: 'none' } }}
       />
       <Drawer.Screen
         name="ayuda"
@@ -448,7 +448,7 @@ export default function DrawerLayout() {
       />
       <Drawer.Screen
         name="mis-ausencias"
-        options={{ title: 'Mis Ausencias', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
+        options={{ title: 'Mis Faltas', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
       />
       <Drawer.Screen
         name="guia"

@@ -91,8 +91,8 @@ export default function MisAusenciasScreen() {
         <Ionicons name="calendar-clear" size={22} color={colors.red} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.h1, { color: colors.textPrimary }]}>Mis Ausencias</Text>
-        <Text style={[styles.sub, { color: colors.textMuted }]}>Cuando te bajás de una colecta o recorrido</Text>
+        <Text style={[styles.h1, { color: colors.textPrimary }]}>Mis Faltas</Text>
+        <Text style={[styles.sub, { color: colors.textMuted }]}>Avisos y ausencias: cuando no venís a un recorrido o colecta</Text>
       </View>
     </View>
   );
@@ -123,7 +123,7 @@ export default function MisAusenciasScreen() {
         {Header}
         <View style={[styles.empty, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
           <Ionicons name="checkmark-circle-outline" size={40} color={colors.green} style={{ marginBottom: 12 }} />
-          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>¡Sin ausencias ni avisos! 🎉</Text>
+          <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>¡Sin faltas! 🎉</Text>
           <Text style={[styles.emptyText, { color: colors.textMuted }]}>No te bajaste de ninguna colecta ni recorrido. Seguí así.</Text>
         </View>
       </ScrollView>
@@ -137,7 +137,7 @@ export default function MisAusenciasScreen() {
       {/* Resumen */}
       <View style={[styles.resumen, { backgroundColor: colors.bgCard, borderColor: colors.red + '55' }]}>
         <View>
-          <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: '600' }}>Ausencias y avisos</Text>
+          <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: '600' }}>Faltas (avisos y ausencias)</Text>
           <Text style={{ fontSize: 28, fontWeight: '900', color: colors.textPrimary }}>{ausencias.length + avisosChofer.length}</Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>

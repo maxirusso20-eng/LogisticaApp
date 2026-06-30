@@ -78,12 +78,12 @@ const SECCIONES: Seccion[] = [
     ],
   },
   {
-    id: 'ausencias', titulo: 'Ausencias', icon: 'calendar-clear-outline', color: '#ef4444',
-    desc: 'Cuando un chofer se baja de una colecta o recorrido.',
+    id: 'ausencias', titulo: 'Faltas (Avisos)', icon: 'calendar-clear-outline', color: '#ef4444',
+    desc: 'Cuando un chofer no viene a un recorrido o colecta.',
     items: [
-      ['Carga (admin)', 'Chofer, día, hora y tipo (colecta/recorrido).'],
-      ['Penalización', 'Antes de las 12:00 resta −0,1%; desde las 12:00 resta −0,5%.'],
-      ['Mis Ausencias (chofer)', 'El chofer ve sus ausencias y el impacto en su nota.'],
+      ['Carga (admin)', 'En Desempeño se cargan como Avisos, según el horario en que avisó (no recorrido / no colecta).'],
+      ['Penalización', 'No recorrido: 8–10hs −0,1% · 10–12hs −0,5% · post 12hs −2,0%. No colecta: post 10hs −0,1% · post 12hs −0,5%.'],
+      ['Mis Faltas (chofer)', 'El chofer ve sus avisos/faltas y el impacto en su nota.'],
     ],
   },
   {
@@ -117,7 +117,7 @@ const SECCIONES: Seccion[] = [
       ['Panel del Día', 'Sus colectas y tareas del día.'],
       ['Mi Rendimiento', 'Sus dos notas (KPI + Desempeño) y el desglose.'],
       ['Ranking', 'Su posición en la flota.'],
-      ['Mis Ausencias', 'Sus ausencias y el impacto en su nota.'],
+      ['Mis Faltas', 'Sus avisos/faltas y el impacto en su nota.'],
       ['Cómo se mide', 'Guía que explica los KPIs e indicadores.'],
       ['Chat', 'Recibe colectas y avisos.'],
     ],

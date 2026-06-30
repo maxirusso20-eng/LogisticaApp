@@ -8,9 +8,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
+  ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import { CAMPOS_MANUALES, NEGATIVOS, penalidadAusencia } from '../../lib/desempeno';
+import { AVISOS, CAMPOS_MANUALES, NEGATIVOS } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 
@@ -25,10 +25,6 @@ const fmtFecha = (iso: string) => {
   const d = new Date(iso + 'T12:00:00');
   return d.toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit' });
 };
-// Helpers para las ausencias (gestión movida acá desde la pantalla Ausencias).
-const horaAhora = () => new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
-const fmtFechaCorta = (iso: string) => { const [, m, d] = String(iso).split('-'); return d && m ? `${d}/${m}` : iso; };
-const fmtHoraAus = (h?: string | null) => (h ? String(h).slice(0, 5) : '—');
 
 export default function DesempenoScreen() {
   const { colors } = useTheme();
@@ -41,11 +37,6 @@ export default function DesempenoScreen() {
   const [guardando, setGuardando] = useState(false);
   const [guardadoOk, setGuardadoOk] = useState(false);
   const [picker, setPicker] = useState(false);
-  const [ausencias, setAusencias] = useState<any[]>([]);
-  const [ausHora, setAusHora] = useState(horaAhora());
-  const [ausTipo, setAusTipo] = useState<'colecta' | 'recorrido'>('colecta');
-  const [ausDetalle, setAusDetalle] = useState('');
-  const [guardandoAus, setGuardandoAus] = useState(false);
 
   const cargar = useCallback(async () => {
     try {
@@ -53,8 +44,6 @@ export default function DesempenoScreen() {
       setRegistros(data || []);
       const { data: ch } = await supabase.from('Choferes').select('nombre').order('nombre');
       setChoferes((ch || []).map((c: any) => c.nombre).filter(Boolean));
-      const { data: aus } = await supabase.from('ausencias').select('*');
-      setAusencias(aus || []);
     } catch (e) {
       console.warn('[desempeno] error', e);
     } finally {
@@ -87,34 +76,7 @@ export default function DesempenoScreen() {
   };
 
   const totalNegativos = useMemo(() => NEGATIVOS.reduce((s, i) => s + (valores[i.key] || 0), 0), [valores]);
-
-  const ausenciasChofer = useMemo(
-    () => (ausencias || [])
-      .filter((a) => a.chofer === choferSel)
-      .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '') || (b.hora || '').localeCompare(a.hora || '')),
-    [ausencias, choferSel]
-  );
-
-  const registrarAusencia = async () => {
-    if (!choferSel) { Alert.alert('Elegí un chofer'); return; }
-    const hora = ausHora.trim();
-    if (!/^\d{1,2}:\d{2}$/.test(hora)) { Alert.alert('Hora inválida', 'Usá el formato HH:MM (ej. 10:30).'); return; }
-    setGuardandoAus(true);
-    const { error } = await supabase.from('ausencias').insert({
-      chofer: choferSel, fecha, hora, tipo: ausTipo, detalle: ausDetalle.trim() || null,
-    });
-    setGuardandoAus(false);
-    if (error) { Alert.alert('Error', error.message); return; }
-    setAusDetalle('');
-    cargar();
-  };
-
-  const borrarAusencia = (id: any) => {
-    Alert.alert('Eliminar ausencia', '¿Seguro?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: async () => { await supabase.from('ausencias').delete().eq('id', id); cargar(); } },
-    ]);
-  };
+  const totalAvisos = useMemo(() => AVISOS.reduce((s, a) => s + (valores[a.key] || 0), 0), [valores]);
 
   if (loading) {
     return <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: 'center' }}><ActivityIndicator color={colors.blue} /></View>;
@@ -178,6 +140,13 @@ export default function DesempenoScreen() {
           </View>
           {NEGATIVOS.map((i) => <Fila key={i.key} k={i.key} label={i.label} positivo={false} />)}
 
+          {/* ── Avisos (faltas: no recorrido / no colecta, por franja horaria) ── */}
+          <View style={[styles.secHead, { marginTop: 18 }]}>
+            <Ionicons name="time-outline" size={15} color="#f59e0b" />
+            <Text style={{ fontSize: 12.5, fontWeight: '800', color: '#f59e0b' }}>Avisos ({totalAvisos})</Text>
+          </View>
+          {AVISOS.map((a) => <Fila key={a.key} k={a.key} label={`${a.label}  (−${a.peso}%)`} positivo={false} />)}
+
           <TouchableOpacity onPress={guardar} disabled={guardando} activeOpacity={0.85}
             style={[styles.saveBtn, { backgroundColor: guardadoOk ? colors.green : colors.blue }]}>
             <Ionicons name={guardadoOk ? 'checkmark' : 'save-outline'} size={17} color="#fff" />
@@ -185,50 +154,6 @@ export default function DesempenoScreen() {
               {guardando ? 'Guardando…' : guardadoOk ? 'Guardado ✓' : 'Guardar indicadores del día'}
             </Text>
           </TouchableOpacity>
-
-          {/* ── Ausencias del chofer (alta + historial) ── */}
-          <View style={[styles.secHead, { marginTop: 20 }]}>
-            <Ionicons name="calendar-clear-outline" size={15} color={colors.red} />
-            <Text style={{ fontSize: 12.5, fontWeight: '800', color: colors.red }}>Ausencias</Text>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
-            <TextInput value={ausHora} onChangeText={setAusHora} placeholder="HH:MM" placeholderTextColor={colors.textMuted}
-              keyboardType="numbers-and-punctuation"
-              style={[styles.ausInput, { width: 70, textAlign: 'center', backgroundColor: colors.bgInput, borderColor: colors.border, color: colors.textPrimary }]} />
-            <TouchableOpacity onPress={() => setAusTipo((t) => (t === 'colecta' ? 'recorrido' : 'colecta'))}
-              style={[styles.ausInput, { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, backgroundColor: colors.bgInput, borderColor: colors.border }]}>
-              <Ionicons name={ausTipo === 'colecta' ? 'cube-outline' : 'car-outline'} size={14} color={colors.blue} />
-              <Text style={{ color: colors.textPrimary, fontSize: 12.5, fontWeight: '700', textTransform: 'capitalize' }}>{ausTipo}</Text>
-            </TouchableOpacity>
-            <TextInput value={ausDetalle} onChangeText={setAusDetalle} placeholder="Detalle" placeholderTextColor={colors.textMuted}
-              style={[styles.ausInput, { flex: 1, backgroundColor: colors.bgInput, borderColor: colors.border, color: colors.textPrimary }]} />
-          </View>
-          <TouchableOpacity onPress={registrarAusencia} disabled={guardandoAus} activeOpacity={0.85}
-            style={[styles.saveBtn, { marginTop: 8, paddingVertical: 10, backgroundColor: colors.red }]}>
-            <Ionicons name="calendar-clear-outline" size={15} color="#fff" />
-            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>
-              {guardandoAus ? 'Registrando…' : `Registrar (−${penalidadAusencia(ausHora)}% · ${fmtFechaCorta(fecha)})`}
-            </Text>
-          </TouchableOpacity>
-          {ausenciasChofer.length === 0 ? (
-            <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 10 }}>Sin ausencias registradas.</Text>
-          ) : (
-            <View style={{ marginTop: 10, gap: 6 }}>
-              {ausenciasChofer.map((a) => {
-                const penal = penalidadAusencia(a.hora);
-                const col = penal === 0 ? colors.green : penal >= 0.5 ? colors.red : '#f59e0b';
-                return (
-                  <View key={a.id} style={[styles.ausRow, { backgroundColor: colors.bgInput, borderColor: colors.border }]}>
-                    <Text style={{ fontSize: 12, color: colors.textPrimary, fontWeight: '700' }}>{fmtFechaCorta(a.fecha)} {fmtHoraAus(a.hora)}</Text>
-                    <Text style={{ fontSize: 12, color: colors.textMuted, textTransform: 'capitalize' }}>{a.tipo}</Text>
-                    <View style={{ flex: 1 }} />
-                    <Text style={{ fontSize: 12, fontWeight: '800', color: col }}>−{penal}%</Text>
-                    <TouchableOpacity onPress={() => borrarAusencia(a.id)} hitSlop={8}><Ionicons name="trash-outline" size={15} color={colors.red} /></TouchableOpacity>
-                  </View>
-                );
-              })}
-            </View>
-          )}
         </View>
       ) : (
         <View style={[styles.card, { backgroundColor: colors.bgCard, borderColor: colors.border, alignItems: 'center', paddingVertical: 36 }]}>
