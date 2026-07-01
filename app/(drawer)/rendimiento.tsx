@@ -144,11 +144,17 @@ export default function RendimientoScreen() {
     : { icon: '⚠️', text: 'Hay que mejorar', color: colors.red };
   const podio = puesto === 1 ? '🥇 1er lugar' : puesto === 2 ? '🥈 2do lugar' : puesto === 3 ? '🥉 3er lugar' : `📊 Puesto ${puesto}°`;
 
+  // Desglose justificado: los demorados se abren por MOTIVO (en camino, nadie
+  // +21h, no entregado/cancelado +21h) en vez de decir solo "demorado".
+  const otrosDem = Math.max(0, (yo.demorados || 0) - (yo.demEnCamino || 0) - (yo.demNadie || 0));
   const rows = [
-    { label: 'Entregados', value: yo.entregados, pct: pct(yo.entregados), color: colors.green, icon: '✅', show: true },
-    { label: 'Demorados', value: yo.demorados || 0, pct: pct(yo.demorados || 0), color: colors.red, icon: '❌', show: (yo.demorados || 0) > 0 },
-    { label: 'Pendientes', value: yo.neutros, pct: pct(yo.neutros), color: colors.textMuted, icon: '🔄', show: yo.neutros > 0 },
-    { label: 'Excluidos', value: yo.excluidos, pct: pct(yo.excluidos), color: colors.textMuted, icon: '⛔', show: yo.excluidos > 0 },
+    { label: 'Entregados', value: yo.entregados, pct: pct(yo.entregados), color: colors.green, icon: '✅', sub: false, show: true, desc: 'Llegaron a destino en el día (incluye 2da visita).' },
+    { label: 'Demorados (total)', value: yo.demorados || 0, pct: pct(yo.demorados || 0), color: colors.red, icon: '⏱️', sub: false, show: (yo.demorados || 0) > 0, desc: 'Suma de los que no se entregaron. Cada uno baja tu KPI.' },
+    { label: 'En camino al destinatario', value: yo.demEnCamino || 0, pct: pct(yo.demEnCamino || 0), color: colors.red, icon: '🚚', sub: true, show: (yo.demEnCamino || 0) > 0, desc: 'Se quedó en el camión: a fin del día seguía en ruta sin entregar.' },
+    { label: 'Nadie en domicilio +21h', value: yo.demNadie || 0, pct: pct(yo.demNadie || 0), color: colors.red, icon: '🚪', sub: true, show: (yo.demNadie || 0) > 0, desc: 'Tocaste timbre y no había nadie, ya pasadas las 21hs.' },
+    { label: 'No entregado / cancelado +21h', value: otrosDem, pct: pct(otrosDem), color: colors.red, icon: '📦', sub: true, show: otrosDem > 0, desc: 'No se pudo entregar o se canceló después de las 21hs.' },
+    { label: 'Pendientes', value: yo.neutros, pct: pct(yo.neutros), color: colors.textMuted, icon: '🔄', sub: false, show: yo.neutros > 0, desc: 'Todavía pueden entregarse (reprogramado, a retirar). No afectan tu KPI.' },
+    { label: 'Excluidos', value: yo.excluidos, pct: pct(yo.excluidos), color: colors.textMuted, icon: '⛔', sub: false, show: yo.excluidos > 0, desc: 'Cancelados por ML o el comprador. No es tu responsabilidad.' },
   ].filter((r) => r.show);
 
   return (
@@ -230,13 +236,21 @@ export default function RendimientoScreen() {
           <Ionicons name="cube-outline" size={16} color={colors.textMuted} />
           <Text style={[styles.cardTitle, { color: colors.textPrimary, fontSize: 14 }]}>Desglose de tus {yo.total} envíos</Text>
         </View>
-        {rows.map((r) => (
-          <View key={r.label} style={{ marginBottom: 12 }}>
-            <View style={styles.rowBetween}>
-              <Text style={[styles.smallMuted, { color: colors.textMuted }]}>{r.icon} {r.label}</Text>
-              <Text style={{ fontSize: 13, fontWeight: '800', color: r.color }}>{r.value} ({fmtPct(r.pct)})</Text>
+        {rows.map((r, i) => (
+          <View key={r.label} style={{
+            flexDirection: 'row', alignItems: 'flex-start', gap: 9,
+            paddingVertical: 8, paddingLeft: r.sub ? 12 : 0,
+            borderBottomWidth: i < rows.length - 1 ? 1 : 0, borderBottomColor: colors.borderSubtle,
+          }}>
+            {r.sub && <View style={{ width: 2, alignSelf: 'stretch', borderRadius: 2, backgroundColor: r.color + '55' }} />}
+            <Text style={{ fontSize: 15, lineHeight: 18 }}>{r.icon}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary, lineHeight: 17 }}>{r.label}</Text>
+              <Text style={{ fontSize: 11, color: colors.textMuted, lineHeight: 15, marginTop: 2 }}>{r.desc}</Text>
             </View>
-            <Bar pct={r.pct} color={r.color} track={colors.border} thin />
+            <Text style={{ fontSize: 13, fontWeight: '800', color: r.color, lineHeight: 17 }}>
+              {r.value} <Text style={{ fontSize: 11, fontWeight: '600', color: colors.textMuted }}>({fmtPct(r.pct)})</Text>
+            </Text>
           </View>
         ))}
       </View>
