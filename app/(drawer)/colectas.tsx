@@ -222,7 +222,7 @@ function FotoColecta({ clienteId, fotoUrl, vencida, done }: {
       const { error: ue } = await supabase.storage.from('fotos-colectas').upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
       if (ue) throw ue;
       const { data: ud } = supabase.storage.from('fotos-colectas').getPublicUrl(filePath);
-      const { error: upd } = await supabase.from('Clientes').update({ foto_url: ud.publicUrl, modificado_por: 'chofer' }).eq('id', clienteId);
+      const { error: upd } = await supabase.rpc('chofer_marcar_colecta', { p_id: Number(clienteId), p_foto_url: ud.publicUrl });
       if (upd) throw upd;
       setFotoLocal(ud.publicUrl);
     } catch (err: any) { Alert.alert('Error', err?.message || 'No se pudo subir la foto.'); }
@@ -344,7 +344,7 @@ function FirmaColecta({ clienteId, firmaUrl, vencida, done }: {
       const { error: ue } = await supabase.storage.from('firmas-colectas').upload(filePath, blob, { contentType: 'image/png', upsert: true });
       if (ue) throw ue;
       const { data: ud } = supabase.storage.from('firmas-colectas').getPublicUrl(filePath);
-      const { error: upd } = await supabase.from('Clientes').update({ firma_url: ud.publicUrl, modificado_por: 'chofer' }).eq('id', clienteId);
+      const { error: upd } = await supabase.rpc('chofer_marcar_colecta', { p_id: Number(clienteId), p_firma_url: ud.publicUrl });
       if (upd) throw upd;
       setFirmaLocal(ud.publicUrl);
     } catch (err: any) {
@@ -751,9 +751,10 @@ export default function ColectasScreen() {
     setClientes(prev => prev.map(c => c.id === id ? { ...c, completado: nuevoEstado } : c));
     setToggling(prev => new Set(prev).add(id));
     try {
-      // modificado_por:'chofer' → el webhook notificar_chofer suprime el push
-      // (no auto-notificar al chofer por su propia acción).
-      const { error } = await supabase.from('Clientes').update({ completado: nuevoEstado, modificado_por: 'chofer' }).eq('id', id);
+      // Vía RPC SECURITY DEFINER: la RLS de Clientes es admin-only para
+      // escritura, el chofer no puede hacer UPDATE directo (se bloquea y se
+      // "desmarca"). El RPC valida que sea el chofer asignado y persiste.
+      const { error } = await supabase.rpc('chofer_marcar_colecta', { p_id: Number(id), p_completado: nuevoEstado });
       if (error) { console.error('[Colectas]', error.message); setClientes(prev => prev.map(c => c.id === id ? { ...c, completado: actual } : c)); ignorarNotificacionesCache.delete(idStr); return; }
       if (nuevoEstado) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

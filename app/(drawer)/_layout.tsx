@@ -202,7 +202,8 @@ const GRUPOS_CHOFER = [
   {
     label: 'MÁS', items: [
       { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat', color: '#34D399' },
-      { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia', color: '#A78BFA' },
+      // "Cómo se mide" oculta por ahora (pedido). Para reactivarla, volver a
+      // agregar acá: { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia', color: '#A78BFA' }.
     ],
   },
 ];
