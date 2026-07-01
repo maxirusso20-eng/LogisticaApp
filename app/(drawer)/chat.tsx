@@ -344,7 +344,7 @@ const Burbuja: React.FC<{
     return (
         <View style={[SS.burbujaWrapper, esPropio ? SS.burbujaRight : SS.burbujaLeft]}>
             {!esPropio && mostrarRemitente && (
-                <Text style={[SS.remitente, { color: colors.blue }]}>{mensaje.remitente}</Text>
+                <Text style={[SS.remitente, { color: colors.blue }]}>{(mensaje.remitente || '').includes('@') ? prettyNombre(mensaje.remitente) : mensaje.remitente}</Text>
             )}
             <View style={[SS.burbuja,
             esPropio
