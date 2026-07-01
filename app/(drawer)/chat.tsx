@@ -188,6 +188,42 @@ interface Coordinador {
     id: string; nombre: string; apellido: string; email: string; rol: string; color: string;
 }
 
+// Nombre "lindo" desde el email (para admins/subadmins sin ficha de chofer).
+const prettyNombre = (email: string): string => {
+    const base = (email.split('@')[0] || '').replace(/[._-]+/g, ' ').replace(/\d+/g, '').trim();
+    const pretty = base.split(' ').filter(Boolean).map(w => (w[0]?.toUpperCase() || '') + w.slice(1)).join(' ');
+    return pretty || email;
+};
+const COLORES_EQUIPO = ['#3B82F6', '#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#06B6D4', '#EF4444'];
+const colorFromEmail = (email: string): string => {
+    let h = 0; for (let i = 0; i < email.length; i++) h = (h * 31 + email.charCodeAt(i)) >>> 0;
+    return COLORES_EQUIPO[h % COLORES_EQUIPO.length];
+};
+
+// Equipo con el que el chofer puede chatear: admins (hardcodeados) + subadmins
+// de roles_usuarios (dinámico, igual que la web). Nombres desde Choferes si tienen ficha.
+async function cargarEquipo(): Promise<Coordinador[]> {
+    const { data: roles } = await supabase.from('roles_usuarios').select('email, rol');
+    const rolPorEmail = new Map<string, string>();
+    for (const e of ADMIN_EMAILS) rolPorEmail.set(e.toLowerCase(), 'Admin');
+    for (const r of roles || []) {
+        const rol = (r.rol || '').toLowerCase();
+        if ((rol === 'admin' || rol === 'subadmin') && r.email) rolPorEmail.set(r.email.toLowerCase(), rol === 'admin' ? 'Admin' : 'Equipo');
+    }
+    const lista = [...rolPorEmail.keys()];
+    const { data: chs } = await supabase.from('Choferes').select('nombre, email').in('email', lista);
+    const nombreMap = new Map<string, string>();
+    for (const c of chs || []) if (c.email) nombreMap.set(c.email.toLowerCase(), c.nombre || '');
+    return lista.map(email => {
+        const nombreFull = nombreMap.get(email) || prettyNombre(email);
+        const partes = nombreFull.split(' ');
+        return {
+            id: email, email, nombre: partes[0] || nombreFull, apellido: partes.slice(1).join(' '),
+            rol: rolPorEmail.get(email) || 'Equipo', color: colorFromEmail(email),
+        } as Coordinador;
+    }).sort((a, b) => a.nombre.localeCompare(b.nombre));
+}
+
 // ─── Helpers de formato ───────────────────────────────────────────────────────
 
 const formatHora = (iso: string): string => {
@@ -938,9 +974,10 @@ const ConversacionView: React.FC<{
 // ─── Selector de Coordinador (para choferes) ──────────────────────────────────
 
 const SelectorCoordinador: React.FC<{
+    coordinadores: Coordinador[];
     onSeleccionar: (coord: Coordinador) => void;
     noLeidosPorCoord: Record<string, number>;
-}> = ({ onSeleccionar, noLeidosPorCoord }) => {
+}> = ({ coordinadores, onSeleccionar, noLeidosPorCoord }) => {
     const { colors } = useTheme();
     return (
         <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: 20 }}>
@@ -952,7 +989,7 @@ const SelectorCoordinador: React.FC<{
                     Elegí con quién querés chatear
                 </Text>
             </View>
-            {COORDINADORES.map(coord => {
+            {coordinadores.map(coord => {
                 const noLeidos = noLeidosPorCoord[coord.email] || 0;
                 return (
                     <Pressable
@@ -1010,14 +1047,24 @@ export default function ChatScreen() {
     const [convAbierta, setConvAbierta] = useState<Conversacion | null>(null);
     const [coordElegido, setCoordElegido] = useState<Coordinador | null>(null);
     const [noLeidosPorCoord, setNoLeidosPorCoord] = useState<Record<string, number>>({});
+    const [equipo, setEquipo] = useState<Coordinador[]>([]);
 
     useEffect(() => {
         const init = async () => {
             const { data: { user }, error } = await supabase.auth.getUser();
             if (error || !user) { setAuthError(true); setCargando(false); return; }
             const email = user.email ?? '';
-            const admin = ADMIN_EMAILS.includes(email);
+            // esAdmin = admin hardcodeado O rol admin/subadmin en roles_usuarios
+            // (así los subadmins entran al flujo admin, no como choferes).
+            let admin = ADMIN_EMAILS.includes(email);
+            if (!admin) {
+                const { data: rolRow } = await supabase.from('roles_usuarios').select('rol').eq('email', email).maybeSingle();
+                const r = (rolRow?.rol || '').toLowerCase();
+                admin = r === 'admin' || r === 'subadmin';
+            }
             setMiUserId(user.id); setMiEmail(email); setEsAdmin(admin);
+            // Cargar el equipo (admins + subadmins) para el selector del chofer.
+            cargarEquipo().then(setEquipo).catch(() => {});
             // Nombre real desde tabla Choferes (más fiable que user_metadata)
             try {
                 if (!admin) {
@@ -1026,8 +1073,7 @@ export default function ChatScreen() {
                 } else {
                     // Para admins, el nombre que aparece es "Administración" en los mensajes,
                     // pero localmente mostramos su nombre real
-                    const coord = COORDINADORES.find(c => c.email === email);
-                    setMiNombre(coord?.nombre || 'Admin');
+                    setMiNombre(prettyNombre(email).split(' ')[0] || 'Admin');
                 }
             } catch {
                 setMiNombre(user.user_metadata?.full_name?.split(' ')[0] || email.split('@')[0] || 'Chofer');
@@ -1051,7 +1097,7 @@ export default function ChatScreen() {
         if (esAdmin || !miEmail) return;
         const cargarNoLeidos = async () => {
             const counts: Record<string, number> = {};
-            for (const coord of COORDINADORES) {
+            for (const coord of equipo) {
                 const { count } = await supabase
                     .from('mensajes')
                     .select('id', { count: 'exact', head: true })
@@ -1073,7 +1119,7 @@ export default function ChatScreen() {
             }, cargarNoLeidos)
             .subscribe();
         return () => { void supabase.removeChannel(canal); };
-    }, [esAdmin, miEmail, coordElegido]);
+    }, [esAdmin, miEmail, coordElegido, equipo]);
 
     useEffect(() => {
         const sub = Notifications.addNotificationResponseReceivedListener(response => {
@@ -1083,14 +1129,14 @@ export default function ChatScreen() {
                     setConvAbierta({ email: data.chofer_email, nombre: data.chofer_nombre || data.chofer_email, ultimoMensaje: '', ultimaHora: '', noLeidos: 0, online: false });
                 // Si el push viene de un admin específico y el usuario es chofer, abrir ese chat
                 if (data.admin_email && !esAdmin) {
-                    const coord = COORDINADORES.find(c => c.email === data.admin_email);
+                    const coord = equipo.find(c => c.email === data.admin_email);
                     if (coord) setCoordElegido(coord);
                 }
                 router.push('/(drawer)/chat' as any);
             }
         });
         return () => sub.remove();
-    }, [esAdmin, router]);
+    }, [esAdmin, router, equipo]);
 
     if (authError) return (
         <View style={[SS.vacio, { backgroundColor: colors.bg }]}>
@@ -1112,7 +1158,7 @@ export default function ChatScreen() {
     // FLUJO CHOFER: primero elige coordinador, después entra al chat
     if (!esAdmin) {
         if (!coordElegido) {
-            return <SelectorCoordinador onSeleccionar={setCoordElegido} noLeidosPorCoord={noLeidosPorCoord} />;
+            return <SelectorCoordinador coordinadores={equipo} onSeleccionar={setCoordElegido} noLeidosPorCoord={noLeidosPorCoord} />;
         }
         return (
             <ConversacionView
