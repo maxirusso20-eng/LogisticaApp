@@ -876,7 +876,7 @@ const ConversacionView: React.FC<{
                             {necesitaSeparador(mensajes, index) && (
                                 <SeparadorFecha fecha={formatFechaGrupo(item.created_at)} />
                             )}
-                            <Burbuja mensaje={item} esPropio={item.user_id === miUserId} mostrarRemitente={!esAdmin && item.user_id !== miUserId} />
+                            <Burbuja mensaje={item} esPropio={esAdmin ? item.remitente === REMITENTE_ADMIN : item.remitente !== REMITENTE_ADMIN} mostrarRemitente={!esAdmin && item.remitente === REMITENTE_ADMIN} />
                         </View>
                     )}
                 />
