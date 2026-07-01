@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import {
   acumularPorChofer, calcularDesempenoConducta, calcularRendimientoKPI,
-  type ChoferKpi, colorDesempeno, demoradosTotal, fmtPct,
+  type ChoferKpi, colorDesempeno, demoradosTotal, filtrarMesActual, fmtPct,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -43,8 +43,9 @@ export default function RankingScreen() {
 
   useEffect(() => { cargar(); }, [cargar]);
 
+  // Filtrado al MES actual igual que la web: el ranking arranca de cero cada mes.
   const ranking = useMemo(() => {
-    const porChofer = acumularPorChofer(registros);
+    const porChofer = acumularPorChofer(filtrarMesActual(registros));
     return Object.values(porChofer)
       .map((k): ChoferKpi => {
         const kpi = calcularRendimientoKPI(k);
@@ -62,9 +63,9 @@ export default function RankingScreen() {
 
   const miIndex = ranking.findIndex((k) => (k.chofer || '').trim().toLowerCase() === miNombre);
 
-  // Ranking de DEMORADOS (de más a menos), igual que la web.
+  // Ranking de DEMORADOS (de más a menos), igual que la web (mes actual).
   const rankingDemorados = useMemo(() => {
-    const porChofer = acumularPorChofer(registros);
+    const porChofer = acumularPorChofer(filtrarMesActual(registros));
     return Object.values(porChofer)
       .map((k) => ({
         chofer: k.chofer,

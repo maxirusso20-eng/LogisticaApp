@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import {
   acumularPorChofer, calcularDesempenoConducta, calcularRendimientoKPI,
-  colorDesempeno, type ChoferKpi, cumpleSLA, fmtPct, NEGATIVOS, penalidadAusencias, POSITIVOS, SLA_MINIMO,
+  colorDesempeno, type ChoferKpi, cumpleSLA, filtrarMesActual, fmtPct, NEGATIVOS, penalidadAusencias, POSITIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -52,8 +52,9 @@ export default function RendimientoScreen() {
   useEffect(() => { cargar(); }, [cargar]);
 
   // Ranking de la flota (mismo orden que la web → el puesto coincide).
+  // Filtrado al MES actual igual que la web: arranca de cero cada mes.
   const ranking = useMemo(() => {
-    const porChofer = acumularPorChofer(registros);
+    const porChofer = acumularPorChofer(filtrarMesActual(registros));
     return Object.values(porChofer)
       .map((k): ChoferKpi => {
         const kpi = calcularRendimientoKPI(k);

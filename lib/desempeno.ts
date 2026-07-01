@@ -133,6 +133,15 @@ export function acumularPorChofer(registros: any[]): Record<string, ChoferKpi> {
   return porChofer;
 }
 
+// Filtra registros de kpis_lightdata al MES calendario actual (por r.fecha,
+// formato 'YYYY-MM-DD'). El ranking de la flota se mide por mes: arranca de
+// cero cada mes. (Portado de la web, usar en Rendimiento/Ranking.)
+export function filtrarMesActual(registros: any[]): any[] {
+  const now = new Date();
+  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return (registros || []).filter((r) => String(r.fecha || '').startsWith(ym));
+}
+
 // Total de DEMORADOS (umbrella). El parser ya cuenta TODOS los demorados en
 // `fallos`; demEnCamino/demNadie son solo el desglose.
 export function demoradosTotal(k: ChoferKpi): number {
