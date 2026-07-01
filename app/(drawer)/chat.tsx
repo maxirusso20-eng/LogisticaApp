@@ -881,7 +881,7 @@ const ConversacionView: React.FC<{
                 </View>
                 <View style={{ flex: 1 }}>
                     <Text style={[SS.chatNombre, { color: colors.textPrimary }]}>
-                        {esAdmin ? choferNombre : 'Maxi (Admin)'}
+                        {choferNombre}
                     </Text>
                     <Text style={[SS.chatSub, { color: colors.textMuted }]}>
                         {otroEscribiendo ? '✏️ escribiendo...' : online ? 'En línea' : APP_NAME}
@@ -912,7 +912,7 @@ const ConversacionView: React.FC<{
                             {necesitaSeparador(mensajes, index) && (
                                 <SeparadorFecha fecha={formatFechaGrupo(item.created_at)} />
                             )}
-                            <Burbuja mensaje={item} esPropio={esAdmin ? item.remitente === REMITENTE_ADMIN : item.remitente !== REMITENTE_ADMIN} mostrarRemitente={!esAdmin && item.remitente === REMITENTE_ADMIN} />
+                            <Burbuja mensaje={item} esPropio={String(item.user_id) === String(miUserId)} mostrarRemitente={!esAdmin && String(item.user_id) !== String(miUserId)} />
                         </View>
                     )}
                 />
