@@ -124,7 +124,7 @@ const STORAGE_KEY = 'app_theme_isDark';
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme(); // 'dark' | 'light' | null
-  const [isDark, setIsDark] = useState<boolean>(systemScheme !== 'light');
+  const [isDark, setIsDark] = useState<boolean>(true);
   const [hydrated, setHydrated] = useState(false);
 
   // Leer preferencia guardada al iniciar
@@ -133,8 +133,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       if (val !== null) {
         setIsDark(val === 'true');
       } else {
-        // Sin preferencia guardada → seguir el sistema
-        setIsDark(systemScheme !== 'light');
+        // Sin preferencia guardada → arrancar en oscuro
+        setIsDark(true);
       }
       setHydrated(true);
     }).catch(() => setHydrated(true));

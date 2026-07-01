@@ -19,6 +19,7 @@ import {
     Alert,
     Animated,
     FlatList,
+    Keyboard,
     KeyboardAvoidingView,
     Linking,
     Platform,
@@ -29,6 +30,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { APP_NAME } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -549,6 +551,7 @@ const ConversacionView: React.FC<{
     choferEmail: string; choferNombre: string; adminEmail: string; onVolver?: () => void;
 }> = ({ miUserId, miEmail, miNombre, esAdmin, choferEmail, choferNombre, adminEmail, onVolver }) => {
     const { colors } = useTheme();
+    const insets = useSafeAreaInsets();
     const [mensajes, setMensajes] = useState<Mensaje[]>([]);
     const [texto, setTexto] = useState('');
     const [enviando, setEnviando] = useState(false);
@@ -558,6 +561,7 @@ const ConversacionView: React.FC<{
     const [recording, setRecording] = useState<Audio.Recording | null>(null);
     const [isRecording, setIsRecording] = useState(false);
     const [subiendoMedia, setSubiendoMedia] = useState(false);
+    const [keyboardPad, setKeyboardPad] = useState(0);
     const inputRef = useRef<TextInput>(null);
     const msgCanalRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
     const presenceCanalRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
@@ -807,12 +811,22 @@ const ConversacionView: React.FC<{
         } catch { setTexto(txt); }
         finally { setEnviando(false); inputRef.current?.focus(); }
     };
+    // ── Keyboard listener para Android (KAV no funciona bien dentro del Drawer) ──
+    useEffect(() => {
+        if (Platform.OS !== 'android') return;
+        const show = Keyboard.addListener('keyboardDidShow', (e) => setKeyboardPad(e.endCoordinates.height));
+        const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardPad(0));
+        return () => { show.remove(); hide.remove(); };
+    }, []);
+
+    const chatWrapper = Platform.OS === 'ios'
+        ? { Component: KeyboardAvoidingView, props: { behavior: 'padding' as const, keyboardVerticalOffset: 90 } }
+        : { Component: View, props: {} };
 
     return (
-        <KeyboardAvoidingView
+        <chatWrapper.Component
             style={{ flex: 1, backgroundColor: colors.bg }}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+            {...chatWrapper.props}
         >
             <View style={[SS.chatHeader, { backgroundColor: colors.bgCard, borderBottomColor: colors.borderSubtle }]}>
                 {onVolver && (
@@ -870,7 +884,7 @@ const ConversacionView: React.FC<{
 
             {otroEscribiendo && <IndicadorEscribiendo nombre={nombreEscribiendo} />}
 
-            <View style={[SS.inputBar, { backgroundColor: colors.bgCard, borderTopColor: colors.borderSubtle, paddingBottom: Platform.OS === 'ios' ? 28 : 12 }]}>
+            <View style={[SS.inputBar, { backgroundColor: colors.bgCard, borderTopColor: colors.borderSubtle, paddingBottom: Platform.OS === 'ios' ? 28 : Math.max(12, insets.bottom + 8), marginBottom: Platform.OS === 'android' ? keyboardPad : 0 }]}>
                 {!isRecording && !subiendoMedia && (
                     <TouchableOpacity onPress={handleAdjuntar} style={{ padding: 10, justifyContent: 'center' }}>
                         <Ionicons name="attach" size={24} color={colors.textMuted} />
@@ -917,7 +931,7 @@ const ConversacionView: React.FC<{
                     </View>
                 )}
             </View>
-        </KeyboardAvoidingView>
+        </chatWrapper.Component>
     );
 };
 

@@ -8,7 +8,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  AVISOS, HORA_CORTE_AUSENCIA, NEGATIVOS, SLA_MINIMO,
+  AVISOS, NEGATIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { useTheme } from '../../lib/ThemeContext';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
@@ -53,9 +53,9 @@ export default function GuiaScreen() {
         <Title icon="stats-chart-outline" text="1) Rendimiento (KPI)" color={colors.blue} />
         <P>Sale de Light Data. Arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text> y le restan los demorados y las entregas tardías:</P>
         {[
-          { label: 'En camino al destinatario', val: '−0,5%', color: colors.red },
-          { label: 'Nadie / cancelado / no entregado', val: '−0,2%', color: colors.red },
-          { label: 'Entrega tardía (21–23:05hs)', val: '−0,05%', color: colors.amber },
+          { label: 'Demorado', val: '−0,5%', color: colors.red },
+          { label: 'Nadie / cancelado / no entregado / cancelado post 21hs', val: '−0,2%', color: colors.red },
+          { label: 'Entregas post 21hs (21hs - 23:00hs)', val: '−0,05%', color: colors.amber },
           { label: 'Demorado CON observación', val: '+0,1%', color: colors.green },
           { label: 'Demorado SIN observación', val: '−0,1%', color: colors.red },
         ].map((r) => (
@@ -69,7 +69,7 @@ export default function GuiaScreen() {
       {/* Desempeño */}
       <Card color={colors.green}>
         <Title icon="speedometer-outline" text="2) Desempeño (conducta)" color={colors.green} />
-        <P>Arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text> y cada error resta <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>0,1%</Text>. También restan los avisos y las ausencias. Piso 0%.</P>
+        <P>Arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text> y cada error resta <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>0,1%</Text>. Los avisos de ausencias también impactan en esta nota.</P>
         <P>Los demorados <Text style={{ fontWeight: '800' }}>no</Text> afectan esta nota (esos van al KPI). Es solo tu conducta operativa.</P>
       </Card>
 
@@ -95,19 +95,7 @@ export default function GuiaScreen() {
         ))}
       </Card>
 
-      {/* Ausencias */}
-      <Card color={colors.amber}>
-        <Title icon="calendar-clear-outline" text="Ausencias" color={colors.amber} />
-        <P>Si te bajás de una colecta o recorrido:</P>
-        <View style={styles.liRow}>
-          <Ionicons name="time-outline" size={15} color={colors.amber} />
-          <Text style={[styles.li, { color: colors.textSecondary }]}>Antes de las {HORA_CORTE_AUSENCIA}:00 → <Text style={{ color: colors.amber, fontWeight: '800' }}>−0,1%</Text></Text>
-        </View>
-        <View style={styles.liRow}>
-          <Ionicons name="time-outline" size={15} color={colors.red} />
-          <Text style={[styles.li, { color: colors.textSecondary }]}>Desde las {HORA_CORTE_AUSENCIA}:00 → <Text style={{ color: colors.red, fontWeight: '800' }}>−0,5%</Text> (avisar tarde desorganiza más)</Text>
-        </View>
-      </Card>
+
 
       {/* SLA */}
       <Card color={colors.purple}>
@@ -115,7 +103,7 @@ export default function GuiaScreen() {
         <P>Las dos notas tienen que estar en <Text style={{ color: colors.green, fontWeight: '800' }}>≥ {SLA_MINIMO}%</Text> para estar “en verde”. Mantené el rendimiento alto y cuidá la conducta. 💪</P>
       </Card>
 
-      <View style={{ height: 30 }} />
+      <View style={{ height: 1, backgroundColor: colors.borderSubtle, marginHorizontal: 8, marginTop: 10, marginBottom: 30 }} />
     </ScrollView>
   );
 }

@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  AVISOS, HORA_CORTE_AUSENCIA, HORA_CORTE_TEMPRANA, penalidadAusencia, penalidadAusencias,
+  AVISOS, penalidadAusencia, penalidadAusencias,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -92,7 +92,7 @@ export default function MisAusenciasScreen() {
       </View>
       <View style={{ flex: 1 }}>
         <Text style={[styles.h1, { color: colors.textPrimary }]}>Mis Faltas</Text>
-        <Text style={[styles.sub, { color: colors.textMuted }]}>Avisos y ausencias: cuando no venís a un recorrido o colecta</Text>
+        <Text style={[styles.sub, { color: colors.textMuted }]}>Avisos</Text>
       </View>
     </View>
   );
@@ -134,28 +134,7 @@ export default function MisAusenciasScreen() {
     <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.container} refreshControl={refresh}>
       {Header}
 
-      {/* Resumen */}
-      <View style={[styles.resumen, { backgroundColor: colors.bgCard, borderColor: colors.red + '55' }]}>
-        <View>
-          <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: '600' }}>Faltas (avisos y ausencias)</Text>
-          <Text style={{ fontSize: 28, fontWeight: '900', color: colors.textPrimary }}>{ausencias.length + avisosChofer.length}</Text>
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: '600' }}>Impacto en tu Desempeño</Text>
-          <Text style={{ fontSize: 28, fontWeight: '900', color: colors.red }}>−{totalImpacto}%</Text>
-        </View>
-      </View>
 
-      {/* Explicación */}
-      <View style={[styles.info, { backgroundColor: colors.bgInput, borderColor: colors.border }]}>
-        <Text style={{ fontSize: 12.5, color: colors.textMuted, lineHeight: 19 }}>
-          Bajarte antes de las <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>{HORA_CORTE_TEMPRANA}:00</Text> no resta nada; de{' '}
-          <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>{HORA_CORTE_TEMPRANA}:00 a {HORA_CORTE_AUSENCIA - 1}:59</Text> resta{' '}
-          <Text style={{ color: colors.amber, fontWeight: '800' }}>0,1%</Text>; desde las{' '}
-          <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>{HORA_CORTE_AUSENCIA}:00</Text> resta{' '}
-          <Text style={{ color: colors.red, fontWeight: '800' }}>0,5%</Text> (avisar tarde desorganiza más la logística).
-        </Text>
-      </View>
 
       {/* Lista */}
       <View style={{ gap: 10 }}>

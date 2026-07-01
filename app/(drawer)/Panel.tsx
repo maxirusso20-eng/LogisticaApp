@@ -289,18 +289,7 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
                         <Text style={[S.progressPct, { color: colors.textMuted }]}>{pctDia.toFixed(0)}%</Text>
                     </View>
                 )}
-                {recorrido.porFuera > 0 && (
-                    <View style={[S.progressRow, { marginTop: 5 }]}>
-                        <Text style={[S.progressRowLabel, { color: colors.textMuted }]}>Fuera</Text>
-                        <View style={[S.progressBg, { backgroundColor: colors.bg, borderColor: colors.borderSubtle }]}>
-                            <View style={[S.progressFill, {
-                                width: `${pctFuera}%` as any,
-                                backgroundColor: completoFuera ? colors.green : colors.amber,
-                            }]} />
-                        </View>
-                        <Text style={[S.progressPct, { color: colors.textMuted }]}>{pctFuera.toFixed(0)}%</Text>
-                    </View>
-                )}
+
 
                 <View style={[S.contadoresRow, {
                     backgroundColor: colors.bg,
@@ -315,16 +304,7 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
                         onIncrement={() => cambiar('entregados', +1)}
                         onDecrement={() => cambiar('entregados', -1)}
                     />
-                    <View style={[S.contadoresDivisor, { backgroundColor: colors.borderSubtle }]} />
-                    <ContadorEntregados
-                        label="POR FUERA"
-                        total={recorrido.porFuera || 0}
-                        entregados={recorrido.entregadosFuera || 0}
-                        color={colors.amber}
-                        guardando={isGuardando('entregadosFuera')}
-                        onIncrement={() => cambiar('entregadosFuera', +1)}
-                        onDecrement={() => cambiar('entregadosFuera', -1)}
-                    />
+
                 </View>
             </View>
         </Animated.View>

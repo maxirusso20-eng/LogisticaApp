@@ -5,10 +5,12 @@ import { DrawerActions, useNavigation } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   ScrollView,
   StyleSheet,
   Text,
@@ -161,49 +163,140 @@ function HeaderRight() {
 const GRUPOS_ADMIN = [
   {
     label: 'OPERACIÓN', items: [
-      { name: 'index', label: 'Recorridos', icon: 'bus-outline', route: '/(drawer)/' },
-      { name: 'clientes', label: 'Clientes', icon: 'business-outline', route: '/(drawer)/clientes' },
-      { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas' },
-      { name: 'mapa', label: 'Mapa de Rutas', icon: 'map-outline', route: '/(drawer)/mapa' },
+      { name: 'index', label: 'Recorridos', icon: 'bus-outline', route: '/(drawer)/', color: '#4F8EF7' },
+      { name: 'clientes', label: 'Clientes', icon: 'business-outline', route: '/(drawer)/clientes', color: '#8B5CF6' },
+      { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas', color: '#F59E0B' },
+      { name: 'mapa', label: 'Mapa de Rutas', icon: 'map-outline', route: '/(drawer)/mapa', color: '#10B981' },
     ],
   },
   {
     label: 'EQUIPO Y KPIs', items: [
-      { name: 'personal', label: 'Choferes', icon: 'people-outline', route: '/(drawer)/personal' },
-      { name: 'estadisticas', label: 'Estadísticas', icon: 'bar-chart-outline', route: '/(drawer)/estadisticas' },
-      { name: 'desempeno', label: 'Desempeño', icon: 'speedometer-outline', route: '/(drawer)/desempeno' },
-      { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
-      { name: 'tabla-impacto', label: 'Impacto de cada ítem', icon: 'calculator-outline', route: '/(drawer)/tabla-impacto' },
+      { name: 'personal', label: 'Choferes', icon: 'people-outline', route: '/(drawer)/personal', color: '#3B82F6' },
+      { name: 'estadisticas', label: 'Estadísticas', icon: 'bar-chart-outline', route: '/(drawer)/estadisticas', color: '#06B6D4' },
+      { name: 'desempeno', label: 'Desempeño', icon: 'speedometer-outline', route: '/(drawer)/desempeno', color: '#A78BFA' },
+      { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking', color: '#F59E0B' },
+      { name: 'tabla-impacto', label: 'Impacto de cada ítem', icon: 'calculator-outline', route: '/(drawer)/tabla-impacto', color: '#EC4899' },
     ],
   },
   {
     label: 'MÁS', items: [
-      { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
-      { name: 'ayuda', label: 'Guía de la app', icon: 'book-outline', route: '/(drawer)/ayuda' },
+      { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat', color: '#34D399' },
+      { name: 'ayuda', label: 'Guía de la app', icon: 'book-outline', route: '/(drawer)/ayuda', color: '#94A3B8' },
     ],
   },
 ];
 const GRUPOS_CHOFER = [
   {
     label: 'MI DÍA', items: [
-      { name: 'Panel', label: 'Panel del Día', icon: 'clipboard-outline', route: '/(drawer)/Panel' },
-      { name: 'colectas', label: 'Mis Colectas', icon: 'archive-outline', route: '/(drawer)/colectas' },
+      { name: 'Panel', label: 'Panel del Día', icon: 'clipboard-outline', route: '/(drawer)/Panel', color: '#4F8EF7' },
+      { name: 'colectas', label: 'Mis Colectas', icon: 'archive-outline', route: '/(drawer)/colectas', color: '#F59E0B' },
     ],
   },
   {
     label: 'MI DESEMPEÑO', items: [
-      { name: 'rendimiento', label: 'Mi Rendimiento', icon: 'stats-chart-outline', route: '/(drawer)/rendimiento' },
-      { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking' },
-      { name: 'mis-ausencias', label: 'Mis Faltas', icon: 'calendar-clear-outline', route: '/(drawer)/mis-ausencias' },
-      { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia' },
+      { name: 'rendimiento', label: 'Mi Rendimiento', icon: 'stats-chart-outline', route: '/(drawer)/rendimiento', color: '#3B82F6' },
+      { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking', color: '#F59E0B' },
+      { name: 'mis-ausencias', label: 'Mis Faltas', icon: 'calendar-clear-outline', route: '/(drawer)/mis-ausencias', color: '#EF4444' },
     ],
   },
   {
     label: 'MÁS', items: [
-      { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat' },
+      { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat', color: '#34D399' },
+      { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia', color: '#A78BFA' },
     ],
   },
 ];
+
+// ─── Collapsible Group ────────────────────────────────────────────────────────
+
+function CollapsibleGroup({ label, items, currentRoute, noLeidosChat, colors, onNavigate }: {
+  label: string;
+  items: { name: string; label: string; icon: string; route: string; color: string }[];
+  currentRoute: string;
+  noLeidosChat: number;
+  colors: any;
+  onNavigate: (route: string) => void;
+}) {
+  const hasActive = items.some(i => i.name === currentRoute);
+  const [open, setOpen] = useState(hasActive);
+  const animVal = useRef(new Animated.Value(hasActive ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (hasActive && !open) setOpen(true);
+  }, [hasActive]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    Animated.timing(animVal, {
+      toValue: open ? 1 : 0,
+      duration: 250,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const chevronRotate = animVal.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '90deg'],
+  });
+  const maxH = animVal.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, items.length * 64],
+  });
+  const opac = animVal.interpolate({
+    inputRange: [0, 0.4, 1],
+    outputRange: [0, 0.3, 1],
+  });
+
+  return (
+    <View style={{ marginBottom: 6 }}>
+      <TouchableOpacity
+        onPress={() => setOpen(v => !v)}
+        activeOpacity={0.7}
+        style={drawerStyles.groupHeader}
+      >
+        <Text style={[drawerStyles.groupLabel, { color: colors.textMuted, marginTop: 0, marginBottom: 0, marginLeft: 0 }]}>{label}</Text>
+        <Animated.View style={{ transform: [{ rotate: chevronRotate }] }}>
+          <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
+        </Animated.View>
+      </TouchableOpacity>
+
+      <Animated.View style={{ maxHeight: maxH, opacity: opac, overflow: 'hidden' }}>
+        {items.map((item) => {
+          const isActive = currentRoute === item.name;
+          const esChatConBadge = item.name === 'chat' && noLeidosChat > 0;
+          return (
+            <TouchableOpacity
+              key={item.name}
+              style={[drawerStyles.item, isActive && { backgroundColor: `${colors.blue}14` }]}
+              onPress={() => onNavigate(item.route)}
+              activeOpacity={0.7}
+            >
+              <View style={[drawerStyles.iconBox, { backgroundColor: `${item.color}18` }, isActive && { backgroundColor: `${item.color}30` }]}>
+                <Ionicons name={item.icon as any} size={20} color={isActive ? item.color : `${item.color}BB`} />
+                {esChatConBadge && !isActive && (
+                  <View style={drawerStyles.iconBadge}>
+                    <Text style={drawerStyles.iconBadgeText}>{noLeidosChat > 99 ? '99+' : noLeidosChat}</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={[drawerStyles.label, { color: colors.textMuted }, isActive && { color: colors.textPrimary }]}>
+                {item.label}
+              </Text>
+              {esChatConBadge && !isActive && (
+                <View style={drawerStyles.labelBadge}>
+                  <Text style={drawerStyles.labelBadgeText}>{noLeidosChat > 99 ? '99+' : noLeidosChat}</Text>
+                </View>
+              )}
+              {isActive && (
+                <View style={[drawerStyles.activeIndicator, { backgroundColor: item.color }]} />
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </Animated.View>
+    </View>
+  );
+}
 
 // ─── Drawer Content ───────────────────────────────────────────────────────────
 
@@ -264,73 +357,24 @@ function DrawerContent(props: any) {
 
       <View style={[drawerStyles.divider, { backgroundColor: colors.borderSubtle }]} />
 
-      {/* Items de navegación, agrupados por sección (estilo web) */}
+      {/* Items de navegación, agrupados por sección con despliegue */}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={drawerStyles.items} showsVerticalScrollIndicator={false}>
         {grupos.map((grupo) => (
-          <View key={grupo.label} style={{ marginBottom: 6 }}>
-            <Text style={[drawerStyles.groupLabel, { color: colors.textMuted }]}>{grupo.label}</Text>
-            {grupo.items.map((item) => {
-              const isActive = currentRoute === item.name;
-              const esChatConBadge = item.name === 'chat' && noLeidosChat > 0;
-              return (
-                <TouchableOpacity
-                  key={item.name}
-                  style={[
-                    drawerStyles.item,
-                    isActive && { backgroundColor: `${colors.blue}14` },
-                  ]}
-                  onPress={() => router.push(item.route as any)}
-                  activeOpacity={0.7}
-                >
-                  <View style={[
-                    drawerStyles.iconBox,
-                    { backgroundColor: colors.borderSubtle },
-                    isActive && { backgroundColor: `${colors.blue}26` },
-                  ]}>
-                    <Ionicons
-                      name={item.icon as any}
-                      size={20}
-                      color={isActive ? colors.blue : colors.textMuted}
-                    />
-                    {esChatConBadge && !isActive && (
-                      <View style={drawerStyles.iconBadge}>
-                        <Text style={drawerStyles.iconBadgeText}>
-                          {noLeidosChat > 99 ? '99+' : noLeidosChat}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={[
-                    drawerStyles.label,
-                    { color: colors.textMuted },
-                    isActive && { color: colors.textPrimary },
-                  ]}>
-                    {item.label}
-                  </Text>
-                  {esChatConBadge && !isActive && (
-                    <View style={drawerStyles.labelBadge}>
-                      <Text style={drawerStyles.labelBadgeText}>
-                        {noLeidosChat > 99 ? '99+' : noLeidosChat}
-                      </Text>
-                    </View>
-                  )}
-                  {isActive && (
-                    <View style={[drawerStyles.activeIndicator, { backgroundColor: colors.blue }]} />
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <CollapsibleGroup
+            key={grupo.label}
+            label={grupo.label}
+            items={grupo.items}
+            currentRoute={currentRoute}
+            noLeidosChat={noLeidosChat}
+            colors={colors}
+            onNavigate={(route: string) => router.push(route as any)}
+          />
         ))}
+        {/* Línea decorativa al final de los items */}
+        <View style={{ height: 1, backgroundColor: colors.borderSubtle, marginTop: 16, marginHorizontal: 8 }} />
       </ScrollView>
 
-      {/* Footer — solo versión */}
-      <View style={drawerStyles.footer}>
-        <View style={[drawerStyles.divider, { backgroundColor: colors.borderSubtle }]} />
-        <Text style={[drawerStyles.version, { color: colors.borderSubtle }]}>
-          v{APP_VERSION} · {new Date().getFullYear()}
-        </Text>
-      </View>
+
     </View>
   );
 }
@@ -392,7 +436,7 @@ export default function DrawerLayout() {
         // ── Estética del panel ─────────────────────────────────────────────
         drawerStyle: {
           width: 280,
-          backgroundColor: 'transparent', // el color lo pone DrawerContent
+          backgroundColor: colors.bgDrawer,
           // Bordes redondeados solo del lado derecho (donde termina el drawer)
           borderTopRightRadius: 24,
           borderBottomRightRadius: 24,
@@ -497,8 +541,9 @@ const drawerStyles = StyleSheet.create({
   rolBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, alignSelf: 'flex-start' },
   rolBadgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
   divider: { height: 1, marginHorizontal: 24, marginBottom: 16 },
-  items: { paddingHorizontal: 16, gap: 4, paddingBottom: 90 },
+  items: { paddingHorizontal: 16, gap: 4, paddingBottom: 16 },
   groupLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 0.8, marginLeft: 12, marginTop: 10, marginBottom: 4, textTransform: 'uppercase', opacity: 0.7 },
+  groupHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, marginTop: 4 },
   item: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, paddingHorizontal: 12, borderRadius: 14, position: 'relative' },
   iconBox: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   label: { fontSize: 15, fontWeight: '600', flex: 1 },
@@ -507,6 +552,6 @@ const drawerStyles = StyleSheet.create({
   iconBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
   labelBadge: { backgroundColor: '#EF4444', borderRadius: 10, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 5, marginRight: 12 },
   labelBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
-  footer: { position: 'absolute', bottom: 40, left: 0, right: 0 },
+  footer: { paddingVertical: 16 },
   version: { textAlign: 'center', fontSize: 11, fontWeight: '600', marginTop: 8 },
 });
