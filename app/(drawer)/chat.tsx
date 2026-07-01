@@ -821,6 +821,7 @@ const ConversacionView: React.FC<{
             }]);
             if (error) throw error;
             void pushDestino(esAdmin, choferEmail, miNombre, choferNombre, pseudoTexto);
+            notificarCampana(pseudoTexto);
         } catch (e: any) { Alert.alert('Error', e.message); }
         finally { setSubiendoMedia(false); }
     };
@@ -833,6 +834,19 @@ const ConversacionView: React.FC<{
                 : (await supabase.from('Admins').select('push_token').eq('email', adminEmail).maybeSingle()).data?.push_token;
             if (tokenDest) await enviarPush(tokenDest, `💬 ${admin ? 'Admin' : mNom}`, txt, { tipo: 'CHAT', chofer_email: cEmail, chofer_nombre: admin ? cNom : mNom, admin_email: adminEmail });
         } catch (err) { console.warn('[Push]', err); }
+    };
+
+    // Campana web: cuando el chofer escribe desde la app, el admin (que usa la
+    // web) se entera por la campana del Header. Espeja crearNotificacion de la
+    // web. Falla en silencio. Destinatario = la otra parte de la conversación.
+    const notificarCampana = (detalle: string) => {
+        void supabase.from('notificaciones').insert([{
+            tipo: 'chat',
+            titulo: esAdmin ? 'Admin' : miNombre,
+            detalle,
+            para_email: esAdmin ? choferEmail : adminEmail,
+            origen_email: miEmail,
+        }]);
     };
 
     const handleEnviar = async () => {
@@ -851,6 +865,7 @@ const ConversacionView: React.FC<{
             }]);
             if (error) { setTexto(txt); console.error('[Chat] Error:', error.message); return; }
             void pushDestino(esAdmin, choferEmail, miNombre, choferNombre, txt);
+            notificarCampana(txt);
         } catch { setTexto(txt); }
         finally { setEnviando(false); inputRef.current?.focus(); }
     };
