@@ -301,8 +301,8 @@ const IndicadorEscribiendo: React.FC<{ nombre: string }> = ({ nombre }) => {
 // ─── Burbuja ──────────────────────────────────────────────────────────────────
 
 const Burbuja: React.FC<{
-    mensaje: Mensaje; esPropio: boolean; mostrarRemitente: boolean;
-}> = ({ mensaje, esPropio, mostrarRemitente }) => {
+    mensaje: Mensaje; esPropio: boolean;
+}> = ({ mensaje, esPropio }) => {
     const { colors, isDark } = useTheme();
     const [sound, setSound] = useState<Audio.Sound | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -341,29 +341,36 @@ const Burbuja: React.FC<{
         );
     }
 
+    // Tipo normalizado (espejo de la web ChatBurbuja): cualquier media_type que
+    // no sea multimedia reconocida se trata como TEXTO. Así los mensajes de la
+    // web con media_type='texto' muestran su cuerpo (antes exigía null o 'image'
+    // y por eso solo se veía el nombre + la hora).
+    const mt = (mensaje.media_type || 'texto').toLowerCase();
+    const tipo = mt.startsWith('image') || mt === 'imagen' ? 'imagen'
+        : mt.startsWith('audio') ? 'audio'
+        : (mt === 'archivo' || mt === 'file' || mt === 'document' || mt.startsWith('application')) ? 'archivo'
+        : 'texto';
+
     return (
         <View style={[SS.burbujaWrapper, esPropio ? SS.burbujaRight : SS.burbujaLeft]}>
-            {!esPropio && mostrarRemitente && (
-                <Text style={[SS.remitente, { color: colors.blue }]}>{(mensaje.remitente || '').includes('@') ? prettyNombre(mensaje.remitente) : mensaje.remitente}</Text>
-            )}
             <View style={[SS.burbuja,
             esPropio
                 ? SS.burbujaPropia
                 : { backgroundColor: isDark ? '#0D1526' : '#FFFFFF', borderColor: colors.border, borderWidth: 1, borderBottomLeftRadius: 4 }
             ]}>
-                {mensaje.media_type === 'image' && !!mensaje.media_url && (
+                {tipo === 'imagen' && !!mensaje.media_url && (
                     <Image source={{ uri: mensaje.media_url }}
                         style={{ width: 220, height: 220, borderRadius: 12, marginBottom: 8, backgroundColor: 'rgba(0,0,0,0.1)' }}
                         contentFit="cover" />
                 )}
-                {mensaje.media_type === 'document' && !!mensaje.media_url && (
+                {tipo === 'archivo' && !!mensaje.media_url && (
                     <TouchableOpacity onPress={() => Linking.openURL(mensaje.media_url!)}
                         style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: esPropio ? 'rgba(255,255,255,0.15)' : colors.bgInput, padding: 12, borderRadius: 12, marginBottom: 6, gap: 10 }}>
                         <Ionicons name="document-text" size={26} color={esPropio ? '#fff' : colors.blue} />
                         <Text style={{ flex: 1, fontSize: 13, color: esPropio ? '#fff' : colors.textPrimary, fontWeight: '500' }} numberOfLines={1}>{mensaje.texto}</Text>
                     </TouchableOpacity>
                 )}
-                {mensaje.media_type === 'audio' && !!mensaje.media_url && (
+                {tipo === 'audio' && !!mensaje.media_url && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minWidth: 160, paddingBottom: 6 }}>
                         <TouchableOpacity onPress={handlePlayAudio}
                             style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: esPropio ? 'rgba(255,255,255,0.2)' : colors.blueSubtle, justifyContent: 'center', alignItems: 'center' }}>
@@ -379,12 +386,12 @@ const Burbuja: React.FC<{
                         </View>
                     </View>
                 )}
-                {(!mensaje.media_type || mensaje.media_type === 'image') && (
+                {(tipo === 'texto' || tipo === 'imagen') && !!mensaje.texto && (
                     <Text style={[SS.burbujaTexto, esPropio ? SS.textoPropio : { color: colors.textPrimary }]}>
                         {mensaje.texto}
                     </Text>
                 )}
-                <View style={[SS.burbujaFooter, (mensaje.media_type === 'audio' || mensaje.media_type === 'document') && { marginTop: 0 }]}>
+                <View style={[SS.burbujaFooter, (tipo === 'audio' || tipo === 'archivo') && { marginTop: 0 }]}>
                     <Text style={[SS.hora, esPropio ? SS.horaPropia : { color: colors.textMuted }]}>
                         {formatHora(mensaje.created_at)}
                     </Text>
@@ -912,7 +919,7 @@ const ConversacionView: React.FC<{
                             {necesitaSeparador(mensajes, index) && (
                                 <SeparadorFecha fecha={formatFechaGrupo(item.created_at)} />
                             )}
-                            <Burbuja mensaje={item} esPropio={String(item.user_id) === String(miUserId)} mostrarRemitente={!esAdmin && String(item.user_id) !== String(miUserId)} />
+                            <Burbuja mensaje={item} esPropio={String(item.user_id) === String(miUserId)} />
                         </View>
                     )}
                 />
