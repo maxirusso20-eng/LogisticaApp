@@ -69,13 +69,13 @@ export default function RendimientoScreen() {
       });
   }, [registros]);
 
-  const totalFlota = ranking.length;
+  // El ranking se usa solo para encontrar los datos del chofer logueado (yo).
+  // El puesto en la flota se muestra en su propia pantalla (Ranking), no en el hero.
   const miIndex = useMemo(
     () => ranking.findIndex((k) => (k.chofer || '').trim().toLowerCase() === miNombre.trim().toLowerCase()),
     [ranking, miNombre]
   );
   const yo = miIndex >= 0 ? ranking[miIndex] : null;
-  const puesto = miIndex >= 0 ? miIndex + 1 : null;
 
   const nombreMostrar = miNombre || (miEmail ? miEmail.split('@')[0] : 'Chofer');
 
@@ -143,7 +143,6 @@ export default function RendimientoScreen() {
     : rep >= 95 ? { icon: '✅', text: 'Excelente trabajo', color: colors.green }
     : rep >= 80 ? { icon: '🟡', text: 'Bien, con algunos inconvenientes', color: colors.amber }
     : { icon: '⚠️', text: 'Hay que mejorar', color: colors.red };
-  const podio = puesto === 1 ? '🥇 1er lugar' : puesto === 2 ? '🥈 2do lugar' : puesto === 3 ? '🥉 3er lugar' : `📊 Puesto ${puesto}°`;
 
   // Desglose justificado: cada demorado se abre por su MOTIVO propio (en
   // camino, nadie +21h, no entregado, cancelado +21h) — nada agrupado.
@@ -175,13 +174,10 @@ export default function RendimientoScreen() {
     <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.container} refreshControl={refresh}>
       {Header}
 
-      {/* HERO: reputación + puesto */}
+      {/* HERO: reputación */}
       <View style={[styles.card, { backgroundColor: colors.bgCard, borderColor: barColor + '55', borderTopColor: barColor, borderTopWidth: 3 }]}>
         <View style={styles.rowBetween}>
           <View style={{ flex: 1 }}>
-            <View style={[styles.pill, { backgroundColor: barColor + '1f', borderColor: barColor + '55' }]}>
-              <Text style={[styles.pillText, { color: barColor }]}>{podio} de {totalFlota}</Text>
-            </View>
             <Text style={[styles.choferName, { color: colors.textPrimary }]}>{yo.chofer}</Text>
             {verdict && (
               <View style={[styles.pill, { backgroundColor: verdict.color + '18', borderColor: verdict.color + '44', marginTop: 8 }]}>
