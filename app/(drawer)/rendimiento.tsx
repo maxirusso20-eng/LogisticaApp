@@ -150,25 +150,24 @@ export default function RendimientoScreen() {
   // "Otros" solo cubre datos importados antes de los subtipos nuevos.
   // En las filas de demorados se muestra el IMPACTO REAL en el KPI (−0,5% /
   // −0,2% c/u) en vez del % sobre el total de envíos (confundía).
-  const otrosDem = Math.max(0, (yo.demorados || 0) - (yo.demEnCamino || 0) - (yo.demNadie || 0) - (yo.demNoEntregado || 0) - (yo.demCancelado || 0));
+  const otrosDem = Math.max(0, (yo.demorados || 0) - (yo.demEnCamino || 0) - (yo.demNadie || 0) - (yo.demNoEntregado || 0) - (yo.demCancelado || 0) - (yo.demReprogramado || 0));
   const demGrave = yo.demEnCamino || 0;                           // −0,5% c/u
   const demLeve = Math.max(0, (yo.demorados || 0) - demGrave);    // −0,2% c/u
-  const demConObs = yo.dem_con_obs || 0;                          // +0,1% c/u
-  const demSinObs = Math.max(0, (yo.demorados || 0) - demConObs); // −0,1% c/u
+  const pendConObs = yo.neutroConObs || 0;                        // +0,1% c/u (pendientes)
   const post21 = yo.entregas_post21 || 0;                         // −0,05% c/u
   const kpiTxt = (n: number, tasa: number, signo = '−') => `${signo}${(n * tasa).toFixed(2)}% KPI`;
   const rows = [
     { label: 'Entregados', value: yo.entregados, pct: pct(yo.entregados), kpi: '', color: colors.green, icon: '✅', sub: false, show: true, desc: 'Llegaron a destino en el día (incluye 2da visita).' },
     { label: 'Entregas tardías (21:00–23:05)', value: post21, pct: 0, kpi: kpiTxt(post21, 0.05), color: colors.amber, icon: '🌙', sub: true, show: post21 > 0, desc: 'Entregados, pero después de las 21hs: −0,05% c/u.' },
-    { label: 'Demorados (total)', value: yo.demorados || 0, pct: 0, kpi: kpiTxt(1, demGrave * 0.5 + demLeve * 0.2), color: colors.red, icon: '⏱️', sub: false, show: (yo.demorados || 0) > 0, desc: 'Suma de los que no se entregaron. Cada uno baja tu KPI.' },
+    { label: 'Demorados (total)', value: yo.demorados || 0, pct: 0, kpi: kpiTxt(1, demGrave * 0.5 + demLeve * 0.2), color: colors.red, icon: '⏱️', sub: false, show: (yo.demorados || 0) > 0, desc: 'Suma de los que no se entregaron, abierto por motivo abajo.' },
     { label: 'En camino al destinatario', value: yo.demEnCamino || 0, pct: 0, kpi: kpiTxt(demGrave, 0.5), color: colors.red, icon: '🚚', sub: true, show: (yo.demEnCamino || 0) > 0, desc: 'Se quedó en el camión: a fin del día seguía en ruta. −0,5% c/u.' },
     { label: 'Nadie en domicilio +21h', value: yo.demNadie || 0, pct: 0, kpi: kpiTxt(yo.demNadie || 0, 0.2), color: colors.red, icon: '🚪', sub: true, show: (yo.demNadie || 0) > 0, desc: 'Tocaste timbre y no había nadie, ya pasadas las 21hs. −0,2% c/u.' },
-    { label: 'No entregado', value: yo.demNoEntregado || 0, pct: 0, kpi: kpiTxt(yo.demNoEntregado || 0, 0.2), color: colors.red, icon: '📦', sub: true, show: (yo.demNoEntregado || 0) > 0, desc: 'Quedó marcado "No entregado" en Light Data. −0,2% c/u.' },
     { label: 'Cancelado +21h', value: yo.demCancelado || 0, pct: 0, kpi: kpiTxt(yo.demCancelado || 0, 0.2), color: colors.red, icon: '🚫', sub: true, show: (yo.demCancelado || 0) > 0, desc: 'Se canceló después de las 21hs, sin llegar a entregarse. −0,2% c/u.' },
+    { label: 'Reprogramado +21h', value: yo.demReprogramado || 0, pct: 0, kpi: kpiTxt(yo.demReprogramado || 0, 0.2), color: colors.red, icon: '🔁', sub: true, show: (yo.demReprogramado || 0) > 0, desc: 'Quedó "en camino reprogramado" pasadas las 21hs. −0,2% c/u.' },
+    { label: 'No entregado', value: yo.demNoEntregado || 0, pct: 0, kpi: kpiTxt(yo.demNoEntregado || 0, 0.2), color: colors.red, icon: '📦', sub: true, show: (yo.demNoEntregado || 0) > 0, desc: 'Marcado "No entregado" en importaciones anteriores. −0,2% c/u.' },
     { label: 'Otros demorados', value: otrosDem, pct: 0, kpi: kpiTxt(otrosDem, 0.2), color: colors.red, icon: '❔', sub: true, show: otrosDem > 0, desc: 'De días importados antes del detalle por motivo. −0,2% c/u.' },
-    { label: 'Demorados CON observación', value: demConObs, pct: 0, kpi: kpiTxt(demConObs, 0.1, '+'), color: colors.green, icon: '📝', sub: true, show: (yo.demorados || 0) > 0 && demConObs > 0, desc: 'Justificaste el problema con observación: recuperás +0,1% c/u.' },
-    { label: 'Demorados SIN observación', value: demSinObs, pct: 0, kpi: kpiTxt(demSinObs, 0.1), color: colors.red, icon: '✍️', sub: true, show: (yo.demorados || 0) > 0 && demSinObs > 0, desc: 'Sin observación cargada en Light Data: −0,1% extra c/u.' },
-    { label: 'Pendientes', value: yo.neutros, pct: pct(yo.neutros), kpi: '', color: colors.textMuted, icon: '🔄', sub: false, show: yo.neutros > 0, desc: 'Todavía pueden entregarse (reprogramado, a retirar). No afectan tu KPI.' },
+    { label: 'Pendientes CON observación', value: pendConObs, pct: 0, kpi: kpiTxt(pendConObs, 0.1, '+'), color: colors.green, icon: '📝', sub: true, show: pendConObs > 0, desc: 'Pendientes que documentaste con observación en Light Data: +0,1% c/u.' },
+    { label: 'Pendientes', value: yo.neutros, pct: pct(yo.neutros), kpi: '', color: colors.textMuted, icon: '🔄', sub: false, show: yo.neutros > 0, desc: 'Todavía pueden entregarse (a retirar, reprogramado antes de 21). No afectan tu KPI.' },
     { label: 'Excluidos', value: yo.excluidos, pct: pct(yo.excluidos), kpi: '', color: colors.textMuted, icon: '⛔', sub: false, show: yo.excluidos > 0, desc: 'Cancelados por ML o el comprador. No es tu responsabilidad.' },
   ].filter((r) => r.show);
 
