@@ -14,7 +14,7 @@ import { useTheme } from '../../lib/ThemeContext';
 
 const KPI_FACTORES = [
   { label: 'En camino al destinatario', detalle: 'Demorado grave: quedó en ruta', valor: -0.5 },
-  { label: 'Nadie / cancelado / no entregado', detalle: 'Demorado leve (post-21)', valor: -0.2 },
+  { label: 'Nadie / cancelado (+21hs)', detalle: 'Demorado leve (post-21)', valor: -0.2 },
   { label: 'Entrega tardía (21:00–23:05hs)', detalle: 'Entregado fuera de horario', valor: -0.05 },
   { label: 'Demorado CON observación', detalle: 'Subió observación + foto', valor: 0.1 },
   { label: 'Demorado SIN observación', detalle: 'No cargó la observación', valor: -0.1 },
