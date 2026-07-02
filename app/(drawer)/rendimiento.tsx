@@ -145,15 +145,18 @@ export default function RendimientoScreen() {
     : { icon: '⚠️', text: 'Hay que mejorar', color: colors.red };
   const podio = puesto === 1 ? '🥇 1er lugar' : puesto === 2 ? '🥈 2do lugar' : puesto === 3 ? '🥉 3er lugar' : `📊 Puesto ${puesto}°`;
 
-  // Desglose justificado: los demorados se abren por MOTIVO (en camino, nadie
-  // +21h, no entregado/cancelado +21h) en vez de decir solo "demorado".
-  const otrosDem = Math.max(0, (yo.demorados || 0) - (yo.demEnCamino || 0) - (yo.demNadie || 0));
+  // Desglose justificado: cada demorado se abre por su MOTIVO propio (en
+  // camino, nadie +21h, no entregado, cancelado +21h) — nada agrupado.
+  // "Otros" solo cubre datos importados antes de los subtipos nuevos.
+  const otrosDem = Math.max(0, (yo.demorados || 0) - (yo.demEnCamino || 0) - (yo.demNadie || 0) - (yo.demNoEntregado || 0) - (yo.demCancelado || 0));
   const rows = [
     { label: 'Entregados', value: yo.entregados, pct: pct(yo.entregados), color: colors.green, icon: '✅', sub: false, show: true, desc: 'Llegaron a destino en el día (incluye 2da visita).' },
     { label: 'Demorados (total)', value: yo.demorados || 0, pct: pct(yo.demorados || 0), color: colors.red, icon: '⏱️', sub: false, show: (yo.demorados || 0) > 0, desc: 'Suma de los que no se entregaron. Cada uno baja tu KPI.' },
     { label: 'En camino al destinatario', value: yo.demEnCamino || 0, pct: pct(yo.demEnCamino || 0), color: colors.red, icon: '🚚', sub: true, show: (yo.demEnCamino || 0) > 0, desc: 'Se quedó en el camión: a fin del día seguía en ruta sin entregar.' },
     { label: 'Nadie en domicilio +21h', value: yo.demNadie || 0, pct: pct(yo.demNadie || 0), color: colors.red, icon: '🚪', sub: true, show: (yo.demNadie || 0) > 0, desc: 'Tocaste timbre y no había nadie, ya pasadas las 21hs.' },
-    { label: 'No entregado / cancelado +21h', value: otrosDem, pct: pct(otrosDem), color: colors.red, icon: '📦', sub: true, show: otrosDem > 0, desc: 'No se pudo entregar o se canceló después de las 21hs.' },
+    { label: 'No entregado', value: yo.demNoEntregado || 0, pct: pct(yo.demNoEntregado || 0), color: colors.red, icon: '📦', sub: true, show: (yo.demNoEntregado || 0) > 0, desc: 'Quedó marcado "No entregado" en Light Data.' },
+    { label: 'Cancelado +21h', value: yo.demCancelado || 0, pct: pct(yo.demCancelado || 0), color: colors.red, icon: '🚫', sub: true, show: (yo.demCancelado || 0) > 0, desc: 'Se canceló después de las 21hs, sin llegar a entregarse.' },
+    { label: 'Otros demorados', value: otrosDem, pct: pct(otrosDem), color: colors.red, icon: '❔', sub: true, show: otrosDem > 0, desc: 'De días importados antes del detalle por motivo (no entregado o cancelado +21h).' },
     { label: 'Pendientes', value: yo.neutros, pct: pct(yo.neutros), color: colors.textMuted, icon: '🔄', sub: false, show: yo.neutros > 0, desc: 'Todavía pueden entregarse (reprogramado, a retirar). No afectan tu KPI.' },
     { label: 'Excluidos', value: yo.excluidos, pct: pct(yo.excluidos), color: colors.textMuted, icon: '⛔', sub: false, show: yo.excluidos > 0, desc: 'Cancelados por ML o el comprador. No es tu responsabilidad.' },
   ].filter((r) => r.show);

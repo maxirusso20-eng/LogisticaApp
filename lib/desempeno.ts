@@ -94,7 +94,8 @@ export function penalAusenciasPorChofer(ausencias: any[]): Record<string, number
 
 export type ChoferKpi = {
   chofer: string; total: number; entregados: number; fallos: number;
-  demEnCamino: number; demNadie: number; neutros: number; excluidos: number;
+  demEnCamino: number; demNadie: number; demNoEntregado: number; demCancelado: number;
+  neutros: number; excluidos: number;
   conObservacion: number; latestId: any; latestFecha: any;
   reputacion?: number | null; demorados?: number; pctObservacion?: number | null;
   penalAusencias?: number;
@@ -110,7 +111,8 @@ export function acumularPorChofer(registros: any[]): Record<string, ChoferKpi> {
     if (!porChofer[nom]) {
       porChofer[nom] = {
         chofer: nom, total: 0, entregados: 0, fallos: 0,
-        demEnCamino: 0, demNadie: 0, neutros: 0, excluidos: 0, conObservacion: 0,
+        demEnCamino: 0, demNadie: 0, demNoEntregado: 0, demCancelado: 0,
+        neutros: 0, excluidos: 0, conObservacion: 0,
         entregas_post21: 0, dem_con_obs: 0,
         latestId: null, latestFecha: null,
         ...Object.fromEntries(CAMPOS_MANUALES.map((k) => [k, 0])),
@@ -122,6 +124,8 @@ export function acumularPorChofer(registros: any[]): Record<string, ChoferKpi> {
     k.fallos += r.fallos || 0;
     k.demEnCamino += r.dem_en_camino || 0;
     k.demNadie += r.dem_nadie || 0;
+    k.demNoEntregado += r.dem_no_entregado || 0;
+    k.demCancelado += r.dem_cancelado || 0;
     k.neutros += r.neutros || 0;
     k.excluidos += r.excluidos || 0;
     k.conObservacion += r.con_observacion || 0;
