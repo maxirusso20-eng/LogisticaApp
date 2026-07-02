@@ -195,7 +195,7 @@ const GRUPOS_CHOFER = [
   {
     label: 'MI DESEMPEÑO', items: [
       { name: 'rendimiento', label: 'Mi Rendimiento', icon: 'stats-chart-outline', route: '/(drawer)/rendimiento', color: '#3B82F6' },
-      { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking', color: '#F59E0B' },
+      // "Ranking" oculto para el chofer por ahora (pedido). Reactivar: volver a agregar acá.
       { name: 'mis-ausencias', label: 'Mis Faltas', icon: 'calendar-clear-outline', route: '/(drawer)/mis-ausencias', color: '#EF4444' },
     ],
   },
