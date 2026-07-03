@@ -98,13 +98,16 @@ interface Cliente {
 interface GrupoChofer { nombre: string; colectas: Cliente[]; hechas: number; total: number; }
 type FiltroColecta = 'todas' | 'pendientes' | 'completadas';
 
-// "Colectas de Hoy" muestra SOLO las del tipo de día actual, así no se mezclan
-// las de Semana con las de Sábados. Sábado = getDay()===6; el resto = Semana
-// (incluye tipo_dia null/'' como semana, igual que la pantalla Clientes).
-const esTipoDeHoy = (td?: string | null) => {
+// Las colectas se separan en APARTADOS por tipo de día (Lun a Vie / Sábados /
+// Especiales) para que no se mezclen en una misma lista. tipo_dia null/'' cuenta
+// como SEMANA, igual que la pantalla Clientes de la web.
+type TipoDia = 'SEMANA' | 'SÁBADOS' | 'ESPECIALES';
+const normTipo = (td?: string | null): TipoDia => {
   const t = (td || '').toString().trim().toUpperCase();
-  return new Date().getDay() === 6 ? t === 'SÁBADOS' : t !== 'SÁBADOS';
+  return t === 'SÁBADOS' ? 'SÁBADOS' : t === 'ESPECIALES' ? 'ESPECIALES' : 'SEMANA';
 };
+const tipoDeHoy = (): TipoDia => (new Date().getDay() === 6 ? 'SÁBADOS' : 'SEMANA');
+const LABEL_TIPO: Record<TipoDia, string> = { SEMANA: 'Lun a Vie', 'SÁBADOS': 'Sábados', ESPECIALES: 'Especiales' };
 
 const parsearHorario = (horario: string): number | null => {
   if (!horario) return null;
@@ -258,9 +261,10 @@ function FotoColecta({ clienteId, fotoUrl, vencida, done }: {
 
 // ─── ColectaCard (Chofer) ─────────────────────────────────────────────────────
 
-function ColectaCard({ item, index, onToggle, toggling }: {
+function ColectaCard({ item, index, onToggle, toggling, esDeHoy }: {
   item: Cliente; index: number;
   onToggle: (id: number | string, actual: boolean, nombreCliente: string) => void; toggling: boolean;
+  esDeHoy: boolean;
 }) {
   const { colors } = useTheme();
   const fade = useRef(new Animated.Value(0)).current;
@@ -271,7 +275,8 @@ function ColectaCard({ item, index, onToggle, toggling }: {
     onToggle(item.id, item.completado, item.cliente);
   };
   const done = item.completado;
-  const vencida = colectaVencida(item.horario, done);
+  // "Fuera de horario" solo aplica en el apartado del día de HOY.
+  const vencida = esDeHoy && colectaVencida(item.horario, done);
 
   return (
     <Animated.View style={[
@@ -485,13 +490,11 @@ const CardChoferAdmin: React.FC<{ grupo: GrupoChofer; index: number }> = ({ grup
 const VistaAdmin: React.FC<{ clientes: Cliente[]; refrescando: boolean; onRefresh: () => void }> = ({ clientes, refrescando, onRefresh }) => {
   const { colors } = useTheme();
   const [busqueda, setBusqueda] = useState('');
-  // Selector Semana/Sábados (como la web). Arranca en el tipo del día de hoy.
-  const [tabDia, setTabDia] = useState<'SEMANA' | 'SÁBADOS'>(new Date().getDay() === 6 ? 'SÁBADOS' : 'SEMANA');
-  // Filtra por el día elegido: así no se mezclan ni aparecen choferes repetidos.
-  const clientesTab = useMemo(() => clientes.filter(c => {
-    const t = (c.tipo_dia || '').toString().trim().toUpperCase();
-    return tabDia === 'SÁBADOS' ? t === 'SÁBADOS' : t !== 'SÁBADOS';
-  }), [clientes, tabDia]);
+  // Selector Lun a Vie / Sábados / Especiales (como la web). Arranca en el de
+  // hoy. Antes "Semana" era "todo lo que no fuera sábados" y los ESPECIALES se
+  // colaban ahí mezclados; ahora cada tipo tiene su apartado propio.
+  const [tabDia, setTabDia] = useState<TipoDia>(tipoDeHoy());
+  const clientesTab = useMemo(() => clientes.filter(c => normTipo(c.tipo_dia) === tabDia), [clientes, tabDia]);
   const grupos = useMemo(() => {
     const lista = busqueda.trim() ? clientesTab.filter(c => (c.cliente || '').toLowerCase().includes(busqueda.toLowerCase()) || (c.chofer || '').toLowerCase().includes(busqueda.toLowerCase()) || (c.direccion || '').toLowerCase().includes(busqueda.toLowerCase())) : clientesTab;
     return agruparPorChofer(lista);
@@ -527,14 +530,14 @@ const VistaAdmin: React.FC<{ clientes: Cliente[]; refrescando: boolean; onRefres
           <Text style={[ST.progressLabel, { color: colors.textMuted, marginTop: 5 }]}>{Math.round(progresoGlobal * 100)}% del día completado</Text>
         </View>
       </View>
-      {/* Selector Semana / Sábados (como la web) */}
+      {/* Selector Lun a Vie / Sábados / Especiales (como la web) */}
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-        {(['SEMANA', 'SÁBADOS'] as const).map(t => {
+        {(['SEMANA', 'SÁBADOS', 'ESPECIALES'] as TipoDia[]).map(t => {
           const activo = tabDia === t;
           return (
             <TouchableOpacity key={t} onPress={() => setTabDia(t)} activeOpacity={0.8}
               style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', borderWidth: 1, backgroundColor: activo ? colors.blue : colors.bgInput, borderColor: activo ? colors.blue : colors.border }}>
-              <Text style={{ fontSize: 13, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{t === 'SEMANA' ? 'Lunes a Viernes' : 'Sábados'}</Text>
+              <Text style={{ fontSize: 12.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{LABEL_TIPO[t]}</Text>
             </TouchableOpacity>
           );
         })}
@@ -564,6 +567,8 @@ export default function ColectasScreen() {
   const [refrescando, setRefrescando] = useState(false);
   const [search, setSearch] = useState('');
   const [filtro, setFiltro] = useState<FiltroColecta>('todas');
+  // Apartado activo (Lun a Vie / Sábados / Especiales). Arranca en el de hoy.
+  const [tabDia, setTabDia] = useState<TipoDia>(tipoDeHoy());
   const [nombreUsuario, setNombre] = useState('');
   const [saludo] = useState(getSaludo);
   const [toggling, setToggling] = useState<Set<number | string>>(new Set());
@@ -586,6 +591,12 @@ export default function ColectasScreen() {
 
       const calculados = [];
       for (const c of clientes) {
+        // Solo se geolocaliza el apartado activo: las colectas de otros tipos
+        // de día van al final conservando su orden (sort estable).
+        if (normTipo(c.tipo_dia) !== tabDia) {
+          calculados.push({ ...c, distancia: 9999999 });
+          continue;
+        }
         if (c.completado) {
           calculados.push({ ...c, distancia: 999999 });
           continue;
@@ -650,9 +661,9 @@ export default function ColectasScreen() {
       if (!esAdminRef.current) query = query.eq('email_chofer', user.email);
       const { data, error } = await query;
       if (error) throw error;
-      // Chofer: solo el tipo del día de hoy (no mezclar Semana con Sábados).
-      // Admin: todas — el panel de supervisión tiene su propio selector Semana/Sábados.
-      setClientes(esAdminRef.current ? (data || []) : (data || []).filter((c: any) => esTipoDeHoy(c.tipo_dia)));
+      // Se cargan TODAS (los 3 tipos de día): la vista del chofer y la del
+      // admin separan por pestañas Lun a Vie / Sábados / Especiales.
+      setClientes(data || []);
     } catch (err) { console.error('Error cargando clientes:', err); }
     finally { setCargando(false); setRefrescando(false); }
   }, []);
@@ -677,7 +688,7 @@ export default function ColectasScreen() {
         const choferCambio = emailViejo !== emailNuevo;
 
         if (choferCambio) {
-          if (emailNuevo === miEmail && esTipoDeHoy(registro.tipo_dia)) {
+          if (emailNuevo === miEmail) {
             // Me asignaron esta colecta → agregar si no existe
             setClientes(prev => {
               if (prev.some(c => c.id === registro.id)) return prev.map(c => c.id === registro.id ? { ...c, ...registro } : c);
@@ -707,7 +718,6 @@ export default function ColectasScreen() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Clientes' }, (payload) => {
         const registro = payload.new as Cliente & { email_chofer?: string };
         if (!esAdminRef.current && emailUsuarioRef.current && registro.email_chofer && registro.email_chofer !== emailUsuarioRef.current) return;
-        if (!esAdminRef.current && !esTipoDeHoy(registro.tipo_dia)) return; // chofer: solo el día de hoy
         setClientes(prev => { if (prev.some(c => c.id === registro.id)) return prev; return [...prev, registro].sort((a, b) => (a.horario || '').localeCompare(b.horario || '')); });
         // Sin notif local en alta: el push del server (Edge notificar_chofer) ya
         // avisa la nueva colecta → evita doble notificación (local + push).
@@ -737,7 +747,9 @@ export default function ColectasScreen() {
 
   React.useEffect(() => {
     if (esAdmin) return;
-    const chequear = () => { clientes.forEach(c => { if (!c.completado && c.email_chofer && colectaVencida(c.horario, c.completado)) void notificarColectaVencida(c.cliente, c.email_chofer); }); };
+    // Solo las colectas del tipo de día de HOY pueden "vencer": las de otros
+    // apartados (ej. Sábados un martes) no deben disparar el aviso.
+    const chequear = () => { clientes.forEach(c => { if (!c.completado && c.email_chofer && normTipo(c.tipo_dia) === tipoDeHoy() && colectaVencida(c.horario, c.completado)) void notificarColectaVencida(c.cliente, c.email_chofer); }); };
     chequear();
     const interval = setInterval(chequear, 60_000);
     return () => clearInterval(interval);
@@ -767,10 +779,19 @@ export default function ColectasScreen() {
     } finally { setToggling(prev => { const next = new Set(prev); next.delete(id); return next; }); }
   };
 
-  const totalHechas = clientes.filter(c => c.completado).length;
-  const totalPendientes = clientes.length - totalHechas;
-  const progreso = clientes.length > 0 ? totalHechas / clientes.length : 0;
-  const filtrados = clientes.filter(c => {
+  // Colectas del apartado activo: stats, progreso, filtros y lista trabajan
+  // SOLO sobre este subconjunto — cada apartado es independiente.
+  const colectasTab = useMemo(() => clientes.filter(c => normTipo(c.tipo_dia) === tabDia), [clientes, tabDia]);
+  const tabEsHoy = tabDia === tipoDeHoy();
+  const conteos = useMemo(() => {
+    const n: Record<TipoDia, number> = { SEMANA: 0, 'SÁBADOS': 0, ESPECIALES: 0 };
+    for (const c of clientes) n[normTipo(c.tipo_dia)] += 1;
+    return n;
+  }, [clientes]);
+  const totalHechas = colectasTab.filter(c => c.completado).length;
+  const totalPendientes = colectasTab.length - totalHechas;
+  const progreso = colectasTab.length > 0 ? totalHechas / colectasTab.length : 0;
+  const filtrados = colectasTab.filter(c => {
     const matchSearch = (c.cliente || '').toLowerCase().includes(search.toLowerCase()) || (c.direccion || '').toLowerCase().includes(search.toLowerCase());
     const matchFiltro = filtro === 'todas' || (filtro === 'completadas' && c.completado) || (filtro === 'pendientes' && !c.completado);
     return matchSearch && matchFiltro;
@@ -790,16 +811,35 @@ export default function ColectasScreen() {
       refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={colors.blue} colors={[colors.blue]} />}>
       <View style={[ST.greetingBox, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
         <View style={ST.greetingTopRow}>
-          <Text style={[ST.greetingEyebrow, { color: colors.blue }]}>COLECTAS DE HOY</Text>
+          <Text style={[ST.greetingEyebrow, { color: colors.blue }]}>{tabEsHoy ? 'COLECTAS DE HOY' : `COLECTAS · ${LABEL_TIPO[tabDia].toUpperCase()}`}</Text>
         </View>
         <Text style={[ST.greetingTitle, { color: colors.textPrimary }]}>{saludo}, {nombreUsuario || 'chofer'} 👋</Text>
         <Text style={[ST.greetingSubtitle, { color: colors.textMuted }]}>
-          {clientes.length === 0 ? 'No tenés colectas asignadas hoy.' : totalPendientes === 0 ? '¡Todo completado! Excelente trabajo. ✅' : `Tenés ${totalPendientes} colecta${totalPendientes !== 1 ? 's' : ''} pendiente${totalPendientes !== 1 ? 's' : ''}.`}
+          {colectasTab.length === 0 ? `No tenés colectas de ${LABEL_TIPO[tabDia]}.` : totalPendientes === 0 ? '¡Todo completado! Excelente trabajo. ✅' : `Tenés ${totalPendientes} colecta${totalPendientes !== 1 ? 's' : ''} pendiente${totalPendientes !== 1 ? 's' : ''} de ${LABEL_TIPO[tabDia]}.`}
         </Text>
       </View>
 
+      {/* Apartados por tipo de día (Lun a Vie / Sábados / Especiales). El de
+          "Especiales" solo aparece si le asignaron colectas de feriado. */}
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+        {(['SEMANA', 'SÁBADOS', 'ESPECIALES'] as TipoDia[])
+          .filter(t => t !== 'ESPECIALES' || conteos.ESPECIALES > 0)
+          .map(t => {
+            const activo = tabDia === t;
+            return (
+              <TouchableOpacity key={t} onPress={() => setTabDia(t)} activeOpacity={0.8}
+                style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1, backgroundColor: activo ? colors.blue : colors.bgInput, borderColor: activo ? colors.blue : colors.border }}>
+                <Text style={{ fontSize: 12.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{LABEL_TIPO[t]}{t === tipoDeHoy() ? ' · hoy' : ''}</Text>
+                <View style={{ borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1, backgroundColor: activo ? 'rgba(255,255,255,0.22)' : colors.bg }}>
+                  <Text style={{ fontSize: 10.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{conteos[t]}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+      </View>
+
       <View style={[ST.statsRow, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
-        {[{ v: clientes.length, c: colors.textPrimary, l: 'Total' }, { v: totalHechas, c: '#34D399', l: 'Hechas' }, { v: totalPendientes, c: totalPendientes > 0 ? '#F59E0B' : '#6B7280', l: 'Pendientes' }].map((s, i) => (
+        {[{ v: colectasTab.length, c: colors.textPrimary, l: 'Total' }, { v: totalHechas, c: '#34D399', l: 'Hechas' }, { v: totalPendientes, c: totalPendientes > 0 ? '#F59E0B' : '#6B7280', l: 'Pendientes' }].map((s, i) => (
           <View key={i} style={[ST.statBox, i > 0 && { borderLeftWidth: 1, borderRightWidth: i === 1 ? 1 : 0, borderColor: colors.border }]}>
             <Text style={[ST.statNum, { color: s.c }]}>{s.v}</Text>
             <Text style={[ST.statLabel, { color: colors.textMuted }]}>{s.l}</Text>
@@ -843,11 +883,11 @@ export default function ColectasScreen() {
         ))}
       </View>
 
-      {filtrados.length === 0 && clientes.length === 0
-        ? <View style={ST.emptyState}><Ionicons name="bed-outline" size={52} color={colors.borderSubtle} /><Text style={[ST.emptyTitle, { color: colors.textMuted }]}>Hoy no tenés colectas asignadas.</Text><Text style={[ST.emptySubtitle, { color: colors.textMuted }]}>¡Buen descanso!</Text></View>
+      {filtrados.length === 0 && colectasTab.length === 0
+        ? <View style={ST.emptyState}><Ionicons name="bed-outline" size={52} color={colors.borderSubtle} /><Text style={[ST.emptyTitle, { color: colors.textMuted }]}>{tabEsHoy ? 'Hoy no tenés colectas asignadas.' : `No tenés colectas de ${LABEL_TIPO[tabDia]}.`}</Text><Text style={[ST.emptySubtitle, { color: colors.textMuted }]}>{tabEsHoy ? '¡Buen descanso!' : 'Cuando te asignen, aparecen acá.'}</Text></View>
         : filtrados.length === 0
           ? <View style={ST.emptyState}><Ionicons name="search-outline" size={48} color={colors.borderSubtle} /><Text style={[ST.emptyTitle, { color: colors.textMuted }]}>Sin resultados</Text><Text style={[ST.emptySubtitle, { color: colors.textMuted }]}>Probá con otro filtro o búsqueda.</Text></View>
-          : filtrados.map((c, i) => <ColectaCard key={c.id} item={c} index={i} onToggle={handleToggle} toggling={toggling.has(c.id)} />)
+          : filtrados.map((c, i) => <ColectaCard key={c.id} item={c} index={i} onToggle={handleToggle} toggling={toggling.has(c.id)} esDeHoy={tabEsHoy} />)
       }
       <View style={{ height: 32 }} />
     </ScrollView>
