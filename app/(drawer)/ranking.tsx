@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import {
   acumularPorChofer, calcularDesempenoConducta, calcularRendimientoKPI,
-  type ChoferKpi, colorDesempeno, demoradosTotal, filtrarMesActual, fmtPct,
+  type ChoferKpi, colorDesempeno, demoradosTotal, fmtPct,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -43,37 +43,44 @@ export default function RankingScreen() {
 
   useEffect(() => { cargar(); }, [cargar]);
 
-  // Filtrado al MES actual igual que la web: el ranking arranca de cero cada mes.
+  // MISMA base que Estadísticas: TODO lo cargado (sin filtro de mes; con el
+  // filtro mensual quedaba vacío al arrancar el mes). El puesto premia
+  // VOLUMEN con CALIDAD (igual que la web):
+  //   tasa de éxito = entregados / (entregados + demorados)
+  //   puntaje       = entregados × tasa de éxito
   const ranking = useMemo(() => {
-    const porChofer = acumularPorChofer(filtrarMesActual(registros));
+    const porChofer = acumularPorChofer(registros);
     return Object.values(porChofer)
       .map((k): ChoferKpi => {
         const kpi = calcularRendimientoKPI(k);
         const desemp = calcularDesempenoConducta(k);
-        return { ...k, reputacion: kpi.pct, desempeno: desemp.score };
+        const base = (k.entregados || 0) + (k.fallos || 0);
+        const tasa = base > 0 ? (k.entregados || 0) / base : 0;
+        return { ...k, reputacion: kpi.pct, desempeno: desemp.score, tasa, puntaje: (k.entregados || 0) * tasa };
       })
-      .sort((a, b) => {
-        if (a.reputacion === null && b.reputacion === null) return b.total - a.total;
-        if (a.reputacion == null) return 1;
-        if (b.reputacion == null) return -1;
-        if (a.reputacion !== b.reputacion) return (b.reputacion || 0) - (a.reputacion || 0);
-        return b.total - a.total;
-      });
+      .sort((a, b) => ((b.puntaje || 0) - (a.puntaje || 0)) || (b.entregados - a.entregados));
   }, [registros]);
 
   const miIndex = ranking.findIndex((k) => (k.chofer || '').trim().toLowerCase() === miNombre);
 
-  // Ranking de DEMORADOS (de más a menos), igual que la web (mes actual).
+  // Ranking de DEMORADOS (de más a menos) con el POR QUÉ (motivo por motivo,
+  // la suma cierra con el total). Igual que la web: sin filtro de mes.
   const rankingDemorados = useMemo(() => {
-    const porChofer = acumularPorChofer(filtrarMesActual(registros));
+    const porChofer = acumularPorChofer(registros);
     return Object.values(porChofer)
-      .map((k) => ({
-        chofer: k.chofer,
-        demorados: demoradosTotal(k),
-        enCamino: k.demEnCamino || 0,
-        nadie: k.demNadie || 0,
-        total: k.total || 0,
-      }))
+      .map((k) => {
+        const fallos = k.fallos || 0;
+        const enCamino = k.demEnCamino || 0, nadie = k.demNadie || 0,
+          cancelado = k.demCancelado || 0, reprogramado = k.demReprogramado || 0,
+          noEntregado = k.demNoEntregado || 0;
+        return {
+          chofer: k.chofer,
+          demorados: demoradosTotal(k),
+          enCamino, nadie, cancelado, reprogramado, noEntregado,
+          otros: Math.max(0, fallos - enCamino - nadie - cancelado - reprogramado - noEntregado),
+          total: k.total || 0,
+        };
+      })
       .filter((k) => k.demorados > 0)
       .sort((a, b) => b.demorados - a.demorados);
   }, [registros]);
@@ -85,7 +92,7 @@ export default function RankingScreen() {
       </View>
       <View style={{ flex: 1 }}>
         <Text style={[styles.h1, { color: colors.textPrimary }]}>Ranking de la flota</Text>
-        <Text style={[styles.sub, { color: colors.textMuted }]}>De mejor a peor rendimiento, en vivo</Text>
+        <Text style={[styles.sub, { color: colors.textMuted }]}>Los que más entregan con mayor tasa de éxito</Text>
       </View>
     </View>
   );
@@ -140,12 +147,12 @@ export default function RankingScreen() {
                     {k.chofer}{soyYo ? <Text style={{ color: rc, fontWeight: '800' }}> · vos</Text> : ''}
                   </Text>
                   <Text numberOfLines={1} style={{ fontSize: 11.5, color: colors.textMuted }}>
-                    {k.entregados}/{k.total} entregados{k.fallos > 0 ? ` · ${k.fallos} fallos` : ''}
+                    {k.total} paq. · KPI <Text style={{ color: rc, fontWeight: '700' }}>{fmtPct(k.reputacion ?? null)}</Text> · Des. <Text style={{ color: dc, fontWeight: '700' }}>{fmtPct(k.desempeno)}</Text>{k.fallos > 0 ? ` · ${k.fallos} dem.` : ''}
                   </Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={{ fontSize: 15, fontWeight: '900', color: rc }}>{fmtPct(k.reputacion ?? null)}</Text>
-                  <Text style={{ fontSize: 10, fontWeight: '800', color: dc }}>Desemp. {fmtPct(k.desempeno)}</Text>
+                  <Text style={{ fontSize: 17, fontWeight: '900', color: colors.green }}>{k.entregados}</Text>
+                  <Text style={{ fontSize: 9.5, fontWeight: '700', color: colors.textMuted }}>entreg. · {Math.round((k.tasa || 0) * 100)}% éxito</Text>
                 </View>
               </View>
             );
@@ -160,7 +167,7 @@ export default function RankingScreen() {
             <Ionicons name="time-outline" size={16} color="#F59E0B" />
             <Text style={{ fontSize: 14, fontWeight: '800', color: colors.textPrimary }}>Ranking de demorados</Text>
           </View>
-          <Text style={{ fontSize: 11.5, color: colors.textMuted, marginBottom: 14 }}>Quién acumula más demorados, de mayor a menor</Text>
+          <Text style={{ fontSize: 11.5, color: colors.textMuted, marginBottom: 14 }}>Quién acumula más demorados y por qué</Text>
 
           {rankingDemorados.map((k, i) => {
             const soyYo = (k.chofer || '').trim().toLowerCase() === miNombre;
@@ -177,9 +184,16 @@ export default function RankingScreen() {
                   <Text numberOfLines={1} style={{ fontSize: 13.5, fontWeight: soyYo ? '800' : '700', color: colors.textPrimary }}>
                     {k.chofer}{soyYo ? <Text style={{ color: col, fontWeight: '800' }}> · vos</Text> : ''}
                   </Text>
-                  <Text numberOfLines={1} style={{ fontSize: 11.5, color: colors.textMuted }}>
-                    {k.enCamino > 0 ? `🚚 ${k.enCamino} en camino  ` : ''}{k.nadie > 0 ? `🚪 ${k.nadie} nadie +21h  ` : ''}de {k.total} paq.
-                  </Text>
+                  {/* El POR QUÉ: motivo por motivo (la suma cierra con el total) */}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2 }}>
+                    {k.enCamino > 0 && <Text style={{ fontSize: 11, color: colors.textMuted }}>🚚 {k.enCamino} en camino</Text>}
+                    {k.nadie > 0 && <Text style={{ fontSize: 11, color: colors.textMuted }}>🚪 {k.nadie} nadie +21hs</Text>}
+                    {k.cancelado > 0 && <Text style={{ fontSize: 11, color: colors.textMuted }}>🚫 {k.cancelado} cancelado +21hs</Text>}
+                    {k.reprogramado > 0 && <Text style={{ fontSize: 11, color: colors.textMuted }}>🔁 {k.reprogramado} reprogramado +21hs</Text>}
+                    {k.noEntregado > 0 && <Text style={{ fontSize: 11, color: colors.textMuted }}>📦 {k.noEntregado} no entregado (viejo)</Text>}
+                    {k.otros > 0 && <Text style={{ fontSize: 11, color: colors.textMuted }}>❔ {k.otros} sin detalle</Text>}
+                    <Text style={{ fontSize: 11, color: colors.textMuted, opacity: 0.7 }}>de {k.total} paq.</Text>
+                  </View>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={{ fontSize: 18, fontWeight: '900', color: col }}>{k.demorados}</Text>
