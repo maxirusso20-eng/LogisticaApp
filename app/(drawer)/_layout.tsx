@@ -173,6 +173,7 @@ const GRUPOS_ADMIN = [
     label: 'EQUIPO Y KPIs', items: [
       { name: 'personal', label: 'Choferes', icon: 'people-outline', route: '/(drawer)/personal', color: '#3B82F6' },
       { name: 'estadisticas', label: 'Estadísticas', icon: 'bar-chart-outline', route: '/(drawer)/estadisticas', color: '#06B6D4' },
+      { name: 'demorados-dia', label: 'Demorados por día', icon: 'calendar-outline', route: '/(drawer)/demorados-dia', color: '#EF4444' },
       { name: 'desempeno', label: 'Desempeño', icon: 'speedometer-outline', route: '/(drawer)/desempeno', color: '#A78BFA' },
       { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking', color: '#F59E0B' },
       { name: 'tabla-impacto', label: 'Impacto de cada ítem', icon: 'calculator-outline', route: '/(drawer)/tabla-impacto', color: '#EC4899' },
@@ -476,6 +477,10 @@ export default function DrawerLayout() {
       <Drawer.Screen
         name="estadisticas"
         options={{ title: 'Estadísticas', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
+      />
+      <Drawer.Screen
+        name="demorados-dia"
+        options={{ title: 'Demorados por día', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
       />
       <Drawer.Screen
         name="clientes"
