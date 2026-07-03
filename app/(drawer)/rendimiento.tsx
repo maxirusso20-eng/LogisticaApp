@@ -49,7 +49,19 @@ export default function RendimientoScreen() {
     }
   }, []);
 
-  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    cargar();
+    // Realtime (igual que la web): el chofer ve su KPI actualizarse solo cuando
+    // el admin importa o corrige — antes solo al abrir o con pull-to-refresh.
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const refrescar = () => { if (t) clearTimeout(t); t = setTimeout(() => cargar(), 1000); };
+    const canal = supabase
+      .channel('kpis-sync-rendimiento')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'kpis_lightdata' }, refrescar)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ausencias' }, refrescar)
+      .subscribe();
+    return () => { if (t) clearTimeout(t); supabase.removeChannel(canal); };
+  }, [cargar]);
 
   // Ranking de la flota (mismo orden que la web → el puesto coincide).
   // Filtrado al MES actual igual que la web: arranca de cero cada mes.

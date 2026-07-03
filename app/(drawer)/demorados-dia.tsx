@@ -61,7 +61,17 @@ export default function DemoradosDiaScreen() {
     }
   }, []);
 
-  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    cargar();
+    // Realtime (igual que la web): recargar con debounce cuando cambian los KPIs.
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const refrescar = () => { if (t) clearTimeout(t); t = setTimeout(() => cargar(), 1000); };
+    const canal = supabase
+      .channel('kpis-sync-demorados-dia')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'kpis_lightdata' }, refrescar)
+      .subscribe();
+    return () => { if (t) clearTimeout(t); supabase.removeChannel(canal); };
+  }, [cargar]);
 
   // Agrupa por FECHA: totales del día + desglose por motivo + detalle por
   // chofer. "otros" = residuo sin subtipo (datos viejos) → todo justificado.

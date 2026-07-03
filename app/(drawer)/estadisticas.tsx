@@ -39,7 +39,19 @@ export default function EstadisticasScreen() {
     }
   }, []);
 
-  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    cargar();
+    // Realtime (igual que la web): recargar con debounce cuando cambian los
+    // KPIs o las ausencias — antes solo refrescaba al abrir o con pull-to-refresh.
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const refrescar = () => { if (t) clearTimeout(t); t = setTimeout(() => cargar(), 1000); };
+    const canal = supabase
+      .channel('kpis-sync-estadisticas')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'kpis_lightdata' }, refrescar)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ausencias' }, refrescar)
+      .subscribe();
+    return () => { if (t) clearTimeout(t); supabase.removeChannel(canal); };
+  }, [cargar]);
 
   const kpis = useMemo(() => {
     const porChofer = acumularPorChofer(registros);

@@ -41,7 +41,17 @@ export default function RankingScreen() {
     }
   }, []);
 
-  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    cargar();
+    // Realtime (igual que la web): recargar con debounce cuando cambian los KPIs.
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const refrescar = () => { if (t) clearTimeout(t); t = setTimeout(() => cargar(), 1000); };
+    const canal = supabase
+      .channel('kpis-sync-ranking')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'kpis_lightdata' }, refrescar)
+      .subscribe();
+    return () => { if (t) clearTimeout(t); supabase.removeChannel(canal); };
+  }, [cargar]);
 
   // MISMA base que Estadísticas: TODO lo cargado (sin filtro de mes; con el
   // filtro mensual quedaba vacío al arrancar el mes). El puesto premia
