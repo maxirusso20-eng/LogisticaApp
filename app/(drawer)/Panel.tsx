@@ -30,8 +30,18 @@ interface Recorrido {
     entregados: number;
     entregadosFuera: number;
     idChofer: number;
-    chofer: string;
+    chofer?: string;
 }
+
+// Apartados por tipo de día: cada uno lee/escribe SU tabla (Recorridos usa
+// tablas separadas por día). "Especiales" no tiene entregadosFuera/chofer.
+type TipoDia = 'SEMANA' | 'SÁBADOS' | 'ESPECIALES';
+const TABLA_DIA: Record<TipoDia, string> = { SEMANA: 'Recorridos', 'SÁBADOS': 'recorridos_sabados', ESPECIALES: 'recorridos_especiales' };
+const LABEL_DIA: Record<TipoDia, string> = { SEMANA: 'Lun a Vie', 'SÁBADOS': 'Sábados', ESPECIALES: 'Especiales' };
+const TIPOS_DIA: TipoDia[] = ['SEMANA', 'SÁBADOS', 'ESPECIALES'];
+const tipoDeHoy = (): TipoDia => (new Date().getDay() === 6 ? 'SÁBADOS' : 'SEMANA');
+const COLS_BASE = 'id, localidad, zona, pqteDia, porFuera, entregados, idChofer';
+const colsDe = (t: TipoDia) => (t === 'ESPECIALES' ? COLS_BASE : COLS_BASE + ', entregadosFuera');
 
 interface ChoferInfo {
     id: number;
@@ -54,6 +64,9 @@ interface OfflineMutation {
     campo: 'entregados' | 'entregadosFuera';
     valor: number;
     timestamp: number;
+    // Tabla destino (Recorridos / recorridos_sabados / recorridos_especiales).
+    // Mutaciones viejas encoladas sin este campo caen a 'Recorridos'.
+    tabla?: string;
 }
 
 async function leerCola(): Promise<OfflineMutation[]> {
@@ -73,8 +86,10 @@ async function guardarCola(cola: OfflineMutation[]): Promise<void> {
 
 async function encolarMutacion(mutation: OfflineMutation): Promise<void> {
     const cola = await leerCola();
-    // Consolidar: si ya existe una mutación pendiente para id+campo, la reemplaza
-    const sin = cola.filter(m => !(m.id === mutation.id && m.campo === mutation.campo));
+    // Consolidar: si ya existe una mutación pendiente para tabla+id+campo, la
+    // reemplaza. La tabla es parte de la clave: los ids se repiten entre
+    // Recorridos / recorridos_sabados / recorridos_especiales.
+    const sin = cola.filter(m => !(m.id === mutation.id && m.campo === mutation.campo && (m.tabla || 'Recorridos') === (mutation.tabla || 'Recorridos')));
     await guardarCola([...sin, mutation]);
 }
 
@@ -88,7 +103,7 @@ async function flushCola(): Promise<{ ok: number; fail: number }> {
     for (const m of cola) {
         try {
             const { error } = await supabase
-                .from('Recorridos')
+                .from(m.tabla || 'Recorridos')
                 .update({ [m.campo]: m.valor })
                 .eq('id', m.id);
             if (error) throw error;
@@ -316,7 +331,9 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
 export default function PanelScreen() {
     const { colors } = useTheme();
     const toast = useToast();
-    const [recorridos, setRecorridos] = useState<Recorrido[]>([]);
+    // Rutas por apartado (semana / sábados / especiales), cada uno de su tabla.
+    const [dataPorDia, setDataPorDia] = useState<Record<TipoDia, Recorrido[]>>({ SEMANA: [], 'SÁBADOS': [], ESPECIALES: [] });
+    const [tabDia, setTabDia] = useState<TipoDia>(tipoDeHoy());
     const [choferInfo, setChoferInfo] = useState<ChoferInfo | null>(null);
     const [cargando, setCargando] = useState(true);
     const [refrescando, setRefrescando] = useState(false);
@@ -324,6 +341,11 @@ export default function PanelScreen() {
     const [saludo] = useState(getSaludo);
     // Id del chofer logueado, para el realtime (closure estable, sin stale).
     const miIdChoferRef = useRef<number | null>(null);
+    // Tab activo en ref: handleGuardar y el realtime lo leen sin stale closure.
+    const tabDiaRef = useRef<TipoDia>(tabDia);
+    useEffect(() => { tabDiaRef.current = tabDia; }, [tabDia]);
+
+    const recorridos = dataPorDia[tabDia];
 
     const cargarDatos = useCallback(async (mostrarLoader = false) => {
         if (mostrarLoader) setCargando(true);
@@ -342,14 +364,13 @@ export default function PanelScreen() {
             setChoferInfo(choferData as ChoferInfo);
             miIdChoferRef.current = (choferData as ChoferInfo).id;
 
-            const { data: recData, error: recError } = await supabase
-                .from('Recorridos')
-                .select('id, localidad, zona, pqteDia, porFuera, entregados, entregadosFuera, idChofer, chofer')
-                .eq('idChofer', choferData.id)
-                .order('orden', { ascending: true, nullsFirst: false });
-
-            if (recError) throw recError;
-            setRecorridos((recData || []).map(r => ({ ...r, entregadosFuera: r.entregadosFuera ?? 0 })));
+            // Las 3 tablas en paralelo: los apartados muestran contador y
+            // cambian al instante sin re-consultar.
+            const [sem, sab, esp] = await Promise.all(TIPOS_DIA.map(t =>
+                supabase.from(TABLA_DIA[t]).select(colsDe(t)).eq('idChofer', choferData.id).order('orden', { ascending: true, nullsFirst: false })
+            ));
+            const normalizar = (rows: any[] | null) => (rows || []).map((r: any) => ({ ...r, entregadosFuera: r.entregadosFuera ?? 0 })) as Recorrido[];
+            setDataPorDia({ SEMANA: normalizar(sem.data as any), 'SÁBADOS': normalizar(sab.data as any), ESPECIALES: normalizar(esp.data as any) });
         } catch (err) {
             console.error('[Panel] Error:', err);
         } finally {
@@ -360,34 +381,40 @@ export default function PanelScreen() {
 
     useEffect(() => {
         cargarDatos(true);
+        // Un handler por tabla: cada evento actualiza SOLO su apartado.
+        // event:'*' para que las modificaciones de la web lleguen en vivo:
+        // alta, baja y reasignación de recorridos del chofer, no solo la edición.
+        const handlerDe = (tipo: TipoDia) => (payload: any) => {
+            const miId = miIdChoferRef.current;
+            if (miId == null) return;
+            const nuevo = payload.new as Recorrido;
+            const viejo = payload.old as Partial<Recorrido>;
+            const idRow = nuevo?.id ?? viejo?.id;
+            if (idRow == null) return;
+            const setLista = (fn: (prev: Recorrido[]) => Recorrido[]) =>
+                setDataPorDia(prev => ({ ...prev, [tipo]: fn(prev[tipo]) }));
+
+            if (payload.eventType === 'DELETE') {
+                setLista(prev => prev.filter(r => r.id !== idRow));
+                return;
+            }
+            if (nuevo.idChofer === miId) {
+                // Alta / reasignado a mí / edición de uno mío → upsert in-place.
+                const norm = { ...nuevo, entregadosFuera: nuevo.entregadosFuera ?? 0 };
+                setLista(prev => prev.some(r => r.id === nuevo.id)
+                    ? prev.map(r => r.id === nuevo.id ? { ...r, ...norm } : r)
+                    : [...prev, norm]
+                );
+            } else if (viejo.idChofer === miId) {
+                // Reasignado a otro chofer → sacarlo de mi lista.
+                setLista(prev => prev.filter(r => r.id !== idRow));
+            }
+        };
         const channel = supabase
             .channel('panel-recorridos-sync')
-            // event:'*' para que las modificaciones de la web lleguen en vivo:
-            // alta, baja y reasignación de recorridos del chofer, no solo la edición.
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'Recorridos' }, (payload) => {
-                const miId = miIdChoferRef.current;
-                if (miId == null) return;
-                const nuevo = payload.new as Recorrido;
-                const viejo = payload.old as Partial<Recorrido>;
-                const idRow = nuevo.id ?? viejo.id;
-                if (idRow == null) return;
-
-                if (payload.eventType === 'DELETE') {
-                    setRecorridos(prev => prev.filter(r => r.id !== idRow));
-                    return;
-                }
-                if (nuevo.idChofer === miId) {
-                    // Alta / reasignado a mí / edición de uno mío → upsert in-place.
-                    const norm = { ...nuevo, entregadosFuera: nuevo.entregadosFuera ?? 0 };
-                    setRecorridos(prev => prev.some(r => r.id === nuevo.id)
-                        ? prev.map(r => r.id === nuevo.id ? { ...r, ...norm } : r)
-                        : [...prev, norm]
-                    );
-                } else if (viejo.idChofer === miId) {
-                    // Reasignado a otro chofer → sacarlo de mi lista.
-                    setRecorridos(prev => prev.filter(r => r.id !== idRow));
-                }
-            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'Recorridos' }, handlerDe('SEMANA'))
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'recorridos_sabados' }, handlerDe('SÁBADOS'))
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'recorridos_especiales' }, handlerDe('ESPECIALES'))
             .subscribe();
         return () => { void supabase.removeChannel(channel); };
     }, [cargarDatos]);
@@ -432,21 +459,24 @@ export default function PanelScreen() {
     }, [intentarSync]);
 
     const handleGuardar = useCallback(async (id: number, campo: 'entregados' | 'entregadosFuera', valor: number) => {
-        // 1. Actualización optimista inmediata
-        setRecorridos(prev => prev.map(r => r.id === id ? { ...r, [campo]: valor } : r));
+        // Tabla del apartado activo (via ref, sin stale closure).
+        const tipo = tabDiaRef.current;
+        const tabla = TABLA_DIA[tipo];
+        // 1. Actualización optimista inmediata (solo en el apartado activo)
+        setDataPorDia(prev => ({ ...prev, [tipo]: prev[tipo].map(r => r.id === id ? { ...r, [campo]: valor } : r) }));
         setGuardandoCampo({ id, campo });
         try {
-            const { error } = await supabase.from('Recorridos').update({ [campo]: valor }).eq('id', id);
+            const { error } = await supabase.from(tabla).update({ [campo]: valor }).eq('id', id);
             if (error) throw error;
-            // Éxito: si había una mutación pendiente para este campo, la removemos
+            // Éxito: si había una mutación pendiente para tabla+id+campo, la removemos
             const cola = await leerCola();
-            const nueva = cola.filter(m => !(m.id === id && m.campo === campo));
+            const nueva = cola.filter(m => !(m.id === id && m.campo === campo && (m.tabla || 'Recorridos') === tabla));
             await guardarCola(nueva);
             setPendientesOffline(nueva.length);
         } catch (err: any) {
             if (isNetworkError(err)) {
                 // 2. Error de red → encolar silenciosamente
-                await encolarMutacion({ id, campo, valor, timestamp: Date.now() });
+                await encolarMutacion({ id, campo, valor, timestamp: Date.now(), tabla });
                 const cola = await leerCola();
                 setPendientesOffline(cola.length);
                 toast.warning('Sin conexión — se guardará cuando vuelva internet');
@@ -489,21 +519,7 @@ export default function PanelScreen() {
         );
     }
 
-    if (recorridos.length === 0) {
-        return (
-            <ScrollView style={[S.container, { backgroundColor: colors.bg }]} contentContainerStyle={S.content}
-                refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={colors.blue} colors={[colors.blue]} />}>
-                <GreetingBox saludo={saludo} choferInfo={choferInfo} totalPaquetes={0} totalEntregados={0} progreso={0} />
-                <View style={S.sinRutas}>
-                    <Ionicons name="map-outline" size={52} color={colors.borderSubtle} />
-                    <Text style={[S.sinRutasTitulo, { color: colors.textSecondary }]}>Sin rutas asignadas hoy</Text>
-                    <Text style={[S.sinRutasSub, { color: colors.textMuted }]}>
-                        El administrador todavía no te asignó recorridos para hoy.
-                    </Text>
-                </View>
-            </ScrollView>
-        );
-    }
+    const tabEsHoy = tabDia === tipoDeHoy();
 
     return (
         <ScrollView style={[S.container, { backgroundColor: colors.bg }]} contentContainerStyle={S.content}
@@ -511,6 +527,25 @@ export default function PanelScreen() {
             refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={colors.blue} colors={[colors.blue]} />}>
             <GreetingBox saludo={saludo} choferInfo={choferInfo}
                 totalPaquetes={totalPaquetes} totalEntregados={totalEntregadosTodo} progreso={progresoGlobal} />
+
+            {/* Apartados por tipo de día (Lun a Vie / Sábados / Especiales).
+                "Especiales" solo aparece si tiene rutas asignadas. */}
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                {TIPOS_DIA
+                    .filter(t => t !== 'ESPECIALES' || dataPorDia.ESPECIALES.length > 0)
+                    .map(t => {
+                        const activo = tabDia === t;
+                        return (
+                            <TouchableOpacity key={t} onPress={() => setTabDia(t)} activeOpacity={0.8}
+                                style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1, backgroundColor: activo ? colors.blue : colors.bgInput, borderColor: activo ? colors.blue : colors.border }}>
+                                <Text style={{ fontSize: 12.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{LABEL_DIA[t]}{t === tipoDeHoy() ? ' · hoy' : ''}</Text>
+                                <View style={{ borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1, backgroundColor: activo ? 'rgba(255,255,255,0.22)' : colors.bg }}>
+                                    <Text style={{ fontSize: 10.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{dataPorDia[t].length}</Text>
+                                </View>
+                            </TouchableOpacity>
+                        );
+                    })}
+            </View>
 
             {/* Banner offline: solo visible si hay cambios pendientes de sincronizar */}
             {pendientesOffline > 0 && (
@@ -527,7 +562,17 @@ export default function PanelScreen() {
                 </TouchableOpacity>
             )}
 
-            {recorridos.map((rec, i) => (
+            {recorridos.length === 0 ? (
+                <View style={S.sinRutas}>
+                    <Ionicons name="map-outline" size={52} color={colors.borderSubtle} />
+                    <Text style={[S.sinRutasTitulo, { color: colors.textSecondary }]}>
+                        {tabEsHoy ? 'Sin rutas asignadas hoy' : `Sin rutas de ${LABEL_DIA[tabDia]}`}
+                    </Text>
+                    <Text style={[S.sinRutasSub, { color: colors.textMuted }]}>
+                        El administrador todavía no te asignó recorridos{tabEsHoy ? ' para hoy' : ` de ${LABEL_DIA[tabDia]}`}.
+                    </Text>
+                </View>
+            ) : recorridos.map((rec, i) => (
                 <FilaRecorrido key={rec.id} recorrido={rec} index={i}
                     onGuardar={handleGuardar} guardandoCampo={guardandoCampo} />
             ))}

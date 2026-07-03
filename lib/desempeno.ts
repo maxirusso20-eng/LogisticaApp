@@ -148,6 +148,17 @@ export function filtrarMesActual(registros: any[]): any[] {
   return (registros || []).filter((r) => String(r.fecha || '').startsWith(ym));
 }
 
+// Filtra por período seleccionable: 'mes' (actual) | 'anterior' | 'todo'.
+// (Espejo de filtrarPeriodo de la web — mantener sincronizados.)
+export type Periodo = 'mes' | 'anterior' | 'todo';
+export function filtrarPeriodo(registros: any[], periodo: Periodo): any[] {
+  if (periodo === 'todo') return registros || [];
+  const now = new Date();
+  const d = periodo === 'anterior' ? new Date(now.getFullYear(), now.getMonth() - 1, 1) : now;
+  const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  return (registros || []).filter((r) => String(r.fecha || '').startsWith(ym));
+}
+
 // Total de DEMORADOS (umbrella). El parser ya cuenta TODOS los demorados en
 // `fallos`; demEnCamino/demNadie son solo el desglose.
 export function demoradosTotal(k: ChoferKpi): number {

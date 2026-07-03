@@ -196,6 +196,7 @@ const GRUPOS_CHOFER = [
   {
     label: 'MI DESEMPEÑO', items: [
       { name: 'rendimiento', label: 'Mi Rendimiento', icon: 'stats-chart-outline', route: '/(drawer)/rendimiento', color: '#3B82F6' },
+      { name: 'mis-dias', label: 'Mi Día a Día', icon: 'calendar-outline', route: '/(drawer)/mis-dias', color: '#06B6D4' },
       // "Ranking" oculto para el chofer por ahora (pedido). Reactivar: volver a agregar acá.
       { name: 'mis-ausencias', label: 'Mis Faltas', icon: 'calendar-clear-outline', route: '/(drawer)/mis-ausencias', color: '#EF4444' },
     ],
@@ -501,6 +502,10 @@ export default function DrawerLayout() {
       <Drawer.Screen
         name="mis-ausencias"
         options={{ title: 'Mis Faltas', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
+      />
+      <Drawer.Screen
+        name="mis-dias"
+        options={{ title: 'Mi Día a Día', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
       />
       <Drawer.Screen
         name="guia"
