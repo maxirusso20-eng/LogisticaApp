@@ -14,6 +14,7 @@
 // TaskManager.defineTask() quede registrado antes de que Android despierte
 // la tarea en segundo plano.
 // ─────────────────────────────────────────────────────────────────────────
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { supabase } from './supabase';
@@ -22,17 +23,67 @@ export type GpsStatus = 'off' | 'foreground' | 'background' | 'denied';
 
 const TASK = 'hogareno-background-location';
 
-// ── Shared: envía coordenadas al RPC verificando sesión ──────────────────
-async function reportLocation(lat: number, lng: number) {
+// ── Cola offline ──────────────────────────────────────────────────────────
+// Cada posición (con su hora real) se guarda en AsyncStorage y se va vaciando
+// al historial (RPC registrar_ubicaciones). Si no hay señal, la cola se acumula
+// y se manda entera al reconectar → NO se pierde el tramo hecho sin señal.
+const QUEUE_KEY = '@ubic_offline_queue';
+const MAX_QUEUE = 1500;   // tope defensivo: nunca crece sin límite
+const LOTE = 200;         // se manda de a lotes tras una desconexión larga
+
+type Punto = { lat: number; lng: number; ts: string };
+let flushing = false;
+
+async function encolar(p: Punto) {
   try {
-    // Asegurar que la sesión esté cargada desde AsyncStorage.
-    // getSession() es no-op si ya está en memoria; si no, lee AsyncStorage.
+    const raw = await AsyncStorage.getItem(QUEUE_KEY);
+    const q: Punto[] = raw ? JSON.parse(raw) : [];
+    q.push(p);
+    // Si supera el tope, se descartan los más viejos (prioriza lo reciente).
+    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(q.length > MAX_QUEUE ? q.slice(-MAX_QUEUE) : q));
+  } catch { /* ignore */ }
+}
+
+// Vacía la cola al historial. Si falla (sin red), la deja para el próximo tick.
+async function vaciarCola() {
+  if (flushing) return;
+  flushing = true;
+  try {
+    const raw = await AsyncStorage.getItem(QUEUE_KEY);
+    let q: Punto[] = raw ? JSON.parse(raw) : [];
+    if (!q.length) return;
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) return; // sin sesión → no hacer nada
-    await supabase.rpc('actualizar_mi_ubicacion', { p_lat: lat, p_lng: lng });
+    if (!session?.access_token) return;
+    while (q.length) {
+      const lote = q.slice(0, LOTE);
+      const { error } = await supabase.rpc('registrar_ubicaciones', { p_puntos: lote });
+      if (error) throw error;
+      q = q.slice(LOTE);
+      await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(q)); // persistir avance
+    }
+  } catch {
+    // Sin red o error: la cola queda intacta y se reintenta en el próximo tick.
+  } finally {
+    flushing = false;
+  }
+}
+
+// ── Shared: registra la posición (dot en vivo + cola de historial) ─────────
+async function reportLocation(lat: number, lng: number) {
+  // 1) Encolar SIEMPRE (aunque no haya red): así el tramo offline no se pierde.
+  await encolar({ lat, lng, ts: new Date().toISOString() });
+  try {
+    // 2) Posición viva (el punto que muestra el mapa). getSession lee AsyncStorage
+    //    si hace falta; es no-op si ya está en memoria.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      await supabase.rpc('actualizar_mi_ubicacion', { p_lat: lat, p_lng: lng });
+    }
   } catch {
     // Sin red o sesión expirada: el próximo tick lo reintenta.
   }
+  // 3) Intentar vaciar la cola (este punto + los que hayan quedado sin enviar).
+  await vaciarCola();
 }
 
 // ── Background task ───────────────────────────────────────────────────────
