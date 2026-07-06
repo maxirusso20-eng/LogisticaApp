@@ -109,6 +109,11 @@ const normTipo = (td?: string | null): TipoDia => {
 const tipoDeHoy = (): TipoDia => (new Date().getDay() === 6 ? 'SÁBADOS' : 'SEMANA');
 const LABEL_TIPO: Record<TipoDia, string> = { SEMANA: 'Lun a Vie', 'SÁBADOS': 'Sábados', ESPECIALES: 'Especiales' };
 
+// El chofer solo puede MARCAR colectas como entregadas a partir de esta hora
+// (reloj local). Evita marcados accidentales a la mañana. La barrera REAL está
+// en el RPC chofer_marcar_colecta (mismo umbral, hora ART); esto avisa en el acto.
+const HORA_HABILITADA = 12;
+
 const parsearHorario = (horario: string): number | null => {
   if (!horario) return null;
   const match = horario.match(/^(\d{1,2}):(\d{2})/);
@@ -759,6 +764,13 @@ export default function ColectasScreen() {
 
   const handleToggle = async (id: number | string, actual: boolean, nombreCliente: string) => {
     const idStr = String(id); const nuevoEstado = !actual;
+    // Bloqueo horario: MARCAR (no desmarcar) solo desde las 12:00. Avisamos en el
+    // acto sin tocar la base. El RPC lo rechaza igual si el reloj del celu está mal.
+    if (nuevoEstado && !esAdminRef.current && new Date().getHours() < HORA_HABILITADA) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      toast.warning(`Podés marcar las colectas como entregadas a partir de las ${HORA_HABILITADA}:00 del mediodía`);
+      return;
+    }
     ignorarNotificacionesCache.set(idStr, Date.now());
     setClientes(prev => prev.map(c => c.id === id ? { ...c, completado: nuevoEstado } : c));
     setToggling(prev => new Set(prev).add(id));
@@ -767,7 +779,7 @@ export default function ColectasScreen() {
       // escritura, el chofer no puede hacer UPDATE directo (se bloquea y se
       // "desmarca"). El RPC valida que sea el chofer asignado y persiste.
       const { error } = await supabase.rpc('chofer_marcar_colecta', { p_id: Number(id), p_completado: nuevoEstado });
-      if (error) { console.error('[Colectas]', error.message); setClientes(prev => prev.map(c => c.id === id ? { ...c, completado: actual } : c)); ignorarNotificacionesCache.delete(idStr); return; }
+      if (error) { console.error('[Colectas]', error.message); setClientes(prev => prev.map(c => c.id === id ? { ...c, completado: actual } : c)); ignorarNotificacionesCache.delete(idStr); toast.error(error.message || 'No se pudo marcar la colecta'); return; }
       if (nuevoEstado) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         toast.success(`${nombreCliente} marcada como completada ✓`);
