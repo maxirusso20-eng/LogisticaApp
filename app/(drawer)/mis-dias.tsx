@@ -102,7 +102,7 @@ export default function MisDiasScreen() {
     const kpiTxt = (n: number, tasa: number, signo = '−') => `${signo}${(n * tasa).toFixed(2)}% KPI`;
     return [
       { label: 'Entregados', value: k.entregados || 0, kpi: '', color: colors.green, icon: '✅', desc: 'Llegaron a destino en el día (incluye 2da visita).' },
-      { label: 'Entregas tardías (21:00–23:05)', value: post21, kpi: kpiTxt(post21, 0.05), color: colors.amber, icon: '🌙', desc: 'Entregados, pero después de las 21hs: −0,05% c/u.' },
+      { label: 'Entregas tardías (21:00–23:05)', value: post21, kpi: 'no penaliza', color: colors.amber, icon: '🌙', desc: 'Entregados, pero después de las 21hs. Solo informativo: NO bajan tu KPI.' },
       { label: 'Demorados (total)', value: k.fallos || 0, kpi: kpiTxt(1, demGrave * 0.5 + demLeve * 0.2), color: colors.red, icon: '⏱️', desc: 'Los que no se entregaron ese día, abiertos por motivo abajo.' },
       { label: 'En camino al destinatario', value: k.demEnCamino || 0, kpi: kpiTxt(demGrave, 0.5), color: colors.red, icon: '🚚', desc: 'Se quedó en el camión: a fin del día seguía en ruta. −0,5% c/u.' },
       { label: 'Nadie en domicilio +21h', value: k.demNadie || 0, kpi: kpiTxt(k.demNadie || 0, 0.2), color: colors.red, icon: '🚪', desc: 'Tocaste timbre y no había nadie, pasadas las 21hs. −0,2% c/u.' },

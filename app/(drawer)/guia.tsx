@@ -51,11 +51,11 @@ export default function GuiaScreen() {
       {/* Rendimiento (KPI) */}
       <Card color={colors.blue}>
         <Title icon="stats-chart-outline" text="1) Rendimiento (KPI)" color={colors.blue} />
-        <P>Sale de Light Data. Arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text> y le restan los demorados y las entregas tardías:</P>
+        <P>Sale de Light Data. Arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text> y le restan los demorados (las tardías solo se informan):</P>
         {[
           { label: 'En camino al destinatario', val: '−0,5%', color: colors.red },
           { label: 'Nadie / cancelado / reprogramado (+21hs)', val: '−0,2%', color: colors.red },
-          { label: 'Entrega tardía (21hs - 23:05hs)', val: '−0,05%', color: colors.amber },
+          { label: 'Entrega tardía (21hs - 23:05hs)', val: 'no resta', color: colors.amber },
           { label: 'Pendiente CON observación', val: '+0,1%', color: colors.green },
         ].map((r) => (
           <View key={r.label} style={[styles.penalRow, { backgroundColor: `${r.color}14`, borderColor: `${r.color}33` }]}>

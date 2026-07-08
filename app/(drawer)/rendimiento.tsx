@@ -171,11 +171,11 @@ export default function RendimientoScreen() {
   const demGrave = yo.demEnCamino || 0;                           // −0,5% c/u
   const demLeve = Math.max(0, (yo.demorados || 0) - demGrave);    // −0,2% c/u
   const pendConObs = yo.neutroConObs || 0;                        // +0,1% c/u (pendientes)
-  const post21 = yo.entregas_post21 || 0;                         // −0,05% c/u
+  const post21 = yo.entregas_post21 || 0;                         // solo informativo (no penaliza)
   const kpiTxt = (n: number, tasa: number, signo = '−') => `${signo}${(n * tasa).toFixed(2)}% KPI`;
   const rows = [
     { label: 'Entregados', value: yo.entregados, pct: pct(yo.entregados), kpi: '', color: colors.green, icon: '✅', sub: false, show: true, desc: 'Llegaron a destino en el día (incluye 2da visita).' },
-    { label: 'Entregas tardías (21:00–23:05)', value: post21, pct: 0, kpi: kpiTxt(post21, 0.05), color: colors.amber, icon: '🌙', sub: true, show: post21 > 0, desc: 'Entregados, pero después de las 21hs: −0,05% c/u.' },
+    { label: 'Entregas tardías (21:00–23:05)', value: post21, pct: 0, kpi: 'no penaliza', color: colors.amber, icon: '🌙', sub: true, show: post21 > 0, desc: 'Entregados, pero después de las 21hs. Solo informativo: NO bajan tu KPI.' },
     { label: 'Demorados (total)', value: yo.demorados || 0, pct: 0, kpi: kpiTxt(1, demGrave * 0.5 + demLeve * 0.2), color: colors.red, icon: '⏱️', sub: false, show: (yo.demorados || 0) > 0, desc: 'Suma de los que no se entregaron, abierto por motivo abajo.' },
     { label: 'En camino al destinatario', value: yo.demEnCamino || 0, pct: 0, kpi: kpiTxt(demGrave, 0.5), color: colors.red, icon: '🚚', sub: true, show: (yo.demEnCamino || 0) > 0, desc: 'Se quedó en el camión: a fin del día seguía en ruta. −0,5% c/u.' },
     { label: 'Nadie en domicilio +21h', value: yo.demNadie || 0, pct: 0, kpi: kpiTxt(yo.demNadie || 0, 0.2), color: colors.red, icon: '🚪', sub: true, show: (yo.demNadie || 0) > 0, desc: 'Tocaste timbre y no había nadie, ya pasadas las 21hs. −0,2% c/u.' },

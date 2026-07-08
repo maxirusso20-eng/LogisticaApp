@@ -119,20 +119,24 @@ export function acumularPorChofer(registros: any[]): Record<string, ChoferKpi> {
       } as ChoferKpi;
     }
     const k = porChofer[nom];
+    // Día "obviado" (ML no contó demorados ese día): sumamos entregados/total y
+    // los positivos, pero NO las penalizaciones del KPI (demorados y tardías).
+    // Espejo del mismo fix en la web (utils/desempeno.js).
+    const obv = r.obviar_demorados === true;
     k.total += r.total || 0;
     k.entregados += r.entregados || 0;
-    k.fallos += r.fallos || 0;
-    k.demEnCamino += r.dem_en_camino || 0;
-    k.demNadie += r.dem_nadie || 0;
-    k.demNoEntregado += r.dem_no_entregado || 0;
-    k.demCancelado += r.dem_cancelado || 0;
-    k.demReprogramado += r.dem_reprogramado || 0;
+    k.fallos += obv ? 0 : (r.fallos || 0);
+    k.demEnCamino += obv ? 0 : (r.dem_en_camino || 0);
+    k.demNadie += obv ? 0 : (r.dem_nadie || 0);
+    k.demNoEntregado += obv ? 0 : (r.dem_no_entregado || 0);
+    k.demCancelado += obv ? 0 : (r.dem_cancelado || 0);
+    k.demReprogramado += obv ? 0 : (r.dem_reprogramado || 0);
     k.neutros += r.neutros || 0;
     k.excluidos += r.excluidos || 0;
     k.conObservacion += r.con_observacion || 0;
     k.neutroConObs += r.neutro_con_obs || 0;       // pendientes con observación (+0,1)
-    k.entregas_post21 += r.entregas_post21 || 0;   // auto desde Light Data
-    k.dem_con_obs += r.dem_con_obs || 0;
+    k.entregas_post21 += obv ? 0 : (r.entregas_post21 || 0);   // auto desde Light Data
+    k.dem_con_obs += obv ? 0 : (r.dem_con_obs || 0);
     for (const c of CAMPOS_MANUALES) k[c] += r[c] || 0;
     if (k.latestId === null) { k.latestId = r.id; k.latestFecha = r.fecha; }
   }
@@ -167,30 +171,30 @@ export function demoradosTotal(k: ChoferKpi): number {
 
 // ── Card 1: RENDIMIENTO (KPI) ──────────────────────────────────────────────
 // 100% base. −0,5% "en camino al destinatario" (demGrave). −0,2% resto de
-// demorados: nadie/cancelado/reprogramado post-21 (demLeve). −0,05% entrega
-// tardía. +0,1% por cada PENDIENTE con observación (la obs de un demorado ya
-// NO suma). Piso 0%, tope 100%.
+// demorados: nadie/cancelado/reprogramado post-21 (demLeve). Entregas tardías:
+// NO penalizan (pedido 2026-07-08; antes −0,05% c/u), solo se informa el total.
+// +0,1% por cada PENDIENTE con observación (la obs de un demorado ya NO suma).
+// Piso 0%, tope 100%.
 export function calcularRendimientoKPI(k: ChoferKpi) {
   const entregados = k.entregados || 0;
   const demorados = demoradosTotal(k);
   const demGrave = k.demEnCamino || 0;                   // "en camino al destinatario" → −0,5%
   const demLeve = Math.max(0, demorados - demGrave);     // nadie/cancelado/reprogramado +21 → −0,2%
   const neutroConObs = k.neutroConObs || 0;              // PENDIENTES con observación → +0,1%
-  const entregasPost21 = k.entregas_post21 || 0;         // entregados 21:00–23:05hs → −0,05%
+  const entregasPost21 = k.entregas_post21 || 0;         // entregados 21:00–23:05hs → solo informativo
 
   const pct = (entregados + demorados) > 0
     ? r2(Math.max(0, Math.min(100,
         100
         - demGrave * 0.5
         - demLeve * 0.2
-        - entregasPost21 * 0.05
         + neutroConObs * 0.1
       )))
     : null;
 
   const pctObservacion = k.total > 0 && k.conObservacion > 0
     ? Math.round((k.conObservacion / k.total) * 100) : null;
-  return { pct, demorados, demGrave, demLeve, neutroConObs, pctObservacion, cumpleSLA: cumpleSLA(pct) };
+  return { pct, demorados, demGrave, demLeve, neutroConObs, entregasPost21, pctObservacion, cumpleSLA: cumpleSLA(pct) };
 }
 
 // ── Card 2: DESEMPEÑO ──────────────────────────────────────────────────────
