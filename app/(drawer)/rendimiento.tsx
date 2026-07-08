@@ -6,6 +6,7 @@
 // + ausencias (la misma base que la web) y usa el motor lib/desempeno.ts.
 // ─────────────────────────────────────────────────────────────────────────
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View,
@@ -49,8 +50,13 @@ export default function RendimientoScreen() {
     }
   }, []);
 
+  // Recarga cada vez que la pantalla toma foco (montaje inicial incluido). Antes
+  // `cargar()` corría UNA sola vez al montar: si esa corrida salía antes de que
+  // la sesión estuviera lista, los KPIs quedaban vacíos hasta cambiar de apartado
+  // en el drawer. Con useFocusEffect se recarga sola al entrar a la pantalla.
+  useFocusEffect(useCallback(() => { cargar(); }, [cargar]));
+
   useEffect(() => {
-    cargar();
     // Realtime (igual que la web): el chofer ve su KPI actualizarse solo cuando
     // el admin importa o corrige — antes solo al abrir o con pull-to-refresh.
     let t: ReturnType<typeof setTimeout> | null = null;

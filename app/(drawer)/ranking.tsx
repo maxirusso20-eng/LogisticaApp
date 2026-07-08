@@ -5,6 +5,7 @@
 // resaltada ("vos"). Lee kpis_lightdata con el motor lib/desempeno.ts.
 // ─────────────────────────────────────────────────────────────────────────
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View,
@@ -41,8 +42,12 @@ export default function RankingScreen() {
     }
   }, []);
 
+  // Recarga cada vez que la pantalla toma foco (montaje inicial incluido). Antes
+  // corría UNA sola vez al montar y, si salía antes de que la sesión estuviera
+  // lista, el ranking quedaba vacío hasta cambiar de apartado. Ver rendimiento.tsx.
+  useFocusEffect(useCallback(() => { cargar(); }, [cargar]));
+
   useEffect(() => {
-    cargar();
     // Realtime (igual que la web): recargar con debounce cuando cambian los KPIs.
     let t: ReturnType<typeof setTimeout> | null = null;
     const refrescar = () => { if (t) clearTimeout(t); t = setTimeout(() => cargar(), 1000); };
