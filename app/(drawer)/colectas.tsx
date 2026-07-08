@@ -577,7 +577,8 @@ export default function ColectasScreen() {
   const [nombreUsuario, setNombre] = useState('');
   const [saludo] = useState(getSaludo);
   const [toggling, setToggling] = useState<Set<number | string>>(new Set());
-  const [gpsStatus, setGpsStatus] = useState<'off' | 'foreground' | 'background' | 'denied'>('off');
+  // Solo el setter: el estado del GPS se registra pero (por ahora) no se muestra en la UI.
+  const [, setGpsStatus] = useState<'off' | 'foreground' | 'background' | 'denied'>('off');
   const [esAdmin, setEsAdmin] = useState(false);
   const emailUsuarioRef = useRef<string | null>(null);
   const userIdRef = useRef<string | null>(null);

@@ -11,7 +11,6 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { useColorScheme } from 'react-native';
 
 // ─── Paleta ───────────────────────────────────────────────────────────────────
 
@@ -123,7 +122,6 @@ const STORAGE_KEY = 'app_theme_isDark';
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const systemScheme = useColorScheme(); // 'dark' | 'light' | null
   const [isDark, setIsDark] = useState<boolean>(true);
   const [hydrated, setHydrated] = useState(false);
 
@@ -138,7 +136,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       }
       setHydrated(true);
     }).catch(() => setHydrated(true));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const setTheme = useCallback((dark: boolean) => {
     setIsDark(dark);

@@ -240,7 +240,7 @@ export default function DemoradosDiaScreen() {
           })}
 
           <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 10, lineHeight: 16 }}>
-            ❔ "Sin detalle" = demorados de días importados antes del desglose por motivo. 📦 "No entregado" hoy no penaliza el KPI (solo aparece en datos viejos).
+            ❔ “Sin detalle” = demorados de días importados antes del desglose por motivo. 📦 “No entregado” hoy no penaliza el KPI (solo aparece en datos viejos).
           </Text>
         </>
       )}

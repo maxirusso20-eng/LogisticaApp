@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  AVISOS, penalidadAusencia, penalidadAusencias,
+  AVISOS, penalidadAusencia,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -69,8 +69,6 @@ export default function MisAusenciasScreen() {
     return () => { void supabase.removeChannel(canal); };
   }, [cargar]);
 
-  const totalPenal = useMemo(() => penalidadAusencias(ausencias), [ausencias]);
-
   // Avisos del chofer (desde kpis_lightdata: cada columna de aviso con count > 0).
   const avisosChofer = useMemo(() => {
     const out: { fecha: string; label: string; count: number; impacto: number }[] = [];
@@ -82,8 +80,6 @@ export default function MisAusenciasScreen() {
     }
     return out.sort((x, y) => String(y.fecha || '').localeCompare(String(x.fecha || '')));
   }, [kpis]);
-  const totalAvisos = useMemo(() => Math.round(avisosChofer.reduce((s, a) => s + a.impacto, 0) * 100) / 100, [avisosChofer]);
-  const totalImpacto = Math.round((totalPenal + totalAvisos) * 100) / 100;
 
   const Header = (
     <View style={styles.header}>

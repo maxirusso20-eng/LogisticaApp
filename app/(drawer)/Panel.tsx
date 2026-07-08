@@ -53,7 +53,6 @@ interface ChoferInfo {
 }
 
 const porcentajeDia = (r: Recorrido) => !r.pqteDia ? 0 : Math.min(100, ((r.entregados || 0) / r.pqteDia) * 100);
-const porcentajeFuera = (r: Recorrido) => !r.porFuera ? 0 : Math.min(100, ((r.entregadosFuera || 0) / r.porFuera) * 100);
 
 // ─── Offline Queue ──────────────────────────────────────────────────────────────────────
 
@@ -249,7 +248,6 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const pctDia = porcentajeDia(recorrido);
-    const pctFuera = porcentajeFuera(recorrido);
     const completoDia = recorrido.pqteDia > 0 && (recorrido.entregados || 0) >= recorrido.pqteDia;
     const completoFuera = recorrido.porFuera > 0 && (recorrido.entregadosFuera || 0) >= recorrido.porFuera;
     const todoCompleto = completoDia && (recorrido.porFuera === 0 || completoFuera);

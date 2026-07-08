@@ -17,7 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { ADMIN_EMAIL, APP_NAME, APP_VERSION } from '../../lib/constants';
+import { ADMIN_EMAIL, APP_NAME } from '../../lib/constants';
 import { forceStopTracking } from '../../lib/locationTracker';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
