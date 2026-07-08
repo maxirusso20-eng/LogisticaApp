@@ -212,10 +212,18 @@ export function calcularDesempenoConducta(k: ChoferKpi) {
   return { score, positivos, negativos, penalAusencias, penalAvisos, cumpleSLA: cumpleSLA(score) };
 }
 
+// Semáforo de notas (espejo de la web, pedido 2026-07-08):
+//   verde ≥ 97% · naranja 90–96.99% · rojo < 90%
 export function colorDesempeno(score: number | null): string {
   if (score == null) return '#64748b';
-  if (score >= SLA_MINIMO) return '#10b981';
-  if (score >= 80) return '#f59e0b';
-  if (score >= 70) return '#f97316';
+  if (score >= 97) return '#10b981';
+  if (score >= 90) return '#f59e0b';
   return '#ef4444';
+}
+
+// Color de la CARD del chofer: manda la PEOR de las dos notas.
+export function colorCardChofer(kpi: number | null, desempeno: number | null): string {
+  const notas = [kpi, desempeno].filter((n): n is number => n != null);
+  if (notas.length === 0) return '#64748b';
+  return colorDesempeno(Math.min(...notas));
 }

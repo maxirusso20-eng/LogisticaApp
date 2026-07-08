@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import {
   acumularPorChofer, calcularDesempenoConducta, calcularRendimientoKPI,
-  colorDesempeno, type ChoferKpi, cumpleSLA, filtrarMesActual, fmtPct, NEGATIVOS, penalidadAusencias, POSITIVOS, SLA_MINIMO,
+  colorCardChofer, colorDesempeno, type ChoferKpi, cumpleSLA, filtrarMesActual, fmtPct, NEGATIVOS, penalidadAusencias, POSITIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -151,6 +151,8 @@ export default function RendimientoScreen() {
   const penalAus = penalidadAusencias(misAusencias);
   const desemp = calcularDesempenoConducta({ ...yo, penalAusencias: penalAus });
   const desempCol = colorDesempeno(desemp.score);
+  // Semáforo de la card: manda la PEOR de las dos notas (espejo de la web).
+  const cardColor = colorCardChofer(rep, desemp.score);
   const desempPos = POSITIVOS.filter((i) => (yo[i.key] || 0) > 0);
   const desempNeg = NEGATIVOS.filter((i) => (yo[i.key] || 0) > 0);
   const hayDesemp = desempPos.length > 0 || desempNeg.length > 0 || misAusencias.length > 0;
@@ -192,8 +194,8 @@ export default function RendimientoScreen() {
     <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.container} refreshControl={refresh}>
       {Header}
 
-      {/* HERO: reputación */}
-      <View style={[styles.card, { backgroundColor: colors.bgCard, borderColor: barColor + '55', borderTopColor: barColor, borderTopWidth: 3 }]}>
+      {/* HERO: reputación (el borde usa la PEOR de las dos notas) */}
+      <View style={[styles.card, { backgroundColor: colors.bgCard, borderColor: cardColor + '66', borderTopColor: cardColor, borderTopWidth: 3 }]}>
         <View style={styles.rowBetween}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.choferName, { color: colors.textPrimary }]}>{yo.chofer}</Text>
