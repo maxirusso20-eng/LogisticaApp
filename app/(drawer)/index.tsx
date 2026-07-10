@@ -20,6 +20,7 @@ import { BottomSheetModal, BottomSheetBackdrop, BottomSheetView } from '@gorhom/
 import { useTheme } from '../../lib/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { ADMIN_EMAIL } from '../../lib/constants';
+import { conLock } from '../../lib/lockAsync';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -429,7 +430,7 @@ export default function RecorridosScreen() {
     }, 600);
   }, []);
 
-  const agregarRecorrido = async (zona: ZonaKey, localidad: string) => {
+  const agregarRecorrido = async (zona: ZonaKey, localidad: string) => conLock('agregar-recorrido', async () => {
     const esSemana = tipoDia === 'semana';
     const tablaActiva = esSemana ? 'Recorridos' : 'recorridos_sabados';
     const setter = esSemana ? setDataSemana : setDataSabado;
@@ -437,7 +438,7 @@ export default function RecorridosScreen() {
     setter(prev => ({ ...prev, [zona]: [...prev[zona], nuevo].sort(compararRecorridoPorOrden) }));
     setModalRecorrido(false);
     try { await supabase.from(tablaActiva).insert([nuevo]); } catch (err) { console.error('Error insertando recorrido:', err); }
-  };
+  });
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render

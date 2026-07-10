@@ -34,6 +34,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { APP_NAME } from '../../lib/constants';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
+import { conLock } from '../../lib/lockAsync';
 
 // ─── Coordinadores ────────────────────────────────────────────────────────────
 // Deben coincidir con los de la web (src/components/PantallaChat.jsx)
@@ -808,7 +809,7 @@ const ConversacionView: React.FC<{
         ]);
     };
 
-    const handleEnviarMedia = async (uri: string, mType: 'audio' | 'image' | 'document', pseudoTexto: string) => {
+    const handleEnviarMedia = async (uri: string, mType: 'audio' | 'image' | 'document', pseudoTexto: string) => conLock('chat-enviar-media', async () => {
         setSubiendoMedia(true);
         try {
             const url = await uploadMediaToSupabase(uri, miUserId, mType);
@@ -824,7 +825,7 @@ const ConversacionView: React.FC<{
             notificarCampana(pseudoTexto);
         } catch (e: any) { Alert.alert('Error', e.message); }
         finally { setSubiendoMedia(false); }
-    };
+    });
 
     // Helper: obtener token destino y enviar push sin bloquear la UI
     const pushDestino = async (admin: boolean, cEmail: string, mNom: string, cNom: string, txt: string) => {
@@ -849,7 +850,7 @@ const ConversacionView: React.FC<{
         }]);
     };
 
-    const handleEnviar = async () => {
+    const handleEnviar = async () => conLock('chat-enviar', async () => {
         const txt = texto.trim();
         if (!txt || enviando) return;
         if (typingRef.current) clearTimeout(typingRef.current);
@@ -868,7 +869,7 @@ const ConversacionView: React.FC<{
             notificarCampana(txt);
         } catch { setTexto(txt); }
         finally { setEnviando(false); inputRef.current?.focus(); }
-    };
+    });
     // ── Keyboard listener para Android (KAV no funciona bien dentro del Drawer) ──
     useEffect(() => {
         if (Platform.OS !== 'android') return;

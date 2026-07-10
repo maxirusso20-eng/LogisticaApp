@@ -18,6 +18,7 @@ import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 import { useToast } from '../../lib/toast';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
+import { conLock } from '../../lib/lockAsync';
 
 type Cliente = { id: number; cliente: string; direccion: string | null; horario: string | null; chofer: string | null; tipo_dia: string | null };
 type Chofer = { nombre: string; email: string | null };
@@ -123,7 +124,7 @@ export default function ClientesScreen() {
   }, [tab]);
 
   // Enviar UNA colecta al chat del chofer.
-  const enviarUno = async (c: Cliente) => {
+  const enviarUno = async (c: Cliente) => conLock('enviar-uno-' + String(c.id), async () => {
     const email = emailDe(c.chofer);
     if (!c.chofer) { toast.error('Asigná un chofer primero'); return; }
     if (!email) { toast.error(`${c.chofer} no tiene email cargado`); return; }
@@ -136,7 +137,7 @@ export default function ClientesScreen() {
     if (error) { toast.error('No se pudo enviar al chat'); return; }
     await marcarWa([c]);
     toast.success(`Enviado a ${c.chofer}`);
-  };
+  });
 
   // Enviar a TODOS los choferes sus colectas de la pestaña (un mensaje c/u).
   const enviarMasivo = () => {
@@ -150,7 +151,7 @@ export default function ClientesScreen() {
       [
         { text: 'Cancelar', style: 'cancel' },
         {
-          text: 'Enviar', onPress: async () => {
+          text: 'Enviar', onPress: async () => conLock('enviar-todas', async () => {
             setEnviando(true);
             try {
               const saludoBase = tab === 'SÁBADOS' ? 'Buenas noches' : 'Buenos días';
@@ -179,7 +180,7 @@ export default function ClientesScreen() {
             } finally {
               setEnviando(false);
             }
-          },
+          }),
         },
       ]
     );

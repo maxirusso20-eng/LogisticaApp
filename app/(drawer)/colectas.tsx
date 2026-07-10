@@ -30,6 +30,7 @@ import { SkeletonColectaCard } from '../../lib/skeleton';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 import { useToast } from '../../lib/toast';
+import { conLock } from '../../lib/lockAsync';
 
 const ignorarNotificacionesCache = new Map<string, number>();
 const CACHE_TTL_MS = 5_000;
@@ -763,7 +764,7 @@ export default function ColectasScreen() {
 
   const handleRefresh = () => { setRefrescando(true); fetchClientes(); };
 
-  const handleToggle = async (id: number | string, actual: boolean, nombreCliente: string) => {
+  const handleToggle = async (id: number | string, actual: boolean, nombreCliente: string) => conLock('toggle-colecta-' + String(id), async () => {
     const idStr = String(id); const nuevoEstado = !actual;
     // Bloqueo horario: MARCAR (no desmarcar) solo desde las 12:00. Avisamos en el
     // acto sin tocar la base. El RPC lo rechaza igual si el reloj del celu está mal.
@@ -790,7 +791,7 @@ export default function ColectasScreen() {
         toast.info(`${nombreCliente} marcada como pendiente`);
       }
     } finally { setToggling(prev => { const next = new Set(prev); next.delete(id); return next; }); }
-  };
+  });
 
   // Colectas del apartado activo: stats, progreso, filtros y lista trabajan
   // SOLO sobre este subconjunto — cada apartado es independiente.

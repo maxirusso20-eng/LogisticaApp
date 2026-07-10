@@ -13,6 +13,7 @@ import {
 import { penalidadAusencia } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
+import { conLock } from '../../lib/lockAsync';
 
 const hoyLocal = () => new Date().toLocaleDateString('sv-SE');
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -48,7 +49,7 @@ export default function AusenciasScreen() {
 
   useEffect(() => { cargar(); }, [cargar]);
 
-  const guardar = async () => {
+  const guardar = async () => conLock('ausencia-guardar', async () => {
     if (!choferSel) { Alert.alert('Elegí un chofer', 'Primero seleccioná un chofer.'); return; }
     setGuardando(true);
     const { data: { session } } = await supabase.auth.getSession();
@@ -59,7 +60,7 @@ export default function AusenciasScreen() {
     setDetalle('');
     cargar();
     Alert.alert('✅ Registrada', `Ausencia de ${choferSel} (−${penal}%)`);
-  };
+  });
 
   const borrar = (a: any) => {
     Alert.alert('Eliminar ausencia', `¿Borrar la ausencia de ${a.chofer} del ${fmtFecha(a.fecha)}?`, [

@@ -22,6 +22,7 @@ import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 import { useToast } from '../../lib/toast';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
+import { conLock } from '../../lib/lockAsync';
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────
 interface Chofer {
@@ -232,7 +233,7 @@ function ModalChofer({ visible, choferEditar, onCerrar, onGuardado }: {
     });
   };
 
-  const guardar = async () => {
+  const guardar = async () => conLock('personal-guardar', async () => {
     if (!form.nombre.trim()) { Alert.alert('Falta el nombre', 'El nombre es obligatorio.'); return; }
     if (!form.dni.trim()) { Alert.alert('Falta el DNI', 'El DNI es obligatorio.'); return; }
     if (!form.zona) { Alert.alert('Falta la zona', 'Seleccioná una zona.'); return; }
@@ -265,7 +266,7 @@ function ModalChofer({ visible, choferEditar, onCerrar, onGuardado }: {
     } finally {
       setGuardando(false);
     }
-  };
+  });
 
   const wrap = [M.inputWrap, { backgroundColor: colors.bgCard, borderColor: colors.border }];
   const inp = [M.input, { color: colors.textPrimary }];
