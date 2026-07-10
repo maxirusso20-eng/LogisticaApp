@@ -191,6 +191,7 @@ const GRUPOS_CHOFER = [
     label: 'MI DÍA', items: [
       { name: 'Panel', label: 'Panel del Día', icon: 'clipboard-outline', route: '/(drawer)/Panel', color: '#4F8EF7' },
       { name: 'colectas', label: 'Mis Colectas', icon: 'archive-outline', route: '/(drawer)/colectas', color: '#F59E0B' },
+      { name: 'mi-calendario', label: 'Mi Calendario', icon: 'calendar-outline', route: '/(drawer)/mi-calendario', color: '#8B5CF6' },
     ],
   },
   {
@@ -506,6 +507,10 @@ export default function DrawerLayout() {
       <Drawer.Screen
         name="mis-dias"
         options={{ title: 'Mi Día a Día', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
+      />
+      <Drawer.Screen
+        name="mi-calendario"
+        options={{ title: 'Mi Calendario', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
       />
       <Drawer.Screen
         name="guia"
