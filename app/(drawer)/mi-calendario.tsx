@@ -32,6 +32,7 @@ const ACENTO = '#8b5cf6';
 export default function MiCalendarioScreen() {
   const { colors } = useTheme();
   const [dias, setDias] = useState<any[]>([]);
+  const [horarios, setHorarios] = useState<Record<string, string>>({}); // { fecha: horario }
   const [miNombre, setMiNombre] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -50,14 +51,21 @@ export default function MiCalendarioScreen() {
         nombre = (data?.nombre || '').trim();
       }
       setMiNombre(nombre);
-      if (!nombre) { setDias([]); return; }
-      const { data: rows } = await supabase.from('calendario_dias')
-        .select('*')
-        .eq('chofer', nombre)
-        .gte('fecha', lunesEsta)
-        .lte('fecha', finProxima)
-        .order('fecha');
+      if (!nombre) { setDias([]); setHorarios({}); return; }
+      const [{ data: rows }, { data: hor }] = await Promise.all([
+        supabase.from('calendario_dias')
+          .select('*')
+          .eq('chofer', nombre)
+          .gte('fecha', lunesEsta)
+          .lte('fecha', finProxima)
+          .order('fecha'),
+        supabase.from('calendario_horarios')
+          .select('fecha, horario')
+          .gte('fecha', lunesEsta)
+          .lte('fecha', finProxima),
+      ]);
       setDias(rows || []);
+      setHorarios(Object.fromEntries((hor || []).map((r: any) => [r.fecha, r.horario || ''])));
     } catch (e) {
       console.warn('[mi-calendario] error', e);
     } finally {
@@ -73,6 +81,7 @@ export default function MiCalendarioScreen() {
     const refrescar = () => { if (t) clearTimeout(t); t = setTimeout(() => cargar(), 600); };
     const canal = supabase.channel('calendario-sync-chofer')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'calendario_dias' }, refrescar)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calendario_horarios' }, refrescar)
       .subscribe();
     return () => { if (t) clearTimeout(t); supabase.removeChannel(canal); };
   }, [cargar]);
@@ -105,6 +114,7 @@ export default function MiCalendarioScreen() {
               </Text>
               <Text style={{ fontSize: 11.5, color: colors.textMuted }}>
                 {pasado && !esHoy ? 'Ya pasó' : esHoy ? '¡Es hoy!' : 'Te toca trabajar'}
+                {horarios[d.fecha] ? <Text style={{ color: ACENTO, fontWeight: '700' }}>{`  🕗 ${horarios[d.fecha]}`}</Text> : null}
               </Text>
             </View>
             {esHoy && (
