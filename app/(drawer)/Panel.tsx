@@ -37,9 +37,13 @@ interface Recorrido {
 // tablas separadas por día). "Especiales" no tiene entregadosFuera/chofer.
 type TipoDia = 'SEMANA' | 'SÁBADOS' | 'ESPECIALES';
 const TABLA_DIA: Record<TipoDia, string> = { SEMANA: 'Recorridos', 'SÁBADOS': 'recorridos_sabados', ESPECIALES: 'recorridos_especiales' };
-const LABEL_DIA: Record<TipoDia, string> = { SEMANA: 'Lun a Vie', 'SÁBADOS': 'Sábados', ESPECIALES: 'Especiales' };
 const TIPOS_DIA: TipoDia[] = ['SEMANA', 'SÁBADOS', 'ESPECIALES'];
 const tipoDeHoy = (): TipoDia => (new Date().getDay() === 6 ? 'SÁBADOS' : 'SEMANA');
+// La web separa los días hábiles por la columna `tab` de Recorridos
+// (LUNES..VIERNES): el apartado de semana muestra SOLO el día de HOY.
+const DIAS_HABILES = ['LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES'];
+const diaHabilHoy = () => { const d = new Date().getDay(); return (d >= 1 && d <= 5) ? DIAS_HABILES[d - 1] : 'LUNES'; };
+const LABEL_DIA: Record<TipoDia, string> = { SEMANA: diaHabilHoy().charAt(0) + diaHabilHoy().slice(1).toLowerCase(), 'SÁBADOS': 'Sábados', ESPECIALES: 'Especiales' };
 const COLS_BASE = 'id, localidad, zona, pqteDia, porFuera, entregados, idChofer';
 const colsDe = (t: TipoDia) => (t === 'ESPECIALES' ? COLS_BASE : COLS_BASE + ', entregadosFuera');
 
@@ -364,9 +368,11 @@ export default function PanelScreen() {
 
             // Las 3 tablas en paralelo: los apartados muestran contador y
             // cambian al instante sin re-consultar.
-            const [sem, sab, esp] = await Promise.all(TIPOS_DIA.map(t =>
-                supabase.from(TABLA_DIA[t]).select(colsDe(t)).eq('idChofer', choferData.id).order('orden', { ascending: true, nullsFirst: false })
-            ));
+            const [sem, sab, esp] = await Promise.all(TIPOS_DIA.map(t => {
+                let q = supabase.from(TABLA_DIA[t]).select(colsDe(t)).eq('idChofer', choferData.id).order('orden', { ascending: true, nullsFirst: false });
+                if (t === 'SEMANA') q = q.eq('tab', diaHabilHoy());   // solo el día de HOY
+                return q;
+            }));
             const normalizar = (rows: any[] | null) => (rows || []).map((r: any) => ({ ...r, entregadosFuera: r.entregadosFuera ?? 0 })) as Recorrido[];
             setDataPorDia({ SEMANA: normalizar(sem.data as any), 'SÁBADOS': normalizar(sab.data as any), ESPECIALES: normalizar(esp.data as any) });
         } catch (err) {

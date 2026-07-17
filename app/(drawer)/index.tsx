@@ -48,6 +48,15 @@ interface Recorrido { id?: number; orden?: number | null; localidad: string; idC
 type ZonaKey = 'ZONA OESTE' | 'ZONA SUR' | 'ZONA NORTE' | 'CABA';
 type TipoDia = 'semana' | 'sabado';
 
+// La web separa los días hábiles por la columna `tab` de Recorridos
+// (LUNES..VIERNES). En la app, la pestaña de semana muestra el DÍA DE HOY
+// (domingo → LUNES, se prepara el día siguiente).
+const DIAS_HABILES = ['LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES'];
+const diaHabilHoy = () => {
+  const d = new Date().getDay(); // 0=Dom .. 6=Sáb
+  return (d >= 1 && d <= 5) ? DIAS_HABILES[d - 1] : 'LUNES';
+};
+
 const ZONAS: ZonaKey[] = ['ZONA OESTE', 'ZONA SUR', 'ZONA NORTE', 'CABA'];
 const ZONA_COLORES: Record<ZonaKey, string> = { 'ZONA OESTE': '#3b82f6', 'ZONA SUR': '#10b981', 'ZONA NORTE': '#f59e0b', 'CABA': '#8b5cf6' };
 const ZONA_ICONOS: Record<ZonaKey, string> = { 'ZONA OESTE': '⬅️', 'ZONA SUR': '⬇️', 'ZONA NORTE': '⬆️', 'CABA': '🏙️' };
@@ -273,10 +282,14 @@ export default function RecorridosScreen() {
     } catch (err) { console.error('Error cargando choferes:', err); }
   }, []);
 
-  // Carga una tabla específica y guarda en el setter correspondiente
+  // Carga una tabla específica y guarda en el setter correspondiente.
+  // La web separó los días hábiles por la columna `tab` (LUNES..VIERNES) en la
+  // tabla Recorridos: acá mostramos SOLO el día de HOY (domingo → LUNES).
   const loadTabla = useCallback(async (tabla: 'Recorridos' | 'recorridos_sabados', setter: React.Dispatch<React.SetStateAction<Record<ZonaKey, Recorrido[]>>>) => {
     try {
-      const { data, error } = await supabase.from(tabla).select('*').order('orden', { ascending: true, nullsFirst: false });
+      let q = supabase.from(tabla).select('*').order('orden', { ascending: true, nullsFirst: false });
+      if (tabla === 'Recorridos') q = q.eq('tab', diaHabilHoy());
+      const { data, error } = await q;
       if (error) throw error;
       const porZona: Record<ZonaKey, Recorrido[]> = { 'ZONA OESTE': [], 'ZONA SUR': [], 'ZONA NORTE': [], 'CABA': [] };
       (data || []).forEach(rec => { const zona = rec.zona as ZonaKey; if (zona in porZona) porZona[zona].push(rec); });
@@ -434,7 +447,10 @@ export default function RecorridosScreen() {
     const esSemana = tipoDia === 'semana';
     const tablaActiva = esSemana ? 'Recorridos' : 'recorridos_sabados';
     const setter = esSemana ? setDataSemana : setDataSabado;
-    const nuevo = { zona, localidad, idChofer: 0, chofer: 'Sin Asignar', pqteDia: 0, porFuera: 0, entregados: 0 };
+    // En Recorridos la fila queda asignada al DÍA de hoy (columna tab).
+    const nuevo = esSemana
+      ? { zona, localidad, idChofer: 0, chofer: 'Sin Asignar', pqteDia: 0, porFuera: 0, entregados: 0, tab: diaHabilHoy() }
+      : { zona, localidad, idChofer: 0, chofer: 'Sin Asignar', pqteDia: 0, porFuera: 0, entregados: 0 };
     setter(prev => ({ ...prev, [zona]: [...prev[zona], nuevo].sort(compararRecorridoPorOrden) }));
     setModalRecorrido(false);
     try { await supabase.from(tablaActiva).insert([nuevo]); } catch (err) { console.error('Error insertando recorrido:', err); }
@@ -504,7 +520,7 @@ export default function RecorridosScreen() {
             color={tipoDia === 'semana' ? '#FFFFFF' : (isDark ? 'rgba(255,255,255,0.5)' : colors.textMuted)}
             style={{ marginRight: 5 }}
           />
-          <Text style={[S.tabTexto, { color: tipoDia === 'semana' ? '#FFFFFF' : (isDark ? 'rgba(255,255,255,0.5)' : colors.textMuted) }]}>LUN — VIE</Text>
+          <Text style={[S.tabTexto, { color: tipoDia === 'semana' ? '#FFFFFF' : (isDark ? 'rgba(255,255,255,0.5)' : colors.textMuted) }]}>{diaHabilHoy()}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
