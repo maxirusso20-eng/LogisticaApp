@@ -11,8 +11,8 @@ import {
   ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
 import {
-  acumularPorChofer, calcularDesempenoConducta, calcularRendimientoKPI,
-  type ChoferKpi, colorDesempeno, demoradosTotal, fmtPct,
+  acumularPorChofer, calcularNotaUnificada,
+  type ChoferKpi, colorDesempeno, demoradosTotal, fmtPct, penalAusenciasPorChofer,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -20,6 +20,7 @@ import { useTheme } from '../../lib/ThemeContext';
 export default function RankingScreen() {
   const { colors } = useTheme();
   const [registros, setRegistros] = useState<any[]>([]);
+  const [ausencias, setAusencias] = useState<any[]>([]);
   const [miNombre, setMiNombre] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -32,8 +33,12 @@ export default function RankingScreen() {
         const { data } = await supabase.from('Choferes').select('nombre').eq('email', email).maybeSingle();
         setMiNombre((data?.nombre || '').trim().toLowerCase());
       }
-      const { data: kpis } = await supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false });
+      const [{ data: kpis }, { data: aus }] = await Promise.all([
+        supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false }),
+        supabase.from('ausencias').select('*'),
+      ]);
       setRegistros(kpis || []);
+      setAusencias(aus || []);
     } catch (e) {
       console.warn('[ranking] error', e);
     } finally {
@@ -54,6 +59,7 @@ export default function RankingScreen() {
     const canal = supabase
       .channel('kpis-sync-ranking')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'kpis_lightdata' }, refrescar)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ausencias' }, refrescar)
       .subscribe();
     return () => { if (t) clearTimeout(t); supabase.removeChannel(canal); };
   }, [cargar]);
@@ -65,16 +71,17 @@ export default function RankingScreen() {
   //   puntaje       = entregados × tasa de éxito
   const ranking = useMemo(() => {
     const porChofer = acumularPorChofer(registros);
+    const penalMap = penalAusenciasPorChofer(ausencias);
     return Object.values(porChofer)
       .map((k): ChoferKpi => {
-        const kpi = calcularRendimientoKPI(k);
-        const desemp = calcularDesempenoConducta(k);
+        // NOTA ÚNICA (modelo v3): demorados + conducta + avisos + ausencias.
+        const nota = calcularNotaUnificada({ ...k, penalAusencias: penalMap[k.chofer] || 0 });
         const base = (k.entregados || 0) + (k.fallos || 0);
         const tasa = base > 0 ? (k.entregados || 0) / base : 0;
-        return { ...k, reputacion: kpi.pct, desempeno: desemp.score, tasa, puntaje: (k.entregados || 0) * tasa };
+        return { ...k, reputacion: nota.pct, tasa, puntaje: (k.entregados || 0) * tasa };
       })
       .sort((a, b) => ((b.puntaje || 0) - (a.puntaje || 0)) || (b.entregados - a.entregados));
-  }, [registros]);
+  }, [registros, ausencias]);
 
   const miIndex = ranking.findIndex((k) => (k.chofer || '').trim().toLowerCase() === miNombre);
 
@@ -144,7 +151,6 @@ export default function RankingScreen() {
           {ranking.map((k, i) => {
             const soyYo = i === miIndex;
             const rc = colorDesempeno(k.reputacion ?? null);
-            const dc = colorDesempeno(k.desempeno);
             const medalla = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}°`;
             return (
               <View
@@ -162,7 +168,7 @@ export default function RankingScreen() {
                     {k.chofer}{soyYo ? <Text style={{ color: rc, fontWeight: '800' }}> · vos</Text> : ''}
                   </Text>
                   <Text numberOfLines={1} style={{ fontSize: 11.5, color: colors.textMuted }}>
-                    {k.total} paq. · KPI <Text style={{ color: rc, fontWeight: '700' }}>{fmtPct(k.reputacion ?? null)}</Text> · Des. <Text style={{ color: dc, fontWeight: '700' }}>{fmtPct(k.desempeno)}</Text>{k.fallos > 0 ? ` · ${k.fallos} dem.` : ''}
+                    {k.total} paq. · Nota <Text style={{ color: rc, fontWeight: '700' }}>{fmtPct(k.reputacion ?? null)}</Text>{k.fallos > 0 ? ` · ${k.fallos} dem.` : ''}
                   </Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>

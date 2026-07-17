@@ -12,8 +12,8 @@ import {
   ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
 import {
-  acumularPorChofer, calcularDesempenoConducta, calcularRendimientoKPI,
-  colorCardChofer, colorDesempeno, type ChoferKpi, cumpleSLA, filtrarMesActual, fmtPct, NEGATIVOS, penalidadAusencias, POSITIVOS, SLA_MINIMO,
+  acumularPorChofer, calcularNotaUnificada,
+  colorDesempeno, type ChoferKpi, cumpleSLA, filtrarMesActual, fmtPct, AVISOS, NEGATIVOS, penalidadAusencias, penalAusenciasPorChofer, POSITIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -72,11 +72,14 @@ export default function RendimientoScreen() {
   // Ranking de la flota (mismo orden que la web → el puesto coincide).
   // Filtrado al MES actual igual que la web: arranca de cero cada mes.
   const ranking = useMemo(() => {
+    // NOTA ÚNICA (modelo v3, espejo de la web): demorados + conducta + avisos
+    // + ausencias impactan el mismo %.
     const porChofer = acumularPorChofer(filtrarMesActual(registros));
+    const penalMap = penalAusenciasPorChofer(ausencias);
     return Object.values(porChofer)
       .map((k): ChoferKpi => {
-        const kpi = calcularRendimientoKPI(k);
-        return { ...k, reputacion: kpi.pct, demorados: kpi.demorados, pctObservacion: kpi.pctObservacion };
+        const nota = calcularNotaUnificada({ ...k, penalAusencias: penalMap[k.chofer] || 0 });
+        return { ...k, reputacion: nota.pct, demorados: nota.demorados, pctObservacion: nota.pctObservacion };
       })
       .sort((a, b) => {
         if (a.reputacion === null && b.reputacion === null) return b.total - a.total;
@@ -85,7 +88,7 @@ export default function RendimientoScreen() {
         if (a.reputacion !== b.reputacion) return (b.reputacion || 0) - (a.reputacion || 0);
         return b.total - a.total;
       });
-  }, [registros]);
+  }, [registros, ausencias]);
 
   // El ranking se usa solo para encontrar los datos del chofer logueado (yo).
   // El puesto en la flota se muestra en su propia pantalla (Ranking), no en el hero.
@@ -149,13 +152,13 @@ export default function RendimientoScreen() {
 
   const misAusencias = ausencias.filter((a) => (a.chofer || '').trim().toLowerCase() === miNombre.trim().toLowerCase());
   const penalAus = penalidadAusencias(misAusencias);
-  const desemp = calcularDesempenoConducta({ ...yo, penalAusencias: penalAus });
-  const desempCol = colorDesempeno(desemp.score);
-  // Semáforo de la card: manda la PEOR de las dos notas (espejo de la web).
-  const cardColor = colorCardChofer(rep, desemp.score);
+  // Conducta (modelo v3): ya está INCLUIDA en la nota de arriba — acá solo se
+  // muestran los chips del detalle, no una nota aparte (espejo de la web).
+  const cardColor = colorDesempeno(rep);
   const desempPos = POSITIVOS.filter((i) => (yo[i.key] || 0) > 0);
   const desempNeg = NEGATIVOS.filter((i) => (yo[i.key] || 0) > 0);
-  const hayDesemp = desempPos.length > 0 || desempNeg.length > 0 || misAusencias.length > 0;
+  const desempAvisos = AVISOS.filter((i) => (yo[i.key] || 0) > 0);
+  const hayDesemp = desempPos.length > 0 || desempNeg.length > 0 || desempAvisos.length > 0 || misAusencias.length > 0;
 
   const pct = (n: number) => (yo.total > 0 ? (n / yo.total) * 100 : 0);
   const verdict = rep == null ? null
@@ -207,7 +210,7 @@ export default function RendimientoScreen() {
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={[styles.bigPct, { color: barColor }]}>{fmtPct(rep)}</Text>
-            <Text style={[styles.smallMuted, { color: colors.textMuted }]}>Rendimiento (KPIs)</Text>
+            <Text style={[styles.smallMuted, { color: colors.textMuted }]}>Tu nota (entregas + conducta)</Text>
             <Text style={[styles.slaText, { color: cumpleSLA(rep) ? colors.green : colors.red }]}>
               {cumpleSLA(rep) ? '✓ Cumple SLA' : `✗ Bajo SLA (${SLA_MINIMO}%)`}
             </Text>
@@ -221,23 +224,15 @@ export default function RendimientoScreen() {
         </View>
       </View>
 
-      {/* DESEMPEÑO (conducta) */}
-      <View style={[styles.card, { backgroundColor: colors.bgCard, borderColor: desempCol + '55', borderTopColor: desempCol, borderTopWidth: 3 }]}>
-        <View style={styles.rowBetween}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-            <Ionicons name="speedometer-outline" size={18} color={desempCol} />
-            <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>Desempeño</Text>
+      {/* CONDUCTA (modelo v3): ya está INCLUIDA en tu nota de arriba. Acá solo
+          se detalla QUÉ te sumó/restó — sin nota aparte (espejo de la web). */}
+      {hayDesemp && (
+        <View style={[styles.card, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10, flexWrap: 'wrap' }}>
+            <Ionicons name="speedometer-outline" size={16} color={colors.textMuted} />
+            <Text style={[styles.cardTitle, { color: colors.textPrimary, fontSize: 14 }]}>Conducta y avisos</Text>
+            <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: '600' }}>— ya incluidos en tu nota</Text>
           </View>
-          <View style={{ alignItems: 'flex-end' }}>
-            <Text style={[styles.bigPct, { color: desempCol }]}>{fmtPct(desemp.score)}</Text>
-            <Text style={[styles.smallMuted, { color: colors.textMuted }]}>Conducta y operativa</Text>
-            <Text style={[styles.slaText, { color: cumpleSLA(desemp.score) ? colors.green : colors.red }]}>
-              {cumpleSLA(desemp.score) ? '✓ Cumple SLA' : `✗ Bajo SLA (${SLA_MINIMO}%)`}
-            </Text>
-          </View>
-        </View>
-        <Bar pct={desemp.score} color={desempCol} track={colors.border} />
-        {hayDesemp ? (
           <View style={styles.tagsWrap}>
             {desempPos.map((i) => (
               <View key={i.key} style={[styles.tag, { backgroundColor: colors.green + '18', borderColor: colors.green + '44' }]}>
@@ -246,7 +241,12 @@ export default function RendimientoScreen() {
             ))}
             {desempNeg.map((i) => (
               <View key={i.key} style={[styles.tag, { backgroundColor: colors.red + '18', borderColor: colors.red + '44' }]}>
-                <Text style={[styles.tagText, { color: colors.red }]}>✗ {i.label} ({yo[i.key]})</Text>
+                <Text style={[styles.tagText, { color: colors.red }]}>✗ {i.label} ({yo[i.key]}) −{((yo[i.key] || 0) * 0.1).toFixed(2)}%</Text>
+              </View>
+            ))}
+            {desempAvisos.map((i) => (
+              <View key={i.key} style={[styles.tag, { backgroundColor: colors.amber + '18', borderColor: colors.amber + '44' }]}>
+                <Text style={[styles.tagText, { color: colors.amber }]}>⏰ {i.label} ({yo[i.key]}) −{((yo[i.key] || 0) * i.peso).toFixed(2)}%</Text>
               </View>
             ))}
             {misAusencias.length > 0 && (
@@ -255,10 +255,8 @@ export default function RendimientoScreen() {
               </View>
             )}
           </View>
-        ) : (
-          <Text style={[styles.muted, { color: colors.textMuted, marginTop: 4 }]}>Todavía no hay indicadores de desempeño cargados para vos.</Text>
-        )}
-      </View>
+        </View>
+      )}
 
       {/* DESGLOSE */}
       <View style={[styles.card, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>

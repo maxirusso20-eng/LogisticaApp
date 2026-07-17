@@ -12,7 +12,7 @@ import {
   ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import {
-  acumularPorChofer, calcularRendimientoKPI, colorDesempeno, filtrarPeriodo, fmtPct, type Periodo,
+  acumularPorChofer, calcularNotaUnificada, colorDesempeno, filtrarPeriodo, fmtPct, type Periodo,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -82,8 +82,9 @@ export default function MisDiasScreen() {
       .map((r) => {
         const acum = acumularPorChofer([r]);
         const k: any = acum[r.chofer] || Object.values(acum)[0];
-        const kpi = calcularRendimientoKPI(k);
-        return { fecha: r.fecha as string, k, kpi: kpi.pct };
+        // Nota ÚNICA del día (modelo v3): entregas + conducta de ese día.
+        const nota = calcularNotaUnificada(k);
+        return { fecha: r.fecha as string, k, kpi: nota.pct };
       })
       .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
   }, [registros, periodo, miNombre]);

@@ -11,7 +11,7 @@ import {
   ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import {
-  acumularPorChofer, calcularDesempenoConducta, calcularRendimientoKPI,
+  acumularPorChofer, calcularNotaUnificada,
   type ChoferKpi, colorDesempeno, fmtPct, penalAusenciasPorChofer,
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
@@ -58,10 +58,10 @@ export default function EstadisticasScreen() {
     const penalMap = penalAusenciasPorChofer(ausencias);
     return Object.values(porChofer)
       .map((k): ChoferKpi => {
-        const kpi = calcularRendimientoKPI(k);
+        // NOTA ÚNICA (modelo v3): demorados + conducta + avisos + ausencias.
         const penalAusencias = penalMap[k.chofer] || 0;
-        const desemp = calcularDesempenoConducta({ ...k, penalAusencias });
-        return { ...k, penalAusencias, reputacion: kpi.pct, demorados: kpi.demorados, pctObservacion: kpi.pctObservacion, desempeno: desemp.score };
+        const nota = calcularNotaUnificada({ ...k, penalAusencias });
+        return { ...k, penalAusencias, reputacion: nota.pct, demorados: nota.demorados, pctObservacion: nota.pctObservacion };
       })
       .sort((a, b) => {
         if (a.reputacion === null && b.reputacion === null) return b.total - a.total;
@@ -137,7 +137,6 @@ export default function EstadisticasScreen() {
         <View style={[styles.card, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
           {kpis.map((k, i) => {
             const rc = colorDesempeno(k.reputacion ?? null);
-            const dc = colorDesempeno(k.desempeno);
             const medalla = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}°`;
             const abierto = expandido === k.chofer;
             const pct = (n: number) => (k.total > 0 ? Math.round((n / k.total) * 100) : 0);
@@ -165,7 +164,7 @@ export default function EstadisticasScreen() {
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={{ fontSize: 15, fontWeight: '900', color: rc }}>{fmtPct(k.reputacion ?? null)}</Text>
-                    <Text style={{ fontSize: 10, fontWeight: '800', color: dc }}>Desemp. {fmtPct(k.desempeno)}</Text>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textMuted }}>Nota única</Text>
                   </View>
                   <Ionicons name={abierto ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} style={{ marginLeft: 4 }} />
                 </TouchableOpacity>

@@ -44,14 +44,14 @@ export default function GuiaScreen() {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[styles.h1, { color: colors.textPrimary }]}>Cómo se mide</Text>
-          <Text style={[styles.sub, { color: colors.textMuted }]}>Tu nota se arma con dos cosas independientes</Text>
+          <Text style={[styles.sub, { color: colors.textMuted }]}>Tu nota única: entregas + conducta, todo en el mismo %</Text>
         </View>
       </View>
 
-      {/* Rendimiento (KPI) */}
+      {/* Entregas (Light Data) */}
       <Card color={colors.blue}>
-        <Title icon="stats-chart-outline" text="1) Rendimiento (KPI)" color={colors.blue} />
-        <P>Sale de Light Data. Arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text> y le restan los demorados (las tardías solo se informan):</P>
+        <Title icon="stats-chart-outline" text="1) Tus entregas (Light Data)" color={colors.blue} />
+        <P>Tu nota arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text> y los demorados le restan (las tardías solo se informan):</P>
         {[
           { label: 'En camino al destinatario', val: '−0,5%', color: colors.red },
           { label: 'Nadie / cancelado / reprogramado (+21hs)', val: '−0,2%', color: colors.red },
@@ -65,11 +65,11 @@ export default function GuiaScreen() {
         ))}
       </Card>
 
-      {/* Desempeño */}
+      {/* Conducta */}
       <Card color={colors.green}>
-        <Title icon="speedometer-outline" text="2) Desempeño (conducta)" color={colors.green} />
-        <P>Arranca en <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>100%</Text> y cada error resta <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>0,1%</Text>. Los avisos de ausencias también impactan en esta nota.</P>
-        <P>Los demorados <Text style={{ fontWeight: '800' }}>no</Text> afectan esta nota (esos van al KPI). Es solo tu conducta operativa.</P>
+        <Title icon="speedometer-outline" text="2) Tu conducta operativa" color={colors.green} />
+        <P>Cada error resta <Text style={{ color: colors.textPrimary, fontWeight: '800' }}>0,1%</Text> de la <Text style={{ fontWeight: '800' }}>misma nota</Text>. Los avisos y las ausencias también restan según el horario.</P>
+        <P>Todo va a <Text style={{ fontWeight: '800' }}>UNA sola nota</Text>: demorados, errores, avisos y ausencias impactan la misma barra que ves en Mi Rendimiento.</P>
       </Card>
 
       {/* Negativos */}
@@ -99,7 +99,7 @@ export default function GuiaScreen() {
       {/* SLA */}
       <Card color={colors.purple}>
         <Title icon="shield-checkmark-outline" text="Meta (SLA)" color={colors.purple} />
-        <P>Las dos notas tienen que estar en <Text style={{ color: colors.green, fontWeight: '800' }}>≥ {SLA_MINIMO}%</Text> para estar “en verde”. Mantené el rendimiento alto y cuidá la conducta. 💪</P>
+        <P>Tu nota tiene que estar en <Text style={{ color: colors.green, fontWeight: '800' }}>≥ {SLA_MINIMO}%</Text> para estar “en verde”. Mantené el rendimiento alto y cuidá la conducta. 💪</P>
       </Card>
 
       <View style={{ height: 1, backgroundColor: colors.borderSubtle, marginHorizontal: 8, marginTop: 10, marginBottom: 30 }} />

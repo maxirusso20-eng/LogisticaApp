@@ -212,6 +212,49 @@ export function calcularDesempenoConducta(k: ChoferKpi) {
   return { score, positivos, negativos, penalAusencias, penalAvisos, cumpleSLA: cumpleSLA(score) };
 }
 
+// ── NOTA ÚNICA (modelo v3, 2026-07-16 — espejo de la web) ──────────────────
+// Se unificaron el KPI y el Desempeño en UNA sola nota: demorados de Light
+// Data + conducta manual + avisos + ausencias impactan el mismo %.
+// Base 100, tope 100, piso 0. pct null solo si NO hay ningún dato.
+export function calcularNotaUnificada(k: ChoferKpi) {
+  const entregados = k.entregados || 0;
+  const demorados = demoradosTotal(k);
+  const demGrave = k.demEnCamino || 0;                   // "en camino al destinatario" → −0,5%
+  const demLeve = Math.max(0, demorados - demGrave);     // nadie/cancelado/reprogramado +21 → −0,2%
+  const neutroConObs = k.neutroConObs || 0;              // PENDIENTES con observación → +0,1%
+  const entregasPost21 = k.entregas_post21 || 0;         // solo informativo
+  const positivos = POSITIVOS.reduce((s, i) => s + (k[i.key] || 0), 0);
+  const negativos = NEGATIVOS.reduce((s, i) => s + (k[i.key] || 0), 0);
+  const penalAusencias = k.penalAusencias || 0;
+  const penalAvisos = r2(AVISOS.reduce((s, a) => s + (k[a.key] || 0) * a.peso, 0));
+  const avisosCant = AVISOS.reduce((s, a) => s + (k[a.key] || 0), 0);
+
+  const hayDatos = (entregados + demorados) > 0
+    || positivos > 0 || negativos > 0 || avisosCant > 0 || penalAusencias > 0;
+
+  const pct = hayDatos
+    ? r2(Math.max(0, Math.min(100,
+        100
+        - demGrave * 0.5
+        - demLeve * 0.2
+        + neutroConObs * 0.1
+        + positivos * PESO_PUNTO
+        - negativos * PESO_PUNTO
+        - penalAvisos
+        - penalAusencias
+      )))
+    : null;
+
+  const pctObservacion = k.total > 0 && k.conObservacion > 0
+    ? Math.round((k.conObservacion / k.total) * 100) : null;
+
+  return {
+    pct, demorados, demGrave, demLeve, neutroConObs, entregasPost21, pctObservacion,
+    positivos, negativos, penalAusencias, penalAvisos, avisosCant,
+    cumpleSLA: cumpleSLA(pct),
+  };
+}
+
 // Semáforo de notas (espejo de la web, pedido 2026-07-08):
 //   verde ≥ 97% · naranja 90–96.99% · rojo < 90%
 export function colorDesempeno(score: number | null): string {
