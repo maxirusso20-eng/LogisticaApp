@@ -30,6 +30,7 @@ interface Recorrido {
     entregados: number;
     entregadosFuera: number;
     pendientes: number;
+    terminado: boolean;
     idChofer: number;
     chofer?: string;
     tab?: string;
@@ -48,9 +49,9 @@ const LABEL_DIA: Record<TabDia, string> = {
     'SÁBADOS': 'Sábados', ESPECIALES: 'Especiales',
 };
 // Sábados/Especiales no tienen `tab`; Especiales tampoco entregadosFuera.
-const COLS_REC = 'id, localidad, zona, pqteDia, porFuera, entregados, entregadosFuera, pendientes, idChofer, tab';
-const COLS_SAB = 'id, localidad, zona, pqteDia, porFuera, entregados, entregadosFuera, pendientes, idChofer';
-const COLS_ESP = 'id, localidad, zona, pqteDia, porFuera, entregados, pendientes, idChofer';
+const COLS_REC = 'id, localidad, zona, pqteDia, porFuera, entregados, entregadosFuera, pendientes, terminado, idChofer, tab';
+const COLS_SAB = 'id, localidad, zona, pqteDia, porFuera, entregados, entregadosFuera, pendientes, terminado, idChofer';
+const COLS_ESP = 'id, localidad, zona, pqteDia, porFuera, entregados, pendientes, terminado, idChofer';
 const VACIO = (): Record<TabDia, Recorrido[]> => ({ LUNES: [], MARTES: [], 'MIÉRCOLES': [], JUEVES: [], VIERNES: [], 'SÁBADOS': [], ESPECIALES: [] });
 
 interface ChoferInfo {
@@ -68,14 +69,29 @@ const porcentajeDia = (r: Recorrido) => !r.pqteDia ? 0 : Math.min(100, ((r.entre
 
 const OFFLINE_KEY = '@offline_queue_recorridos';
 
+type CampoMut = 'entregados' | 'entregadosFuera' | 'terminado';
+
 interface OfflineMutation {
     id: number;
-    campo: 'entregados' | 'entregadosFuera';
+    campo: CampoMut;
+    // Para 'entregados'/'entregadosFuera' es el nuevo total; para 'terminado' 1/0.
     valor: number;
     timestamp: number;
     // Tabla destino (Recorridos / recorridos_sabados / recorridos_especiales).
     // Mutaciones viejas encoladas sin este campo caen a 'Recorridos'.
     tabla?: string;
+}
+
+// Única vía de escritura del chofer: la RLS bloquea el UPDATE directo sobre
+// Recorridos/sabados (policy NOT app_es_chofer), así que va por el RPC
+// SECURITY DEFINER que valida dueño, clampa y recalcula `pendientes`.
+async function escribirRPC(m: OfflineMutation): Promise<void> {
+    const params: Record<string, any> = { p_tabla: m.tabla || 'Recorridos', p_id: m.id };
+    if (m.campo === 'entregados') params.p_entregados = m.valor;
+    else if (m.campo === 'entregadosFuera') params.p_entregados_fuera = m.valor;
+    else if (m.campo === 'terminado') params.p_terminado = m.valor === 1;
+    const { error } = await supabase.rpc('chofer_actualizar_recorrido', params);
+    if (error) throw error;
 }
 
 async function leerCola(): Promise<OfflineMutation[]> {
@@ -111,11 +127,7 @@ async function flushCola(): Promise<{ ok: number; fail: number }> {
 
     for (const m of cola) {
         try {
-            const { error } = await supabase
-                .from(m.tabla || 'Recorridos')
-                .update({ [m.campo]: m.valor })
-                .eq('id', m.id);
-            if (error) throw error;
+            await escribirRPC(m);
             ok++;
         } catch {
             pendientes.push(m); // Re-encolar si sigue fallando
@@ -244,7 +256,7 @@ function ContadorEntregados({ label, total, entregados, color, guardando, onIncr
 
 interface FilaRecorridoProps {
     recorrido: Recorrido; index: number;
-    onGuardar: (id: number, campo: 'entregados' | 'entregadosFuera', valor: number) => Promise<void>;
+    onGuardar: (id: number, campo: CampoMut, valor: number) => Promise<void>;
     guardandoCampo: { id: number; campo: string } | null;
 }
 
@@ -273,14 +285,22 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
         onGuardar(recorrido.id, campo, nuevo);
     };
 
+    const terminado = !!recorrido.terminado;
+    const terminando = isGuardando('terminado');
+    const marcarTerminado = () => {
+        if (terminando) return;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        onGuardar(recorrido.id, 'terminado', terminado ? 0 : 1);
+    };
+
     return (
         <Animated.View style={[
             S.filaCard,
             { backgroundColor: colors.bgCard, borderColor: colors.border },
-            todoCompleto && { borderColor: 'rgba(52,211,153,0.3)', backgroundColor: colors.bgCard },
+            (todoCompleto || terminado) && { borderColor: 'rgba(52,211,153,0.3)', backgroundColor: colors.bgCard },
             { opacity: fade },
         ]}>
-            <View style={[S.filaAccent, { backgroundColor: todoCompleto ? colors.green : colorZona }]} />
+            <View style={[S.filaAccent, { backgroundColor: (todoCompleto || terminado) ? colors.green : colorZona }]} />
 
             <View style={S.filaBody}>
                 <View style={S.filaHeader}>
@@ -299,12 +319,17 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
                             )}
                         </View>
                     </View>
-                    {todoCompleto && (
+                    {terminado ? (
+                        <View style={S.todoCompletoBadge}>
+                            <Ionicons name="flag" size={13} color={colors.green} />
+                            <Text style={S.todoCompletoBadgeText}>Terminado</Text>
+                        </View>
+                    ) : todoCompleto ? (
                         <View style={S.todoCompletoBadge}>
                             <Ionicons name="checkmark-circle" size={13} color={colors.green} />
                             <Text style={S.todoCompletoBadgeText}>Todo completo</Text>
                         </View>
-                    )}
+                    ) : null}
                 </View>
 
                 {recorrido.pqteDia > 0 && (
@@ -336,6 +361,33 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
                     />
 
                 </View>
+
+                <TouchableOpacity
+                    onPress={marcarTerminado}
+                    disabled={terminando}
+                    activeOpacity={0.8}
+                    style={[
+                        S.terminarBtn,
+                        terminado
+                            ? { backgroundColor: 'rgba(52,211,153,0.14)', borderColor: 'rgba(52,211,153,0.4)' }
+                            : { backgroundColor: colors.bgInput, borderColor: colors.border },
+                        terminando && { opacity: 0.5 },
+                    ]}
+                >
+                    {terminando
+                        ? <ActivityIndicator size="small" color={colors.green} />
+                        : <>
+                            <Ionicons
+                                name={terminado ? 'checkmark-done-circle' : 'flag-outline'}
+                                size={17}
+                                color={terminado ? colors.green : colors.textSecondary}
+                            />
+                            <Text style={[S.terminarBtnText, { color: terminado ? colors.green : colors.textSecondary }]}>
+                                {terminado ? 'Recorrido terminado · tocá para deshacer' : 'Terminé el recorrido'}
+                            </Text>
+                        </>
+                    }
+                </TouchableOpacity>
             </View>
         </Animated.View>
     );
@@ -403,7 +455,7 @@ export default function PanelScreen() {
                 supabase.from('recorridos_sabados').select(COLS_SAB).eq('idChofer', choferData.id).order('orden', { ascending: true, nullsFirst: false }),
                 supabase.from('recorridos_especiales').select(COLS_ESP).eq('idChofer', choferData.id).order('orden', { ascending: true, nullsFirst: false }),
             ]);
-            const norm = (r: any): Recorrido => ({ ...r, entregadosFuera: r.entregadosFuera ?? 0, pendientes: r.pendientes ?? 0 });
+            const norm = (r: any): Recorrido => ({ ...r, entregadosFuera: r.entregadosFuera ?? 0, pendientes: r.pendientes ?? 0, terminado: r.terminado ?? false });
             const buckets = VACIO();
             for (const r of ((rec.data as any[]) || [])) {
                 const t = (DIAS as string[]).includes(r.tab) ? (r.tab as TabDia) : 'LUNES';
@@ -481,16 +533,22 @@ export default function PanelScreen() {
         return () => sub.remove();
     }, [intentarSync]);
 
-    const handleGuardar = useCallback(async (id: number, campo: 'entregados' | 'entregadosFuera', valor: number) => {
+    const handleGuardar = useCallback(async (id: number, campo: CampoMut, valor: number) => {
         // Tabla del día activo (via ref, sin stale closure).
         const tab = tabDiaRef.current;
         const tabla = tablaDeTab(tab);
-        // 1. Actualización optimista inmediata (solo en el día activo)
-        setDataPorDia(prev => ({ ...prev, [tab]: prev[tab].map(r => r.id === id ? { ...r, [campo]: valor } : r) }));
+        // 1. Actualización optimista inmediata (solo en el día activo). Al marcar
+        //    entregas también bajamos `pendientes` en vivo (el RPC lo confirma).
+        const aplicar = (r: Recorrido): Recorrido => {
+            if (campo === 'terminado') return { ...r, terminado: valor === 1 };
+            const next: Recorrido = { ...r, [campo]: valor };
+            if (campo === 'entregados') next.pendientes = Math.max(0, (r.pqteDia || 0) - valor);
+            return next;
+        };
+        setDataPorDia(prev => ({ ...prev, [tab]: prev[tab].map(r => r.id === id ? aplicar(r) : r) }));
         setGuardandoCampo({ id, campo });
         try {
-            const { error } = await supabase.from(tabla).update({ [campo]: valor }).eq('id', id);
-            if (error) throw error;
+            await escribirRPC({ id, campo, valor, timestamp: Date.now(), tabla });
             // Éxito: si había una mutación pendiente para tabla+id+campo, la removemos
             const cola = await leerCola();
             const nueva = cola.filter(m => !(m.id === id && m.campo === campo && (m.tabla || 'Recorridos') === tabla));
@@ -732,6 +790,8 @@ const S = StyleSheet.create({
     progressPct: { fontSize: 9, fontWeight: '700', width: 28, textAlign: 'right' },
     contadoresRow: { flexDirection: 'row', borderRadius: 14, overflow: 'hidden', borderWidth: 1, marginTop: 12 },
     contadoresDivisor: { width: 1 },
+    terminarBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 12, borderWidth: 1, paddingVertical: 12, marginTop: 12, minHeight: 44 },
+    terminarBtnText: { fontSize: 13, fontWeight: '700' },
     offlineBanner: {
         flexDirection: 'row', alignItems: 'center', gap: 8,
         backgroundColor: 'rgba(245,158,11,0.10)',
