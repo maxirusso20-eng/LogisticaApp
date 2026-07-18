@@ -2,7 +2,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Animated,
@@ -29,23 +29,29 @@ interface Recorrido {
     porFuera: number;
     entregados: number;
     entregadosFuera: number;
+    pendientes: number;
     idChofer: number;
     chofer?: string;
+    tab?: string;
 }
 
-// Apartados por tipo de día: cada uno lee/escribe SU tabla (Recorridos usa
-// tablas separadas por día). "Especiales" no tiene entregadosFuera/chofer.
-type TipoDia = 'SEMANA' | 'SÁBADOS' | 'ESPECIALES';
-const TABLA_DIA: Record<TipoDia, string> = { SEMANA: 'Recorridos', 'SÁBADOS': 'recorridos_sabados', ESPECIALES: 'recorridos_especiales' };
-const TIPOS_DIA: TipoDia[] = ['SEMANA', 'SÁBADOS', 'ESPECIALES'];
-const tipoDeHoy = (): TipoDia => (new Date().getDay() === 6 ? 'SÁBADOS' : 'SEMANA');
-// La web separa los días hábiles por la columna `tab` de Recorridos
-// (LUNES..VIERNES): el apartado de semana muestra SOLO el día de HOY.
-const DIAS_HABILES = ['LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES'];
-const diaHabilHoy = () => { const d = new Date().getDay(); return (d >= 1 && d <= 5) ? DIAS_HABILES[d - 1] : 'LUNES'; };
-const LABEL_DIA: Record<TipoDia, string> = { SEMANA: diaHabilHoy().charAt(0) + diaHabilHoy().slice(1).toLowerCase(), 'SÁBADOS': 'Sábados', ESPECIALES: 'Especiales' };
-const COLS_BASE = 'id, localidad, zona, pqteDia, porFuera, entregados, idChofer';
-const colsDe = (t: TipoDia) => (t === 'ESPECIALES' ? COLS_BASE : COLS_BASE + ', entregadosFuera');
+// Apartados POR DÍA (espeja la web): los días hábiles viven en 'Recorridos'
+// distinguidos por la columna `tab` (LUNES..VIERNES); Sábados y Especiales
+// tienen su propia tabla. Reemplaza al viejo apartado único "SEMANA" (que
+// mostraba solo el día de hoy).
+type TabDia = 'LUNES' | 'MARTES' | 'MIÉRCOLES' | 'JUEVES' | 'VIERNES' | 'SÁBADOS' | 'ESPECIALES';
+const DIAS: TabDia[] = ['LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES'];
+const tabDeHoy = (): TabDia => { const d = new Date().getDay(); if (d === 6) return 'SÁBADOS'; if (d === 0) return 'LUNES'; return DIAS[d - 1]; };
+const tablaDeTab = (t: TabDia): string => t === 'SÁBADOS' ? 'recorridos_sabados' : t === 'ESPECIALES' ? 'recorridos_especiales' : 'Recorridos';
+const LABEL_DIA: Record<TabDia, string> = {
+    LUNES: 'Lunes', MARTES: 'Martes', 'MIÉRCOLES': 'Miércoles', JUEVES: 'Jueves', VIERNES: 'Viernes',
+    'SÁBADOS': 'Sábados', ESPECIALES: 'Especiales',
+};
+// Sábados/Especiales no tienen `tab`; Especiales tampoco entregadosFuera.
+const COLS_REC = 'id, localidad, zona, pqteDia, porFuera, entregados, entregadosFuera, pendientes, idChofer, tab';
+const COLS_SAB = 'id, localidad, zona, pqteDia, porFuera, entregados, entregadosFuera, pendientes, idChofer';
+const COLS_ESP = 'id, localidad, zona, pqteDia, porFuera, entregados, pendientes, idChofer';
+const VACIO = (): Record<TabDia, Recorrido[]> => ({ LUNES: [], MARTES: [], 'MIÉRCOLES': [], JUEVES: [], VIERNES: [], 'SÁBADOS': [], ESPECIALES: [] });
 
 interface ChoferInfo {
     id: number;
@@ -282,8 +288,15 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
                         <Text style={[S.filaLocalidad, { color: colors.textPrimary }]} numberOfLines={1}>
                             {recorrido.localidad}
                         </Text>
-                        <View style={[S.zonaBadge, { backgroundColor: colorZona + '20', borderColor: colorZona + '40' }]}>
-                            <Text style={[S.zonaText, { color: colorZona }]}>{recorrido.zona}</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                            <View style={[S.zonaBadge, { backgroundColor: colorZona + '20', borderColor: colorZona + '40' }]}>
+                                <Text style={[S.zonaText, { color: colorZona }]}>{recorrido.zona}</Text>
+                            </View>
+                            {(recorrido.pendientes || 0) > 0 && (
+                                <View style={S.pendBadge}>
+                                    <Text style={S.pendText}>{recorrido.pendientes} pendiente{recorrido.pendientes === 1 ? '' : 's'}</Text>
+                                </View>
+                            )}
                         </View>
                     </View>
                     {todoCompleto && (
@@ -333,9 +346,9 @@ function FilaRecorrido({ recorrido, index, onGuardar, guardandoCampo }: FilaReco
 export default function PanelScreen() {
     const { colors } = useTheme();
     const toast = useToast();
-    // Rutas por apartado (semana / sábados / especiales), cada uno de su tabla.
-    const [dataPorDia, setDataPorDia] = useState<Record<TipoDia, Recorrido[]>>({ SEMANA: [], 'SÁBADOS': [], ESPECIALES: [] });
-    const [tabDia, setTabDia] = useState<TipoDia>(tipoDeHoy());
+    // Rutas por día (Lun..Vie / Sábados / Especiales), agrupadas por `tab`.
+    const [dataPorDia, setDataPorDia] = useState<Record<TabDia, Recorrido[]>>(VACIO);
+    const [tabDia, setTabDia] = useState<TabDia>(tabDeHoy());
     const [choferInfo, setChoferInfo] = useState<ChoferInfo | null>(null);
     const [cargando, setCargando] = useState(true);
     const [refrescando, setRefrescando] = useState(false);
@@ -344,10 +357,28 @@ export default function PanelScreen() {
     // Id del chofer logueado, para el realtime (closure estable, sin stale).
     const miIdChoferRef = useRef<number | null>(null);
     // Tab activo en ref: handleGuardar y el realtime lo leen sin stale closure.
-    const tabDiaRef = useRef<TipoDia>(tabDia);
+    const tabDiaRef = useRef<TabDia>(tabDia);
     useEffect(() => { tabDiaRef.current = tabDia; }, [tabDia]);
 
-    const recorridos = dataPorDia[tabDia];
+    const recorridos = dataPorDia[tabDia] || [];
+
+    // Pestañas visibles: días hábiles con rutas (más el de HOY aunque esté
+    // vacío), Sábados (si tiene rutas o es sábado) y Especiales (solo si tiene).
+    const tabsVisibles = useMemo(() => {
+        const hoy = tabDeHoy();
+        const tabs: TabDia[] = [];
+        for (const d of DIAS) if (dataPorDia[d].length > 0 || d === hoy) tabs.push(d);
+        if (dataPorDia['SÁBADOS'].length > 0 || hoy === 'SÁBADOS') tabs.push('SÁBADOS');
+        if (dataPorDia.ESPECIALES.length > 0) tabs.push('ESPECIALES');
+        return tabs;
+    }, [dataPorDia]);
+
+    // Si el día activo dejó de estar visible (se quedó sin rutas), caemos al de hoy.
+    useEffect(() => {
+        if (tabsVisibles.length && !tabsVisibles.includes(tabDia)) {
+            setTabDia(tabsVisibles.includes(tabDeHoy()) ? tabDeHoy() : tabsVisibles[0]);
+        }
+    }, [tabsVisibles, tabDia]);
 
     const cargarDatos = useCallback(async (mostrarLoader = false) => {
         if (mostrarLoader) setCargando(true);
@@ -366,15 +397,21 @@ export default function PanelScreen() {
             setChoferInfo(choferData as ChoferInfo);
             miIdChoferRef.current = (choferData as ChoferInfo).id;
 
-            // Las 3 tablas en paralelo: los apartados muestran contador y
-            // cambian al instante sin re-consultar.
-            const [sem, sab, esp] = await Promise.all(TIPOS_DIA.map(t => {
-                let q = supabase.from(TABLA_DIA[t]).select(colsDe(t)).eq('idChofer', choferData.id).order('orden', { ascending: true, nullsFirst: false });
-                if (t === 'SEMANA') q = q.eq('tab', diaHabilHoy());   // solo el día de HOY
-                return q;
-            }));
-            const normalizar = (rows: any[] | null) => (rows || []).map((r: any) => ({ ...r, entregadosFuera: r.entregadosFuera ?? 0 })) as Recorrido[];
-            setDataPorDia({ SEMANA: normalizar(sem.data as any), 'SÁBADOS': normalizar(sab.data as any), ESPECIALES: normalizar(esp.data as any) });
+            // Las 3 tablas en paralelo; los días hábiles se agrupan por `tab`.
+            const [rec, sab, esp] = await Promise.all([
+                supabase.from('Recorridos').select(COLS_REC).eq('idChofer', choferData.id).order('orden', { ascending: true, nullsFirst: false }),
+                supabase.from('recorridos_sabados').select(COLS_SAB).eq('idChofer', choferData.id).order('orden', { ascending: true, nullsFirst: false }),
+                supabase.from('recorridos_especiales').select(COLS_ESP).eq('idChofer', choferData.id).order('orden', { ascending: true, nullsFirst: false }),
+            ]);
+            const norm = (r: any): Recorrido => ({ ...r, entregadosFuera: r.entregadosFuera ?? 0, pendientes: r.pendientes ?? 0 });
+            const buckets = VACIO();
+            for (const r of ((rec.data as any[]) || [])) {
+                const t = (DIAS as string[]).includes(r.tab) ? (r.tab as TabDia) : 'LUNES';
+                buckets[t].push(norm(r));
+            }
+            buckets['SÁBADOS'] = ((sab.data as any[]) || []).map(norm);
+            buckets.ESPECIALES = ((esp.data as any[]) || []).map(norm);
+            setDataPorDia(buckets);
         } catch (err) {
             console.error('[Panel] Error:', err);
         } finally {
@@ -385,40 +422,22 @@ export default function PanelScreen() {
 
     useEffect(() => {
         cargarDatos(true);
-        // Un handler por tabla: cada evento actualiza SOLO su apartado.
-        // event:'*' para que las modificaciones de la web lleguen en vivo:
-        // alta, baja y reasignación de recorridos del chofer, no solo la edición.
-        const handlerDe = (tipo: TipoDia) => (payload: any) => {
+        // Con los días hábiles agrupados por `tab`, una fila puede caer en
+        // cualquier bucket; en vez de un merge quirúrgico por apartado,
+        // recargamos si el evento me toca a mí (alta/baja/edición/reasignación).
+        // Las consultas son chicas (rutas de un solo chofer).
+        const reloadSiEsMio = (payload: any) => {
             const miId = miIdChoferRef.current;
             if (miId == null) return;
-            const nuevo = payload.new as Recorrido;
-            const viejo = payload.old as Partial<Recorrido>;
-            const idRow = nuevo?.id ?? viejo?.id;
-            if (idRow == null) return;
-            const setLista = (fn: (prev: Recorrido[]) => Recorrido[]) =>
-                setDataPorDia(prev => ({ ...prev, [tipo]: fn(prev[tipo]) }));
-
-            if (payload.eventType === 'DELETE') {
-                setLista(prev => prev.filter(r => r.id !== idRow));
-                return;
-            }
-            if (nuevo.idChofer === miId) {
-                // Alta / reasignado a mí / edición de uno mío → upsert in-place.
-                const norm = { ...nuevo, entregadosFuera: nuevo.entregadosFuera ?? 0 };
-                setLista(prev => prev.some(r => r.id === nuevo.id)
-                    ? prev.map(r => r.id === nuevo.id ? { ...r, ...norm } : r)
-                    : [...prev, norm]
-                );
-            } else if (viejo.idChofer === miId) {
-                // Reasignado a otro chofer → sacarlo de mi lista.
-                setLista(prev => prev.filter(r => r.id !== idRow));
+            if (payload.eventType === 'DELETE' || payload.new?.idChofer === miId || payload.old?.idChofer === miId) {
+                cargarDatos();
             }
         };
         const channel = supabase
             .channel('panel-recorridos-sync')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'Recorridos' }, handlerDe('SEMANA'))
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'recorridos_sabados' }, handlerDe('SÁBADOS'))
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'recorridos_especiales' }, handlerDe('ESPECIALES'))
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'Recorridos' }, reloadSiEsMio)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'recorridos_sabados' }, reloadSiEsMio)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'recorridos_especiales' }, reloadSiEsMio)
             .subscribe();
         return () => { void supabase.removeChannel(channel); };
     }, [cargarDatos]);
@@ -463,11 +482,11 @@ export default function PanelScreen() {
     }, [intentarSync]);
 
     const handleGuardar = useCallback(async (id: number, campo: 'entregados' | 'entregadosFuera', valor: number) => {
-        // Tabla del apartado activo (via ref, sin stale closure).
-        const tipo = tabDiaRef.current;
-        const tabla = TABLA_DIA[tipo];
-        // 1. Actualización optimista inmediata (solo en el apartado activo)
-        setDataPorDia(prev => ({ ...prev, [tipo]: prev[tipo].map(r => r.id === id ? { ...r, [campo]: valor } : r) }));
+        // Tabla del día activo (via ref, sin stale closure).
+        const tab = tabDiaRef.current;
+        const tabla = tablaDeTab(tab);
+        // 1. Actualización optimista inmediata (solo en el día activo)
+        setDataPorDia(prev => ({ ...prev, [tab]: prev[tab].map(r => r.id === id ? { ...r, [campo]: valor } : r) }));
         setGuardandoCampo({ id, campo });
         try {
             const { error } = await supabase.from(tabla).update({ [campo]: valor }).eq('id', id);
@@ -523,7 +542,7 @@ export default function PanelScreen() {
         );
     }
 
-    const tabEsHoy = tabDia === tipoDeHoy();
+    const tabEsHoy = tabDia === tabDeHoy();
 
     return (
         <ScrollView style={[S.container, { backgroundColor: colors.bg }]} contentContainerStyle={S.content}
@@ -532,23 +551,22 @@ export default function PanelScreen() {
             <GreetingBox saludo={saludo} choferInfo={choferInfo}
                 totalPaquetes={totalPaquetes} totalEntregados={totalEntregadosTodo} progreso={progresoGlobal} />
 
-            {/* Apartados por tipo de día (Lun a Vie / Sábados / Especiales).
-                "Especiales" solo aparece si tiene rutas asignadas. */}
-            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-                {TIPOS_DIA
-                    .filter(t => t !== 'ESPECIALES' || dataPorDia.ESPECIALES.length > 0)
-                    .map(t => {
-                        const activo = tabDia === t;
-                        return (
-                            <TouchableOpacity key={t} onPress={() => setTabDia(t)} activeOpacity={0.8}
-                                style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1, backgroundColor: activo ? colors.blue : colors.bgInput, borderColor: activo ? colors.blue : colors.border }}>
-                                <Text style={{ fontSize: 12.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{LABEL_DIA[t]}{t === tipoDeHoy() ? ' · hoy' : ''}</Text>
-                                <View style={{ borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1, backgroundColor: activo ? 'rgba(255,255,255,0.22)' : colors.bg }}>
-                                    <Text style={{ fontSize: 10.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{dataPorDia[t].length}</Text>
-                                </View>
-                            </TouchableOpacity>
-                        );
-                    })}
+            {/* Pestañas POR DÍA (Lun..Vie / Sábados / Especiales): días hábiles con
+                rutas + el de hoy; Sábados si hay o es sábado; Especiales si hay. */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                {tabsVisibles.map(t => {
+                    const activo = tabDia === t;
+                    const esHoy = t === tabDeHoy();
+                    return (
+                        <TouchableOpacity key={t} onPress={() => setTabDia(t)} activeOpacity={0.8}
+                            style={{ flexGrow: 1, flexBasis: '30%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1, backgroundColor: activo ? colors.blue : colors.bgInput, borderColor: activo ? colors.blue : colors.border }}>
+                            <Text style={{ fontSize: 12.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{LABEL_DIA[t]}{esHoy ? ' · hoy' : ''}</Text>
+                            <View style={{ borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1, backgroundColor: activo ? 'rgba(255,255,255,0.22)' : colors.bg }}>
+                                <Text style={{ fontSize: 10.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{dataPorDia[t].length}</Text>
+                            </View>
+                        </TouchableOpacity>
+                    );
+                })}
             </View>
 
             {/* Banner offline: solo visible si hay cambios pendientes de sincronizar */}
@@ -705,6 +723,8 @@ const S = StyleSheet.create({
     filaLocalidad: { fontSize: 16, fontWeight: '700', marginBottom: 6 },
     zonaBadge: { alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1 },
     zonaText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
+    pendBadge: { alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.35)' },
+    pendText: { fontSize: 10, fontWeight: '700', color: '#F59E0B' },
     todoCompletoBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(52,211,153,0.1)', borderWidth: 1, borderColor: 'rgba(52,211,153,0.25)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
     todoCompletoBadgeText: { fontSize: 11, color: '#34D399', fontWeight: '700' },
     progressRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
