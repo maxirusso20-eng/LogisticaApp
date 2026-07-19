@@ -1,5 +1,6 @@
 // app/(drawer)/mis-envios.tsx
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -32,6 +33,7 @@ interface Envio {
     categoria: string | null;
     es_error: boolean;
     post21: boolean;
+    motivo: string | null;
     direccion: string | null;
     localidad: string | null;
     cliente: string | null;
@@ -47,17 +49,29 @@ const CAT: Record<CatKey, { icon: string; label: string; col: string }> = {
 };
 const catInfo = (k: string | null) => CAT[(k || '') as CatKey] || { icon: 'help-circle', label: k || '—', col: '#64748b' };
 
+// Subtipos de error (columna `motivo`) → chips propios en vez de un único "Errores".
+const MOTIVOS: Record<string, { icon: string; label: string; col: string }> = {
+    en_camino:    { icon: 'car',              label: 'En camino',   col: '#ef4444' },
+    nadie:        { icon: 'home',             label: 'Nadie +21h',  col: '#f59e0b' },
+    cancelado:    { icon: 'close-circle',     label: 'Cancelado +21h', col: '#a855f7' },
+    reprogramado: { icon: 'repeat',           label: 'Reprog. +21h', col: '#3b82f6' },
+};
+
 const CHIPS: { k: string; l: string; col: string }[] = [
     { k: 'todos', l: 'Todos', col: '#3b82f6' },
-    { k: 'error', l: '⚠️ Errores', col: CAT.error.col },
     { k: 'entregado', l: '✅ Entregados', col: CAT.entregado.col },
-    { k: 'pendiente', l: '📦 Pendientes', col: CAT.pendiente.col },
     { k: 'post21', l: '🌙 Post-21', col: '#a855f7' },
+    { k: 'en_camino', l: '🚚 En camino', col: MOTIVOS.en_camino.col },
+    { k: 'nadie', l: '🚪 Nadie +21h', col: MOTIVOS.nadie.col },
+    { k: 'cancelado', l: '🚫 Cancelado +21h', col: MOTIVOS.cancelado.col },
+    { k: 'reprogramado', l: '🔁 Reprog. +21h', col: MOTIVOS.reprogramado.col },
+    { k: 'pendiente', l: '📦 Pendientes', col: CAT.pendiente.col },
 ];
 const pasaChip = (r: Envio, chip: string) => {
     if (chip === 'todos') return true;
     if (chip === 'post21') return !!r.post21;
     if (chip === 'error') return !!r.es_error;
+    if (MOTIVOS[chip]) return r.motivo === chip;
     return r.categoria === chip;
 };
 // Los envíos sin tracking real llevan clave sintética (prefijo 'ST:'): no se muestra.
@@ -94,7 +108,7 @@ export default function MisEnviosScreen() {
             miNombreRef.current = chofer.nombre;
             const { data } = await supabase
                 .from('envios_registro')
-                .select('id, fecha, estado, categoria, es_error, post21, direccion, localidad, cliente, tracking, chofer')
+                .select('id, fecha, estado, categoria, es_error, post21, motivo, direccion, localidad, cliente, tracking, chofer')
                 .eq('chofer', chofer.nombre)
                 .order('fecha', { ascending: false })
                 .limit(1500); // tope de seguridad (pantalla "por día", recientes)
@@ -128,8 +142,13 @@ export default function MisEnviosScreen() {
     const filtrados = useMemo(() => registros.filter(r => pasaChip(r, chip)), [registros, chip]);
 
     const conteos = useMemo(() => {
-        const n: Record<string, number> = { todos: registros.length, entregado: 0, error: 0, pendiente: 0, post21: 0 };
-        for (const r of registros) { if (r.categoria && n[r.categoria] != null) n[r.categoria]++; if (r.post21) n.post21++; }
+        const n: Record<string, number> = { todos: registros.length, entregado: 0, error: 0, pendiente: 0, post21: 0,
+            en_camino: 0, nadie: 0, cancelado: 0, reprogramado: 0 };
+        for (const r of registros) {
+            if (r.categoria && n[r.categoria] != null) n[r.categoria]++;
+            if (r.post21) n.post21++;
+            if (r.motivo && n[r.motivo] != null) n[r.motivo]++;
+        }
         return n;
     }, [registros]);
 
@@ -145,6 +164,13 @@ export default function MisEnviosScreen() {
     const toggleDia = (fecha: string) => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setDiaAbierto(prev => prev === fecha ? null : fecha);
+    };
+
+    // Cambiar de chip: vibración sutil + transición animada de la lista.
+    const cambiarChip = (k: string) => {
+        Haptics.selectionAsync();
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setChip(k);
     };
 
     if (cargando) {
@@ -182,7 +208,7 @@ export default function MisEnviosScreen() {
                     const on = chip === m.k;
                     const n = conteos[m.k] ?? 0;
                     return (
-                        <TouchableOpacity key={m.k} onPress={() => setChip(m.k)} activeOpacity={0.8}
+                        <TouchableOpacity key={m.k} onPress={() => cambiarChip(m.k)} activeOpacity={0.8}
                             style={[S.chip, { backgroundColor: on ? m.col : colors.bgInput, borderColor: on ? m.col : colors.border }]}>
                             <Text style={[S.chipText, { color: on ? '#fff' : colors.textMuted }]}>{m.l} {n}</Text>
                         </TouchableOpacity>
