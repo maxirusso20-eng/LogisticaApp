@@ -71,11 +71,14 @@ export default function ClientesScreen() {
 
   // Realtime: si la web (u otra PC) manda colectas o cambia asignaciones, refrescar.
   useEffect(() => {
+    // Debounce: un import/edición masiva de Clientes → un solo refetch.
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const refrescar = () => { if (t) clearTimeout(t); t = setTimeout(() => cargar(), 600); };
     const canal = supabase.channel('clientes-app-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pantalla_clientes' }, () => cargar())
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'Clientes' }, () => cargar())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pantalla_clientes' }, refrescar)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'Clientes' }, refrescar)
       .subscribe();
-    return () => { void supabase.removeChannel(canal); };
+    return () => { if (t) clearTimeout(t); void supabase.removeChannel(canal); };
   }, [cargar]);
 
   const lista = useMemo(() => {

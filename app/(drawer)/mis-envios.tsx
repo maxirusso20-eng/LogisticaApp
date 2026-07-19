@@ -1,6 +1,6 @@
 // app/(drawer)/mis-envios.tsx
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     LayoutAnimation,
@@ -80,6 +80,8 @@ export default function MisEnviosScreen() {
     const [diaAbierto, setDiaAbierto] = useState<string | null>(null);
     const [miNombre, setMiNombre] = useState('');
     const [sinChofer, setSinChofer] = useState(false);
+    // Nombre en ref para que el handler del realtime no quede con closure viejo.
+    const miNombreRef = useRef('');
 
     const cargar = useCallback(async () => {
         try {
@@ -89,11 +91,13 @@ export default function MisEnviosScreen() {
                 .from('Choferes').select('nombre').eq('email', user.email).maybeSingle();
             if (!chofer?.nombre) { setSinChofer(true); setCargando(false); setRefrescando(false); return; }
             setMiNombre(chofer.nombre);
+            miNombreRef.current = chofer.nombre;
             const { data } = await supabase
                 .from('envios_registro')
-                .select('id, fecha, estado, categoria, es_error, post21, direccion, localidad, cliente, tracking')
+                .select('id, fecha, estado, categoria, es_error, post21, direccion, localidad, cliente, tracking, chofer')
                 .eq('chofer', chofer.nombre)
-                .order('fecha', { ascending: false });
+                .order('fecha', { ascending: false })
+                .limit(1500); // tope de seguridad (pantalla "por día", recientes)
             setRegistros((data as Envio[]) || []);
         } catch (err) {
             console.error('[MisEnvios]', err);
@@ -105,11 +109,20 @@ export default function MisEnviosScreen() {
 
     useEffect(() => {
         cargar();
+        // Solo recargar si el cambio es de MIS envíos, con debounce: un import
+        // inserta decenas de filas → un único refetch, no uno por cada fila.
+        let t: ReturnType<typeof setTimeout>;
+        const reloadSiEsMio = (payload: any) => {
+            const c = payload.new?.chofer ?? payload.old?.chofer;
+            const mio = miNombreRef.current;
+            if (c && mio && c !== mio) return;
+            clearTimeout(t); t = setTimeout(() => cargar(), 500);
+        };
         const canal = supabase
             .channel('envios-registro-app')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'envios_registro' }, () => cargar())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'envios_registro' }, reloadSiEsMio)
             .subscribe();
-        return () => { void supabase.removeChannel(canal); };
+        return () => { clearTimeout(t); void supabase.removeChannel(canal); };
     }, [cargar]);
 
     const filtrados = useMemo(() => registros.filter(r => pasaChip(r, chip)), [registros, chip]);
