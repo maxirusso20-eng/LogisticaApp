@@ -60,6 +60,8 @@ const pasaChip = (r: Envio, chip: string) => {
     if (chip === 'error') return !!r.es_error;
     return r.categoria === chip;
 };
+// Los envíos sin tracking real llevan clave sintética (prefijo 'ST:'): no se muestra.
+const trackingVisible = (t: string | null) => (t && !t.startsWith('ST:')) ? t : null;
 
 const DIAS_SEM = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -224,10 +226,10 @@ export default function MisEnviosScreen() {
                                                     <Text style={[S.lineaText, { color: colors.textMuted }]}>{r.direccion}{r.localidad ? ` · ${r.localidad}` : ''}</Text>
                                                 </View>
                                             )}
-                                            {!!r.tracking && (
+                                            {!!trackingVisible(r.tracking) && (
                                                 <View style={S.linea}>
                                                     <Ionicons name="cube-outline" size={12} color={colors.textMuted} />
-                                                    <Text style={[S.tracking, { color: colors.textMuted }]}>{r.tracking}</Text>
+                                                    <Text style={[S.tracking, { color: colors.textMuted }]}>{trackingVisible(r.tracking)}</Text>
                                                 </View>
                                             )}
                                         </View>
