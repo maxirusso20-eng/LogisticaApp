@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Keyboard,
   Platform,
   RefreshControl,
   ScrollView,
@@ -118,7 +119,7 @@ const TablaZona = React.memo<TablaZonaProps>(({ zona, datos, choferes, visible, 
   const color = ZONA_COLORES[zona];
   return (
     <View style={S.tablaContainer}>
-      <TouchableOpacity activeOpacity={0.75} onPress={() => onToggle(zona)} style={[S.zonaHeaderRow, { borderLeftColor: color }]}>
+      <TouchableOpacity activeOpacity={0.75} onPress={() => { Keyboard.dismiss(); onToggle(zona); }} style={[S.zonaHeaderRow, { borderLeftColor: color }]}>
         <Ionicons name={visible ? 'chevron-down' : 'chevron-forward'} size={14} color={color} style={{ marginRight: 8 }} />
         <Text style={[S.zonaHeader, { color }]}>{zona}</Text>
         <View style={[S.zonaBadge, { backgroundColor: color + '22', borderColor: color + '44' }]}>
@@ -490,7 +491,7 @@ export default function RecorridosScreen() {
       {/* Action bar — sin cambios */}
       <View style={S.actionBar}>
         <TouchableOpacity
-          onPress={() => setModalRecorrido(true)}
+          onPress={() => { Keyboard.dismiss(); setModalRecorrido(true); }}
           style={[S.btnAccion, { backgroundColor: colors.blue }]}
           activeOpacity={0.8}
         >
@@ -498,7 +499,7 @@ export default function RecorridosScreen() {
           <Text style={S.btnAccionTexto}>Recorrido</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          onPress={() => router.push('/(drawer)/personal' as any)}
+          onPress={() => { Keyboard.dismiss(); router.push('/(drawer)/personal' as any); }}
           style={[S.btnAccion, S.btnAccionSecundario, { backgroundColor: colors.blueSubtle, borderColor: `${colors.blue}4D` }]}
           activeOpacity={0.8}
         >
@@ -511,7 +512,7 @@ export default function RecorridosScreen() {
       <View style={[S.tabsContainer, { backgroundColor: isDark ? '#0d1526' : colors.bgCard, borderColor: colors.border, borderWidth: 1 }]}>
         <TouchableOpacity
           style={[S.tabBtn, tipoDia === 'semana' && { backgroundColor: isDark ? '#3b82f6' : '#4F8EF7' }]}
-          onPress={() => setTipoDia('semana')}
+          onPress={() => { Keyboard.dismiss(); setTipoDia('semana'); }}
           activeOpacity={0.8}
         >
           <Ionicons
@@ -525,7 +526,7 @@ export default function RecorridosScreen() {
 
         <TouchableOpacity
           style={[S.tabBtn, tipoDia === 'sabado' && { backgroundColor: isDark ? '#3b82f6' : '#4F8EF7' }]}
-          onPress={() => setTipoDia('sabado')}
+          onPress={() => { Keyboard.dismiss(); setTipoDia('sabado'); }}
           activeOpacity={0.8}
         >
           <Ionicons
