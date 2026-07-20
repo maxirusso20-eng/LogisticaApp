@@ -17,7 +17,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { ADMIN_EMAIL, APP_NAME } from '../../lib/constants';
+import { APP_NAME } from '../../lib/constants';
+import { esAdminRol, useRol, type Rol } from '../../lib/auth';
 import { forceStopTracking } from '../../lib/locationTracker';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -29,43 +30,29 @@ const lastSeenKey = (email: string) => `chat_last_seen_${email}`;
 
 // ─── Hooks de datos ───────────────────────────────────────────────────────────
 
-function useEsAdmin(): { esAdmin: boolean | null; miEmail: string } {
-  const [esAdmin, setEsAdmin] = useState<boolean | null>(null);
-  const [miEmail, setMiEmail] = useState('');
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const email = session?.user?.email ?? '';
-      if (email) { setMiEmail(email); setEsAdmin(email === ADMIN_EMAIL); }
-      else {
-        supabase.auth.getUser().then(({ data }) => {
-          const e = data.user?.email ?? '';
-          setMiEmail(e); setEsAdmin(e === ADMIN_EMAIL);
-        });
-      }
-    });
-  }, []);
-  return { esAdmin, miEmail };
-}
-
-function useNombreChofer(miEmail: string, esAdmin: boolean | null): string {
+// Trae el nombre del chofer logueado (solo cuando el rol es 'chofer').
+function useNombreChofer(miEmail: string, rol: Rol | null): string {
   const [nombre, setNombre] = useState('');
   useEffect(() => {
-    if (!miEmail || esAdmin !== false) return;
+    if (!miEmail || rol !== 'chofer') return;
     supabase.from('Choferes').select('nombre').eq('email', miEmail).maybeSingle()
       .then(({ data }) => { if (data?.nombre) setNombre(data.nombre); });
-  }, [miEmail, esAdmin]);
+  }, [miEmail, rol]);
   return nombre;
 }
 
 function useMensajesNoLeidos(
   miEmail: string,
-  esAdmin: boolean | null,
+  rol: Rol | null,
   isChatActive: boolean
 ): number {
   const [noLeidos, setNoLeidos] = useState(0);
+  // Del lado "admin" (admin/subadmin/coordinador) cuentan los mensajes que no son
+  // del propio Admin; del lado chofer, los que le mandó el Admin.
+  const ladoAdmin = rol !== 'chofer';
 
   const fetchCount = useCallback(async () => {
-    if (!miEmail || esAdmin === null) return;
+    if (!miEmail || rol === null) return;
     try {
       const lastSeen = await AsyncStorage.getItem(lastSeenKey(miEmail));
       const desde = lastSeen ?? new Date(0).toISOString();
@@ -74,7 +61,7 @@ function useMensajesNoLeidos(
         .select('id', { count: 'exact', head: true })
         .gt('created_at', desde)
         .neq('remitente', 'Sistema');
-      if (esAdmin) {
+      if (ladoAdmin) {
         query = query.neq('remitente', 'Admin');
       } else {
         query = query.eq('chofer_email', miEmail).eq('remitente', 'Admin');
@@ -82,7 +69,7 @@ function useMensajesNoLeidos(
       const { count } = await query;
       setNoLeidos(count ?? 0);
     } catch (err) { console.warn('[Badge]', err); }
-  }, [miEmail, esAdmin]);
+  }, [miEmail, rol, ladoAdmin]);
 
   useEffect(() => {
     if (!isChatActive || !miEmail) return;
@@ -159,59 +146,75 @@ function HeaderRight() {
 
 // ─── Drawer items ─────────────────────────────────────────────────────────────
 
-// Items agrupados por sección (estilo web). Cada grupo tiene un encabezado.
-const GRUPOS_ADMIN = [
+// Items agrupados por sección (estilo web). Cada ítem declara qué roles lo ven
+// (espeja Sidebar.jsx de la web). El menú se arma filtrando por el rol resuelto.
+type ItemMenu = { name: string; label: string; icon: string; route: string; color: string; roles: Rol[] };
+type GrupoMenu = { label: string; items: ItemMenu[] };
+
+const GRUPOS: GrupoMenu[] = [
   {
     label: 'OPERACIÓN', items: [
-      { name: 'index', label: 'Recorridos', icon: 'bus-outline', route: '/(drawer)/', color: '#4F8EF7' },
-      { name: 'clientes', label: 'Clientes', icon: 'business-outline', route: '/(drawer)/clientes', color: '#8B5CF6' },
-      { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas', color: '#F59E0B' },
-      { name: 'mapa', label: 'Mapa de Rutas', icon: 'map-outline', route: '/(drawer)/mapa', color: '#10B981' },
+      { name: 'index', label: 'Recorridos', icon: 'bus-outline', route: '/(drawer)/', color: '#4F8EF7', roles: ['admin', 'subadmin', 'coordinador'] },
+      { name: 'clientes', label: 'Clientes', icon: 'business-outline', route: '/(drawer)/clientes', color: '#8B5CF6', roles: ['admin', 'subadmin'] },
+      { name: 'colectas', label: 'Colectas de Hoy', icon: 'archive-outline', route: '/(drawer)/colectas', color: '#F59E0B', roles: ['admin', 'subadmin'] },
+      { name: 'mapa', label: 'Mapa de Rutas', icon: 'map-outline', route: '/(drawer)/mapa', color: '#10B981', roles: ['admin', 'subadmin', 'coordinador'] },
     ],
   },
   {
     label: 'EQUIPO Y KPIs', items: [
-      { name: 'personal', label: 'Choferes', icon: 'people-outline', route: '/(drawer)/personal', color: '#3B82F6' },
-      { name: 'estadisticas', label: 'Estadísticas', icon: 'bar-chart-outline', route: '/(drawer)/estadisticas', color: '#06B6D4' },
-      { name: 'demorados-dia', label: 'Demorados por día', icon: 'calendar-outline', route: '/(drawer)/demorados-dia', color: '#EF4444' },
-      { name: 'desempeno', label: 'Desempeño', icon: 'speedometer-outline', route: '/(drawer)/desempeno', color: '#A78BFA' },
-      { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking', color: '#F59E0B' },
-      { name: 'tabla-impacto', label: 'Impacto de cada ítem', icon: 'calculator-outline', route: '/(drawer)/tabla-impacto', color: '#EC4899' },
+      { name: 'personal', label: 'Choferes', icon: 'people-outline', route: '/(drawer)/personal', color: '#3B82F6', roles: ['admin', 'subadmin'] },
+      { name: 'estadisticas', label: 'Estadísticas', icon: 'bar-chart-outline', route: '/(drawer)/estadisticas', color: '#06B6D4', roles: ['admin', 'subadmin'] },
+      { name: 'demorados-dia', label: 'Demorados por día', icon: 'calendar-outline', route: '/(drawer)/demorados-dia', color: '#EF4444', roles: ['admin', 'subadmin'] },
+      { name: 'desempeno', label: 'Desempeño', icon: 'speedometer-outline', route: '/(drawer)/desempeno', color: '#A78BFA', roles: ['admin', 'subadmin'] },
+      { name: 'ranking', label: 'Ranking', icon: 'trophy-outline', route: '/(drawer)/ranking', color: '#F59E0B', roles: ['admin', 'subadmin'] },
+      { name: 'tabla-impacto', label: 'Impacto de cada ítem', icon: 'calculator-outline', route: '/(drawer)/tabla-impacto', color: '#EC4899', roles: ['admin', 'subadmin'] },
     ],
   },
   {
-    label: 'MÁS', items: [
-      { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat', color: '#34D399' },
-      { name: 'ayuda', label: 'Guía de la app', icon: 'book-outline', route: '/(drawer)/ayuda', color: '#94A3B8' },
+    label: 'GESTIÓN', items: [
+      { name: 'accesos', label: 'Accesos', icon: 'shield-checkmark-outline', route: '/(drawer)/accesos', color: '#8B5CF6', roles: ['admin', 'subadmin'] },
     ],
   },
-];
-const GRUPOS_CHOFER = [
   {
     label: 'MI DÍA', items: [
-      { name: 'Panel', label: 'Panel del Día', icon: 'clipboard-outline', route: '/(drawer)/Panel', color: '#4F8EF7' },
-      { name: 'colectas', label: 'Mis Colectas', icon: 'archive-outline', route: '/(drawer)/colectas', color: '#F59E0B' },
-      { name: 'mi-calendario', label: 'Mi Calendario', icon: 'calendar-outline', route: '/(drawer)/mi-calendario', color: '#8B5CF6' },
+      { name: 'Panel', label: 'Panel del Día', icon: 'clipboard-outline', route: '/(drawer)/Panel', color: '#4F8EF7', roles: ['chofer'] },
+      { name: 'colectas', label: 'Mis Colectas', icon: 'archive-outline', route: '/(drawer)/colectas', color: '#F59E0B', roles: ['chofer'] },
+      { name: 'mi-calendario', label: 'Mi Calendario', icon: 'calendar-outline', route: '/(drawer)/mi-calendario', color: '#8B5CF6', roles: ['chofer'] },
     ],
   },
   {
     label: 'MI DESEMPEÑO', items: [
-      { name: 'rendimiento', label: 'Mi Rendimiento', icon: 'stats-chart-outline', route: '/(drawer)/rendimiento', color: '#3B82F6' },
-      { name: 'mis-dias', label: 'Mi Día a Día', icon: 'calendar-outline', route: '/(drawer)/mis-dias', color: '#06B6D4' },
-      { name: 'mis-envios', label: 'Mis Envíos', icon: 'cube-outline', route: '/(drawer)/mis-envios', color: '#3B82F6' },
-      // "Ranking" oculto para el chofer por ahora (pedido). Reactivar: volver a agregar acá.
-      { name: 'mis-ausencias', label: 'Mis Faltas', icon: 'calendar-clear-outline', route: '/(drawer)/mis-ausencias', color: '#EF4444' },
+      { name: 'rendimiento', label: 'Mi Rendimiento', icon: 'stats-chart-outline', route: '/(drawer)/rendimiento', color: '#3B82F6', roles: ['chofer'] },
+      { name: 'mis-dias', label: 'Mi Día a Día', icon: 'calendar-outline', route: '/(drawer)/mis-dias', color: '#06B6D4', roles: ['chofer'] },
+      { name: 'mis-envios', label: 'Mis Envíos', icon: 'cube-outline', route: '/(drawer)/mis-envios', color: '#3B82F6', roles: ['chofer'] },
+      // "Ranking" oculto para el chofer por ahora (pedido). Reactivar: sumar roles ['chofer'].
+      { name: 'mis-ausencias', label: 'Mis Faltas', icon: 'calendar-clear-outline', route: '/(drawer)/mis-ausencias', color: '#EF4444', roles: ['chofer'] },
     ],
   },
   {
     label: 'MÁS', items: [
-      { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat', color: '#34D399' },
-      { name: 'como-usar', label: 'Cómo usar la app', icon: 'compass-outline', route: '/(drawer)/como-usar', color: '#6366F1' },
-      // "Cómo se mide" oculta por ahora (pedido). Para reactivarla, volver a
-      // agregar acá: { name: 'guia', label: 'Cómo se mide', icon: 'help-buoy-outline', route: '/(drawer)/guia', color: '#A78BFA' }.
+      { name: 'chat', label: 'Chat', icon: 'chatbubbles-outline', route: '/(drawer)/chat', color: '#34D399', roles: ['admin', 'subadmin', 'coordinador', 'chofer'] },
+      { name: 'ayuda', label: 'Guía de la app', icon: 'book-outline', route: '/(drawer)/ayuda', color: '#94A3B8', roles: ['admin', 'subadmin'] },
+      { name: 'como-usar', label: 'Cómo usar la app', icon: 'compass-outline', route: '/(drawer)/como-usar', color: '#6366F1', roles: ['chofer'] },
+      // "Cómo se mide" (guia) oculta por ahora (pedido).
     ],
   },
 ];
+
+// Arma los grupos visibles para un rol: filtra ítems y descarta grupos vacíos.
+function gruposParaRol(rol: Rol): GrupoMenu[] {
+  return GRUPOS
+    .map((g) => ({ ...g, items: g.items.filter((i) => i.roles.includes(rol)) }))
+    .filter((g) => g.items.length > 0);
+}
+
+// Config del badge de rol en el header del drawer (etiqueta + ícono + color).
+const ROL_BADGE: Record<Rol, { label: string; icon: keyof typeof Ionicons.glyphMap; color: 'amber' | 'blue' | 'cyan' }> = {
+  admin: { label: 'Administrador', icon: 'shield-checkmark-outline', color: 'amber' },
+  subadmin: { label: 'Subadmin', icon: 'shield-half-outline', color: 'amber' },
+  coordinador: { label: 'Coordinador', icon: 'clipboard-outline', color: 'cyan' },
+  chofer: { label: 'Chofer', icon: 'person-outline', color: 'blue' },
+};
 
 // ─── Collapsible Group ────────────────────────────────────────────────────────
 
@@ -308,15 +311,17 @@ function CollapsibleGroup({ label, items, currentRoute, noLeidosChat, colors, on
 
 function DrawerContent(props: any) {
   const router = useRouter();
-  const { esAdmin, miEmail } = useEsAdmin();
-  const nombreChofer = useNombreChofer(miEmail, esAdmin);
+  const { rol, miEmail } = useRol();
+  const nombreChofer = useNombreChofer(miEmail, rol);
   const { colors } = useTheme();
   const currentRoute = props.state?.routes[props.state?.index]?.name;
   const isChatActive = currentRoute === 'chat';
-  const noLeidosChat = useMensajesNoLeidos(miEmail, esAdmin, isChatActive);
+  const noLeidosChat = useMensajesNoLeidos(miEmail, rol, isChatActive);
 
-  if (esAdmin === null) return <View style={[drawerStyles.container, { backgroundColor: colors.bgDrawer }]} />;
-  const grupos = esAdmin ? GRUPOS_ADMIN : GRUPOS_CHOFER;
+  if (rol === null) return <View style={[drawerStyles.container, { backgroundColor: colors.bgDrawer }]} />;
+  const esAdmin = esAdminRol(rol);
+  const grupos = gruposParaRol(rol);
+  const rolCfg = ROL_BADGE[rol];
 
   return (
     <View style={[drawerStyles.container, { backgroundColor: colors.bgDrawer }]}>
@@ -343,21 +348,20 @@ function DrawerContent(props: any) {
         ) : null}
 
         <View style={drawerStyles.rolBadgeRow}>
-          <View style={[
-            drawerStyles.rolBadge,
-            esAdmin
-              ? { backgroundColor: 'rgba(245,158,11,0.1)', borderColor: 'rgba(245,158,11,0.25)' }
-              : { backgroundColor: colors.blueSubtle, borderColor: `${colors.blue}40` },
-          ]}>
-            <Ionicons
-              name={esAdmin ? 'shield-checkmark-outline' : 'person-outline'}
-              size={10}
-              color={esAdmin ? colors.amber : colors.blue}
-            />
-            <Text style={[drawerStyles.rolBadgeText, { color: esAdmin ? colors.amber : colors.blue }]}>
-              {esAdmin ? 'Administrador' : 'Chofer'}
-            </Text>
-          </View>
+          {(() => {
+            const badgeColor = rolCfg.color === 'amber' ? colors.amber : rolCfg.color === 'cyan' ? '#06B6D4' : colors.blue;
+            return (
+              <View style={[
+                drawerStyles.rolBadge,
+                { backgroundColor: `${badgeColor}1a`, borderColor: `${badgeColor}40` },
+              ]}>
+                <Ionicons name={rolCfg.icon} size={10} color={badgeColor} />
+                <Text style={[drawerStyles.rolBadgeText, { color: badgeColor }]}>
+                  {rolCfg.label}
+                </Text>
+              </View>
+            );
+          })()}
         </View>
       </View>
 
@@ -388,7 +392,7 @@ function DrawerContent(props: any) {
 // ─── Root Drawer Layout ───────────────────────────────────────────────────────
 
 export default function DrawerLayout() {
-  const { esAdmin } = useEsAdmin();
+  const { rol } = useRol();
   const { colors } = useTheme();
 
   // Registra/refresca el push token al entrar a la app, para CUALQUIER usuario
@@ -398,12 +402,12 @@ export default function DrawerLayout() {
   usePushTokenSync();
 
   useEffect(() => {
-    if (esAdmin !== null) SplashScreen.hideAsync();
-  }, [esAdmin]);
+    if (rol !== null) SplashScreen.hideAsync();
+  }, [rol]);
 
   // Splash de marca SIEMPRE navy (#1A2436, igual que el logo y el splash nativo)
   // → arranque premium y seamless, sin importar el tema.
-  if (esAdmin === null) {
+  if (rol === null) {
     return (
       <View style={[splashStyles.container, { backgroundColor: '#1A2436' }]}>
         <View style={[
@@ -426,7 +430,7 @@ export default function DrawerLayout() {
     );
   }
 
-  const rutaInicial = esAdmin ? 'index' : 'colectas';
+  const rutaInicial = rol === 'chofer' ? 'colectas' : 'index';
 
   return (
     <Drawer
@@ -466,66 +470,30 @@ export default function DrawerLayout() {
         overlayColor: 'rgba(0,0,0,0.45)',
       }}
     >
+      {/* La visibilidad del menú la controla el drawer custom (gruposParaRol);
+          acá solo se registran las rutas y su título de header. */}
       <Drawer.Screen name="index" options={{ title: 'Recorridos' }} />
       <Drawer.Screen name="personal" options={{ title: 'Equipo Logistico' }} />
       <Drawer.Screen name="mapa" options={{ title: 'Mapa de Rutas' }} />
       <Drawer.Screen name="colectas" options={{ title: 'Colectas de Hoy' }} />
       <Drawer.Screen name="chat" options={{ title: 'Chat' }} />
       <Drawer.Screen name="Panel" options={{ title: 'Panel del Dia' }} />
-      <Drawer.Screen
-        name="rendimiento"
-        options={{ title: 'Mi Rendimiento', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
-      />
+      <Drawer.Screen name="rendimiento" options={{ title: 'Mi Rendimiento' }} />
       <Drawer.Screen name="ranking" options={{ title: 'Ranking de la flota' }} />
-      <Drawer.Screen
-        name="estadisticas"
-        options={{ title: 'Estadísticas', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
-      />
-      <Drawer.Screen
-        name="demorados-dia"
-        options={{ title: 'Demorados por día', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
-      />
-      <Drawer.Screen
-        name="clientes"
-        options={{ title: 'Clientes', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
-      />
-      <Drawer.Screen
-        name="desempeno"
-        options={{ title: 'Desempeño', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
-      />
-      <Drawer.Screen
-        name="ausencias"
-        options={{ title: 'Ausencias', drawerItemStyle: { display: 'none' } }}
-      />
-      <Drawer.Screen
-        name="ayuda"
-        options={{ title: 'Guía de la app', drawerItemStyle: !esAdmin ? { display: 'none' } : undefined }}
-      />
-      <Drawer.Screen
-        name="mis-ausencias"
-        options={{ title: 'Mis Faltas', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
-      />
-      <Drawer.Screen
-        name="mis-dias"
-        options={{ title: 'Mi Día a Día', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
-      />
-      <Drawer.Screen
-        name="mis-envios"
-        options={{ title: 'Mis Envíos', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
-      />
-      <Drawer.Screen
-        name="mi-calendario"
-        options={{ title: 'Mi Calendario', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
-      />
-      <Drawer.Screen
-        name="guia"
-        options={{ title: 'Cómo se mide' }}
-      />
+      <Drawer.Screen name="estadisticas" options={{ title: 'Estadísticas' }} />
+      <Drawer.Screen name="demorados-dia" options={{ title: 'Demorados por día' }} />
+      <Drawer.Screen name="clientes" options={{ title: 'Clientes' }} />
+      <Drawer.Screen name="desempeno" options={{ title: 'Desempeño' }} />
+      <Drawer.Screen name="accesos" options={{ title: 'Gestión de Accesos' }} />
+      <Drawer.Screen name="ausencias" options={{ title: 'Ausencias', drawerItemStyle: { display: 'none' } }} />
+      <Drawer.Screen name="ayuda" options={{ title: 'Guía de la app' }} />
+      <Drawer.Screen name="mis-ausencias" options={{ title: 'Mis Faltas' }} />
+      <Drawer.Screen name="mis-dias" options={{ title: 'Mi Día a Día' }} />
+      <Drawer.Screen name="mis-envios" options={{ title: 'Mis Envíos' }} />
+      <Drawer.Screen name="mi-calendario" options={{ title: 'Mi Calendario' }} />
+      <Drawer.Screen name="guia" options={{ title: 'Cómo se mide' }} />
       <Drawer.Screen name="tabla-impacto" options={{ title: 'Impacto de cada ítem' }} />
-      <Drawer.Screen
-        name="como-usar"
-        options={{ title: 'Cómo usar la app', drawerItemStyle: esAdmin ? { display: 'none' } : undefined }}
-      />
+      <Drawer.Screen name="como-usar" options={{ title: 'Cómo usar la app' }} />
     </Drawer>
   );
 }

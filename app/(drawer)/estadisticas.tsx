@@ -16,9 +16,11 @@ import {
 } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
+import { useRoleGuard } from '../_hooks/useRoleGuard';
 
 export default function EstadisticasScreen() {
   const { colors } = useTheme();
+  const { autorizado, verificando } = useRoleGuard('admin');
   const [registros, setRegistros] = useState<any[]>([]);
   const [ausencias, setAusencias] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,6 +93,8 @@ export default function EstadisticasScreen() {
   );
 
   const refresh = <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); cargar(); }} tintColor={colors.blue} />;
+
+  if (verificando || !autorizado) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
 
   if (loading) {
     return (

@@ -14,6 +14,17 @@
 // ─────────────────────────────────────────────
 
 export const ADMIN_EMAIL = process.env.EXPO_PUBLIC_ADMIN_EMAIL ?? 'maxirusso20@gmail.com';
+
+// Lista de admins "dueños" (fijos, no se pueden bajar). Espeja ADMIN_EMAILS de
+// la web (src/components/shared/AuthContext.jsx). Cualquier otro admin/subadmin
+// se gestiona desde la tabla roles_usuarios (pantalla Accesos), sin tocar código.
+export const ADMIN_EMAILS = [ADMIN_EMAIL];
+
+// Dominio de los conductores: cualquier x@hogareno.com es chofer automáticamente.
+export const DOMINIO_CONDUCTORES = '@hogareno.com';
+export const esEmailConductor = (email?: string | null): boolean =>
+  (email || '').toString().trim().toLowerCase().endsWith(DOMINIO_CONDUCTORES);
+
 export const APP_NAME = process.env.EXPO_PUBLIC_APP_NAME ?? 'Logística Hogareño';
 export const APP_TAGLINE = process.env.EXPO_PUBLIC_APP_TAGLINE ?? 'Panel de Control · Área Logística';
 export const APP_VERSION = process.env.EXPO_PUBLIC_APP_VERSION ?? '1.0.0';

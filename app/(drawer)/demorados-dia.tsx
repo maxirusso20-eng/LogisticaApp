@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
+import { useRoleGuard } from '../_hooks/useRoleGuard';
 
 // Motivos de demorado (mismo orden y textos que la web).
 const MOTIVOS = [
@@ -44,6 +45,7 @@ const fechaCorta = (iso: string) => {
 
 export default function DemoradosDiaScreen() {
   const { colors } = useTheme();
+  const { autorizado, verificando } = useRoleGuard('admin');
   const [registros, setRegistros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -134,6 +136,8 @@ export default function DemoradosDiaScreen() {
       ))}
     </View>
   );
+
+  if (verificando || !autorizado) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
 
   if (loading) {
     return (

@@ -1,23 +1,27 @@
 // app/_hooks/useRoleGuard.ts
 //
-// Hook que protege pantallas que deberían ser solo para admin.
-// Si un chofer no-admin intenta acceder (por deep link, notificación,
-// o bug de navegación), se redirige a su pantalla de Panel.
+// Hook que protege pantallas según el ROL del usuario (modelo de 4 roles,
+// espejo de la web). Si el rol resuelto no está permitido (por deep link,
+// notificación o bug de navegación), redirige a la pantalla que le corresponde.
+//
+// Roles: admin | subadmin | coordinador | chofer  (ver lib/auth.ts)
 //
 // USO:
-//   export default function PantallaAdmin() {
-//     const { autorizado, verificando } = useRoleGuard('admin');
-//     if (verificando) return <LoaderPantalla />;
-//     if (!autorizado) return null; // el hook ya redirigió
-//     return <MiContenidoAdmin />;
-//   }
+//   const { autorizado, verificando } = useRoleGuard('admin'); // admin + subadmin
+//   const { autorizado, verificando } = useRoleGuard(['admin','subadmin','coordinador']);
+//   if (verificando) return <Loader />;
+//   if (!autorizado) return null; // el hook ya redirigió
 
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ADMIN_EMAIL } from '../../lib/constants';
+import { resolveRol, type Rol } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 
-type Rol = 'admin' | 'chofer' | 'ambos';
+// Alias de compatibilidad + lista explícita de roles.
+//   'admin'  → admin + subadmin   (los subadmins mantienen el acceso)
+//   'chofer' → solo chofer
+//   'ambos'  → cualquier sesión autenticada
+type GuardArg = 'admin' | 'chofer' | 'ambos' | Rol[];
 
 interface RoleGuardResult {
   /** true = puede ver la pantalla; false = redirigido o sin sesión */
@@ -26,19 +30,32 @@ interface RoleGuardResult {
   verificando: boolean;
   /** email del usuario actual (null si no hay sesión) */
   email: string | null;
+  /** rol resuelto (null mientras verifica / sin sesión) */
+  rol: Rol | null;
 }
 
-/**
- * Protege una pantalla según el rol requerido.
- *
- * @param rolRequerido 'admin' = solo admin; 'chofer' = solo NO-admin;
- *                     'ambos' = cualquier sesión (admin o chofer)
- */
-export function useRoleGuard(rolRequerido: Rol = 'admin'): RoleGuardResult {
+function permitidosDe(arg: GuardArg): Rol[] | 'todos' {
+  if (arg === 'ambos') return 'todos';
+  if (arg === 'admin') return ['admin', 'subadmin'];
+  if (arg === 'chofer') return ['chofer'];
+  return arg;
+}
+
+// A dónde mandar a alguien sin acceso, según su rol real.
+function destinoPara(rol: Rol | null): string {
+  return rol === 'chofer' ? '/(drawer)/colectas' : '/(drawer)/';
+}
+
+export function useRoleGuard(rolRequerido: GuardArg = 'admin'): RoleGuardResult {
   const router = useRouter();
   const [autorizado, setAutorizado] = useState(false);
   const [verificando, setVerificando] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
+  const [rol, setRol] = useState<Rol | null>(null);
+
+  // Clave estable: si el caller pasa un array inline (nueva referencia por
+  // render) el efecto no debe re-dispararse en loop.
+  const reqKey = Array.isArray(rolRequerido) ? rolRequerido.join(',') : rolRequerido;
 
   useEffect(() => {
     let activo = true;
@@ -52,25 +69,21 @@ export function useRoleGuard(rolRequerido: Rol = 'admin'): RoleGuardResult {
         setEmail(mail);
 
         if (!mail) {
-          // Sin sesión → al login
           setAutorizado(false);
           router.replace('/login' as any);
           return;
         }
 
-        const esAdmin = mail === ADMIN_EMAIL;
+        const rolResuelto = await resolveRol(session);
+        if (!activo) return;
+        setRol(rolResuelto);
 
-        if (rolRequerido === 'admin' && !esAdmin) {
-          // Chofer intentando entrar a pantalla de admin → al Panel
-          setAutorizado(false);
-          router.replace('/(drawer)/Panel' as any);
-          return;
-        }
+        const permitidos = permitidosDe(rolRequerido);
+        const ok = permitidos === 'todos' || (rolResuelto != null && permitidos.includes(rolResuelto));
 
-        if (rolRequerido === 'chofer' && esAdmin) {
-          // Admin en pantalla solo-chofer → al home
+        if (!ok) {
           setAutorizado(false);
-          router.replace('/(drawer)' as any);
+          router.replace(destinoPara(rolResuelto) as any);
           return;
         }
 
@@ -88,15 +101,14 @@ export function useRoleGuard(rolRequerido: Rol = 'admin'): RoleGuardResult {
 
     verificar();
     return () => { activo = false; };
-  }, [rolRequerido, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reqKey, router]);
 
-  return { autorizado, verificando, email };
+  return { autorizado, verificando, email, rol };
 }
 
-// Default export vacío para silenciar el warning de Expo Router.
-// Expo Router trata los archivos dentro de app/ como rutas potenciales.
-// Aunque el prefijo _ debería hacer que lo ignore, en algunas versiones
-// igual tira warning. Este default export lo silencia sin afectar nada.
+// Default export vacío para silenciar el warning de Expo Router (trata los
+// archivos dentro de app/ como rutas potenciales aunque tengan prefijo _).
 export default function _HooksRouteIgnore() {
   return null;
 }

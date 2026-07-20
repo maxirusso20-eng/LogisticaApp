@@ -11,6 +11,7 @@ import {
   AVISOS, NEGATIVOS, PESO_PUNTO, POSITIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { useTheme } from '../../lib/ThemeContext';
+import { useRoleGuard } from '../_hooks/useRoleGuard';
 
 const KPI_FACTORES = [
   { label: 'En camino al destinatario', detalle: 'Demorado grave: quedó en ruta', valor: -0.5 },
@@ -21,6 +22,7 @@ const KPI_FACTORES = [
 
 export default function TablaImpactoScreen() {
   const { colors } = useTheme();
+  const { autorizado, verificando } = useRoleGuard('admin');
 
   const colorValor = (v: number) => (v > 0 ? colors.green : v < 0 ? colors.red : colors.textMuted);
   const fmtSigno = (v: number) => `${v > 0 ? '+' : ''}${v}%`;
@@ -52,6 +54,8 @@ export default function TablaImpactoScreen() {
       {children}
     </View>
   );
+
+  if (verificando || !autorizado) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
 
   return (
     <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={{ padding: 16, paddingTop: 18 }}>

@@ -13,6 +13,7 @@ import {
 import { AVISOS, CAMPOS_MANUALES, NEGATIVOS } from '../../lib/desempeno';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
+import { useRoleGuard } from '../_hooks/useRoleGuard';
 
 const hoyLocal = () => new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD local
 const ceros = (): Record<string, number> => Object.fromEntries(CAMPOS_MANUALES.map((k) => [k, 0]));
@@ -28,6 +29,7 @@ const fmtFecha = (iso: string) => {
 
 export default function DesempenoScreen() {
   const { colors } = useTheme();
+  const { autorizado, verificando } = useRoleGuard('admin');
   const [choferes, setChoferes] = useState<string[]>([]);
   const [registros, setRegistros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,6 +100,8 @@ export default function DesempenoScreen() {
       </View>
     </View>
   );
+
+  if (verificando || !autorizado) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
 
   return (
     <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
