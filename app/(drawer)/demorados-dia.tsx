@@ -22,8 +22,6 @@ const MOTIVOS = [
   { campo: 'nadie', icon: '🚪', label: 'nadie en domicilio +21h' },
   { campo: 'cancelado', icon: '🚫', label: 'cancelado +21h' },
   { campo: 'reprogramado', icon: '🔁', label: 'reprogramado +21h' },
-  { campo: 'noEntregado', icon: '📦', label: 'no entregado (regla vieja)' },
-  { campo: 'otros', icon: '❔', label: 'sin detalle (import viejo)' },
 ] as const;
 
 type Dia = {
