@@ -11,6 +11,7 @@ import {
   ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { AVISOS, CAMPOS_MANUALES, NEGATIVOS } from '../../lib/desempeno';
+import { fetchTodo } from '../../lib/fetchTodo';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
@@ -42,7 +43,7 @@ export default function DesempenoScreen() {
 
   const cargar = useCallback(async () => {
     try {
-      const { data } = await supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false });
+      const data = await fetchTodo((d, h) => supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false }).range(d, h));
       setRegistros(data || []);
       const { data: ch } = await supabase.from('Choferes').select('nombre').order('nombre');
       setChoferes((ch || []).map((c: any) => c.nombre).filter(Boolean));

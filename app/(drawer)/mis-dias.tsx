@@ -14,6 +14,7 @@ import {
 import {
   acumularPorChofer, calcularNotaUnificada, colorDesempeno, filtrarPeriodo, fmtPct, type Periodo,
 } from '../../lib/desempeno';
+import { fetchTodo } from '../../lib/fetchTodo';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 
@@ -51,7 +52,7 @@ export default function MisDiasScreen() {
         const { data } = await supabase.from('Choferes').select('nombre').eq('email', email).maybeSingle();
         setMiNombre(data?.nombre || '');
       }
-      const { data: kpis } = await supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false });
+      const kpis = await fetchTodo((d, h) => supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false }).range(d, h));
       setRegistros(kpis || []);
     } catch (e) {
       console.warn('[mis-dias] error', e);

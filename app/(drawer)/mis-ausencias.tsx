@@ -10,6 +10,7 @@ import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View }
 import {
   AVISOS, penalidadAusencia,
 } from '../../lib/desempeno';
+import { fetchTodo } from '../../lib/fetchTodo';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
@@ -46,7 +47,7 @@ export default function MisAusenciasScreen() {
         const { data } = await supabase.from('ausencias').select('*').eq('chofer', nombre)
           .order('fecha', { ascending: false }).order('hora', { ascending: false });
         setAusencias(data || []);
-        const { data: k } = await supabase.from('kpis_lightdata').select('*').eq('chofer', nombre).order('fecha', { ascending: false });
+        const k = await fetchTodo((d, h) => supabase.from('kpis_lightdata').select('*').eq('chofer', nombre).order('fecha', { ascending: false }).range(d, h));
         setKpis(k || []);
       } else {
         setAusencias([]); setKpis([]);

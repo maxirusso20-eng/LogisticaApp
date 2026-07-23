@@ -15,6 +15,7 @@ import {
   acumularPorChofer, calcularNotaUnificada,
   colorDesempeno, type ChoferKpi, cumpleSLA, filtrarMesActual, fmtPct, AVISOS, NEGATIVOS, penalidadAusencias, penalAusenciasPorChofer, POSITIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
+import { fetchTodo } from '../../lib/fetchTodo';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 
@@ -38,7 +39,7 @@ export default function RendimientoScreen() {
         nombre = data?.nombre || '';
       }
       setMiNombre(nombre);
-      const { data: kpis } = await supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false });
+      const kpis = await fetchTodo((d, h) => supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false }).range(d, h));
       setRegistros(kpis || []);
       const { data: aus } = await supabase.from('ausencias').select('*');
       setAusencias(aus || []);

@@ -14,6 +14,7 @@ import {
   acumularPorChofer, calcularNotaUnificada,
   type ChoferKpi, colorDesempeno, demoradosTotal, fmtPct, penalAusenciasPorChofer,
 } from '../../lib/desempeno';
+import { fetchTodo } from '../../lib/fetchTodo';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
@@ -35,8 +36,8 @@ export default function RankingScreen() {
         const { data } = await supabase.from('Choferes').select('nombre').eq('email', email).maybeSingle();
         setMiNombre((data?.nombre || '').trim().toLowerCase());
       }
-      const [{ data: kpis }, { data: aus }] = await Promise.all([
-        supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false }),
+      const [kpis, { data: aus }] = await Promise.all([
+        fetchTodo((d, h) => supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false }).range(d, h)),
         supabase.from('ausencias').select('*'),
       ]);
       setRegistros(kpis || []);

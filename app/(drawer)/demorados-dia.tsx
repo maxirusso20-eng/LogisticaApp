@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
+import { fetchTodo } from '../../lib/fetchTodo';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
@@ -53,7 +54,7 @@ export default function DemoradosDiaScreen() {
 
   const cargar = useCallback(async () => {
     try {
-      const { data } = await supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false });
+      const data = await fetchTodo((d, h) => supabase.from('kpis_lightdata').select('*').order('fecha', { ascending: false }).range(d, h));
       setRegistros(data || []);
     } catch (e) {
       console.warn('[demorados-dia] error', e);
