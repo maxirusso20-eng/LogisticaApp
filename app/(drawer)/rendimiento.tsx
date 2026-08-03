@@ -76,7 +76,11 @@ export default function RendimientoScreen() {
     // NOTA ÚNICA (modelo v3, espejo de la web): demorados + conducta + avisos
     // + ausencias impactan el mismo %.
     const porChofer = acumularPorChofer(filtrarMesActual(registros));
-    const penalMap = penalAusenciasPorChofer(ausencias);
+    // Las ausencias van al MISMO mes que los KPIs. Estaban sin filtrar: una
+    // falta de junio le seguía restando en la nota de agosto y el mes nunca
+    // arrancaba de cero, así que la nota de la app quedaba por debajo de la de
+    // la web. La web ya lo filtra (filtrarPeriodo(ausencias, periodo)).
+    const penalMap = penalAusenciasPorChofer(filtrarMesActual(ausencias));
     return Object.values(porChofer)
       .map((k): ChoferKpi => {
         const nota = calcularNotaUnificada({ ...k, penalAusencias: penalMap[k.chofer] || 0 });
@@ -151,7 +155,10 @@ export default function RendimientoScreen() {
   const rep = yo.reputacion as number | null;
   const barColor = colorDesempeno(rep);
 
-  const misAusencias = ausencias.filter((a) => (a.chofer || '').trim().toLowerCase() === miNombre.trim().toLowerCase());
+  // Del MES actual, igual que la nota de arriba: si no, el detalle mostraba
+  // faltas de meses viejos que ya no le están restando.
+  const misAusencias = filtrarMesActual(ausencias)
+    .filter((a) => (a.chofer || '').trim().toLowerCase() === miNombre.trim().toLowerCase());
   const penalAus = penalidadAusencias(misAusencias);
   // Conducta (modelo v3): ya está INCLUIDA en la nota de arriba — acá solo se
   // muestran los chips del detalle, no una nota aparte (espejo de la web).
