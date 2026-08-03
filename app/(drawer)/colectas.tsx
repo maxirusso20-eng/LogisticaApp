@@ -1,11 +1,7 @@
 // app/(drawer)/colectas.tsx
 import { Ionicons } from '@expo/vector-icons';
-import { BottomSheetBackdrop, BottomSheetModal } from '@gorhom/bottom-sheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
-import { Image } from 'expo-image';
-import * as ImageManipulator from 'expo-image-manipulator';
-import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -23,7 +19,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import SignatureScreen from 'react-native-signature-canvas';
 import { ADMIN_EMAIL, getSaludo } from '../../lib/constants';
 import { startTracking, stopTracking } from '../../lib/locationTracker';
 import { SkeletonColectaCard } from '../../lib/skeleton';
@@ -36,24 +31,6 @@ const ignorarNotificacionesCache = new Map<string, number>();
 const CACHE_TTL_MS = 5_000;
 const ORS_URL = 'https://api.openrouteservice.org/geocode/search';
 const ORS_API_KEY = process.env.EXPO_PUBLIC_ORS_KEY || '';
-
-/**
- * Reduce fotos a 1024px de ancho + JPEG 75% antes de subir a Supabase.
- * Antes: ~2-4MB por foto con cámara moderna (quality 0.7 no hace resize real)
- * Ahora: ~150-300KB por foto — reducción de ~85% de storage.
- */
-async function comprimirImagen(uri: string): Promise<string> {
-  try {
-    const result = await ImageManipulator.manipulateAsync(
-      uri,
-      [{ resize: { width: 1024 } }],
-      { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    return result.uri;
-  } catch {
-    return uri;
-  }
-}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -207,64 +184,6 @@ const agruparPorChofer = (lista: Cliente[]): GrupoChofer[] => {
     .sort((a, b) => { const ap = a.total - a.hechas; const bp = b.total - b.hechas; return bp !== ap ? bp - ap : a.nombre.localeCompare(b.nombre); });
 };
 
-// ─── FotoColecta ──────────────────────────────────────────────────────────────
-
-function FotoColecta({ clienteId, fotoUrl, vencida, done }: {
-  clienteId: number | string; fotoUrl: string | null; vencida: boolean; done: boolean; emailChofer: string; clienteNombre: string;
-}) {
-  const { colors } = useTheme();
-  const [subiendo, setSubiendo] = React.useState(false);
-  const [fotoLocal, setFotoLocal] = React.useState<string | null>(fotoUrl);
-  React.useEffect(() => { setFotoLocal(fotoUrl); }, [fotoUrl]);
-
-  const sacarFoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Sin permiso', 'Necesitás permitir el acceso a la cámara.'); return; }
-    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 1, allowsEditing: false });
-    if (result.canceled || !result.assets[0]) return;
-    setSubiendo(true);
-    try {
-      // Comprimir antes de subir: 1024px + JPEG 75% → ~150-300KB
-      const uriComprimida = await comprimirImagen(result.assets[0].uri);
-      const blob = await (await fetch(uriComprimida)).blob();
-      const filePath = `colectas/${String(clienteId)}_${Date.now()}.jpg`;
-      const { error: ue } = await supabase.storage.from('fotos-colectas').upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
-      if (ue) throw ue;
-      const { data: ud } = supabase.storage.from('fotos-colectas').getPublicUrl(filePath);
-      const { error: upd } = await supabase.rpc('chofer_marcar_colecta', { p_id: Number(clienteId), p_foto_url: ud.publicUrl });
-      if (upd) throw upd;
-      setFotoLocal(ud.publicUrl);
-    } catch (err: any) { Alert.alert('Error', err?.message || 'No se pudo subir la foto.'); }
-    finally { setSubiendo(false); }
-  };
-
-  return (
-    <View style={ST.fotoContainer}>
-      {fotoLocal ? (
-        <View>
-          <Text style={[ST.fotoLabel, { color: colors.textMuted }]}>{done ? '📸 Foto de entrega' : '📸 Justificación'}</Text>
-          <Image
-            source={{ uri: fotoLocal }}
-            style={[ST.fotoPreview, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
-            contentFit="cover"
-            transition={200}
-          />
-          <TouchableOpacity style={ST.fotoBtnReemplazar} onPress={sacarFoto} disabled={subiendo} activeOpacity={0.75}>
-            <Ionicons name="camera-outline" size={13} color={colors.textMuted} />
-            <Text style={[ST.fotoBtnReemplazarText, { color: colors.textMuted }]}>Reemplazar foto</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <TouchableOpacity style={[ST.fotoBtnSacar, { backgroundColor: colors.blue }, vencida && !done && { backgroundColor: '#EF4444' }]} onPress={sacarFoto} disabled={subiendo} activeOpacity={0.8}>
-          {subiendo ? <ActivityIndicator size="small" color="#FFFFFF" /> : (
-            <><Ionicons name="camera" size={16} color="#FFFFFF" /><Text style={ST.fotoBtnText}>{vencida && !done ? 'Justificar colecta no realizada' : 'Foto de entrega'}</Text></>
-          )}
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-}
-
 // ─── ColectaCard (Chofer) ─────────────────────────────────────────────────────
 
 function ColectaCard({ item, index, onToggle, toggling, esDeHoy }: {
@@ -328,91 +247,6 @@ function ColectaCard({ item, index, onToggle, toggling, esDeHoy }: {
         )}
       </View>
     </Animated.View>
-  );
-}
-
-// ─── FirmaColecta ─────────────────────────────────────────────────────────────
-
-function FirmaColecta({ clienteId, firmaUrl, vencida, done }: {
-  clienteId: number | string; firmaUrl: string | null; vencida: boolean; done: boolean;
-}) {
-  const { colors } = useTheme();
-  const [subiendo, setSubiendo] = useState(false);
-  const [firmaLocal, setFirmaLocal] = useState<string | null>(firmaUrl);
-  const sheetRef = useRef<BottomSheetModal>(null);
-
-  useEffect(() => { setFirmaLocal(firmaUrl); }, [firmaUrl]);
-
-  const snapPoints = useMemo(() => ['65%', '90%'], []);
-  const renderBackdrop = useCallback((props: any) => <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} opacity={0.6} />, []);
-
-  const handleSignature = async (signature: string) => {
-    sheetRef.current?.dismiss();
-    setSubiendo(true);
-    try {
-      const blob = await (await fetch(signature)).blob();
-      const filePath = `firmas/${String(clienteId)}_${Date.now()}.png`;
-      const { error: ue } = await supabase.storage.from('firmas-colectas').upload(filePath, blob, { contentType: 'image/png', upsert: true });
-      if (ue) throw ue;
-      const { data: ud } = supabase.storage.from('firmas-colectas').getPublicUrl(filePath);
-      const { error: upd } = await supabase.rpc('chofer_marcar_colecta', { p_id: Number(clienteId), p_firma_url: ud.publicUrl });
-      if (upd) throw upd;
-      setFirmaLocal(ud.publicUrl);
-    } catch (err: any) {
-      Alert.alert('Error', err?.message || 'No se pudo subir la firma.');
-    } finally {
-      setSubiendo(false);
-    }
-  };
-
-  return (
-    <View style={ST.fotoContainer}>
-      {firmaLocal ? (
-        <View>
-          <Text style={[ST.fotoLabel, { color: colors.textMuted }]}>✍️ Firma del cliente</Text>
-          <Image source={{ uri: firmaLocal }} style={[ST.fotoPreview, { backgroundColor: colors.bgInput, borderColor: colors.border }]} contentFit="contain" transition={200} />
-          <TouchableOpacity style={ST.fotoBtnReemplazar} onPress={() => sheetRef.current?.present()} disabled={subiendo}>
-            <Ionicons name="create-outline" size={13} color={colors.textMuted} />
-            <Text style={[ST.fotoBtnReemplazarText, { color: colors.textMuted }]}>Nueva firma</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <TouchableOpacity style={[ST.fotoBtnSacar, { backgroundColor: colors.bgInput, borderWidth: 1, borderColor: colors.blue }]} onPress={() => sheetRef.current?.present()} disabled={subiendo || (vencida && !done)}>
-          {subiendo ? <ActivityIndicator size="small" color={colors.blue} /> : (
-            <><Ionicons name="pencil" size={16} color={colors.blue} /><Text style={[ST.fotoBtnText, { color: colors.blue }]}>Pedir Firma</Text></>
-          )}
-        </TouchableOpacity>
-      )}
-
-      <BottomSheetModal
-        ref={sheetRef}
-        index={1}
-        snapPoints={snapPoints}
-        backdropComponent={renderBackdrop}
-        backgroundStyle={{ backgroundColor: colors.bgCard }}
-        handleIndicatorStyle={{ backgroundColor: colors.borderSubtle }}
-        enablePanDownToClose
-      >
-        <View style={{ flex: 1, padding: 10 }}>
-          <Text style={{ textAlign: 'center', marginBottom: 10, fontSize: 16, fontWeight: 'bold', color: colors.textPrimary }}>Firma del Cliente</Text>
-          <SignatureScreen
-            onOK={handleSignature}
-            onEmpty={() => Alert.alert('Aviso', 'La firma no puede estar vacía')}
-            descriptionText=""
-            clearText="Borrar"
-            confirmText="Guardar"
-            webStyle={`
-              .m-signature-pad { box-shadow: none; border: 1.5px solid ${colors.border}; border-radius: 14px; }
-              body { background-color: transparent; }
-              .m-signature-pad--body { background-color: ${colors.bgInput}; border-radius: 12px; overflow: hidden; }
-              .m-signature-pad--footer { padding: 15px 10px; margin-top: 10px; }
-              .button { background-color: ${colors.blue}; color: #fff; padding: 10px 20px; border-radius: 10px; font-weight: bold; border: none; font-size: 14px;}
-              .button.clear { background-color: transparent; border: 1.5px solid ${colors.border}; color: ${colors.textPrimary}; }
-            `}
-          />
-        </View>
-      </BottomSheetModal>
-    </View>
   );
 }
 
