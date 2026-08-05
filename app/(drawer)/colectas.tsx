@@ -80,13 +80,26 @@ type FiltroColecta = 'todas' | 'pendientes' | 'completadas';
 // Las colectas se separan en APARTADOS por tipo de día (Lun a Vie / Sábados /
 // Especiales) para que no se mezclen en una misma lista. tipo_dia null/'' cuenta
 // como SEMANA, igual que la pantalla Clientes de la web.
-type TipoDia = 'SEMANA' | 'SÁBADOS' | 'ESPECIALES';
-const normTipo = (td?: string | null): TipoDia => {
-  const t = (td || '').toString().trim().toUpperCase();
-  return t === 'SÁBADOS' ? 'SÁBADOS' : t === 'ESPECIALES' ? 'ESPECIALES' : 'SEMANA';
-};
+// El apartado es texto libre: ademas de los 3 base, el admin puede crear los
+// suyos y cada uno necesita su propia pestana.
+type TipoDia = string;
+// ⚠️ Devuelve el apartado TAL CUAL. Antes mandaba a SEMANA todo lo que no
+// fuera SÁBADOS/ESPECIALES, asi que un apartado nuevo del admin le aparecia al
+// chofer DENTRO de 'Lun a Vie', mezclado con las colectas reales de ese dia.
+const normTipo = (td?: string | null): TipoDia =>
+  (td || '').toString().trim().toUpperCase() || 'SEMANA';
 const tipoDeHoy = (): TipoDia => (new Date().getDay() === 6 ? 'SÁBADOS' : 'SEMANA');
-const LABEL_TIPO: Record<TipoDia, string> = { SEMANA: 'Lun a Vie', 'SÁBADOS': 'Sábados', ESPECIALES: 'Especiales' };
+const LABEL_BASE: Record<string, string> = { SEMANA: 'Lun a Vie', 'SÁBADOS': 'Sábados', ESPECIALES: 'Especiales' };
+const labelDe = (k: string) => LABEL_BASE[k] || k;
+// Orden: los 3 base primero, los custom despues (alfabetico).
+const ordenarApartados = (ks: string[]) => {
+  const base = ['SEMANA', 'SÁBADOS', 'ESPECIALES'];
+  return [...ks].sort((a, b) => {
+    const ia = base.indexOf(a), ib = base.indexOf(b);
+    if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    return a.localeCompare(b, 'es');
+  });
+};
 
 // El chofer solo puede MARCAR colectas como entregadas a partir de esta hora
 // (reloj local). Evita marcados accidentales a la mañana. La barrera REAL está
@@ -373,12 +386,12 @@ const VistaAdmin: React.FC<{ clientes: Cliente[]; refrescando: boolean; onRefres
       </View>
       {/* Selector Lun a Vie / Sábados / Especiales (como la web) */}
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-        {(['SEMANA', 'SÁBADOS', 'ESPECIALES'] as TipoDia[]).map(t => {
+        {ordenarApartados([...new Set(clientes.map(c => normTipo(c.tipo_dia)))]).map(t => {
           const activo = tabDia === t;
           return (
             <TouchableOpacity key={t} onPress={() => setTabDia(t)} activeOpacity={0.8}
               style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', borderWidth: 1, backgroundColor: activo ? colors.blue : colors.bgInput, borderColor: activo ? colors.blue : colors.border }}>
-              <Text style={{ fontSize: 12.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{LABEL_TIPO[t]}</Text>
+              <Text style={{ fontSize: 12.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{labelDe(t)}</Text>
             </TouchableOpacity>
           );
         })}
@@ -572,6 +585,10 @@ export default function ColectasScreen() {
         setClientes(prev => prev.filter(c => c.id !== eliminado.id));
         if (!esAdminRef.current) notificarCambioDesdecentral({ tipo: 'DELETE', clienteNombre: eliminado.cliente });
       })
+      // Prender o apagar un apartado desde la web tiene que verse EN EL ACTO en
+      // la app del chofer, sin que tenga que recargar. Se recarga entero porque
+      // el cambio afecta a todas sus colectas, no a una fila.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'apartados_visibles' }, () => { void fetchClientes(); })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [fetchClientes]);
@@ -636,8 +653,8 @@ export default function ColectasScreen() {
   const colectasTab = useMemo(() => clientes.filter(c => normTipo(c.tipo_dia) === tabDia), [clientes, tabDia]);
   const tabEsHoy = tabDia === tipoDeHoy();
   const conteos = useMemo(() => {
-    const n: Record<TipoDia, number> = { SEMANA: 0, 'SÁBADOS': 0, ESPECIALES: 0 };
-    for (const c of clientes) n[normTipo(c.tipo_dia)] += 1;
+    const n: Record<string, number> = { SEMANA: 0, 'SÁBADOS': 0, ESPECIALES: 0 };
+    for (const c of clientes) { const k = normTipo(c.tipo_dia); n[k] = (n[k] || 0) + 1; }
     return n;
   }, [clientes]);
   const totalHechas = colectasTab.filter(c => c.completado).length;
@@ -663,11 +680,11 @@ export default function ColectasScreen() {
       refreshControl={<RefreshControl refreshing={refrescando} onRefresh={handleRefresh} tintColor={colors.blue} colors={[colors.blue]} />}>
       <View style={[ST.greetingBox, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
         <View style={ST.greetingTopRow}>
-          <Text style={[ST.greetingEyebrow, { color: colors.blue }]}>{tabEsHoy ? 'COLECTAS DE HOY' : `COLECTAS · ${LABEL_TIPO[tabDia].toUpperCase()}`}</Text>
+          <Text style={[ST.greetingEyebrow, { color: colors.blue }]}>{tabEsHoy ? 'COLECTAS DE HOY' : `COLECTAS · ${labelDe(tabDia).toUpperCase()}`}</Text>
         </View>
         <Text style={[ST.greetingTitle, { color: colors.textPrimary }]}>{saludo}, {nombreUsuario || 'chofer'} 👋</Text>
         <Text style={[ST.greetingSubtitle, { color: colors.textMuted }]}>
-          {colectasTab.length === 0 ? `No tenés colectas de ${LABEL_TIPO[tabDia]}.` : totalPendientes === 0 ? '¡Todo completado! Excelente trabajo. ✅' : `Tenés ${totalPendientes} colecta${totalPendientes !== 1 ? 's' : ''} pendiente${totalPendientes !== 1 ? 's' : ''} de ${LABEL_TIPO[tabDia]}.`}
+          {colectasTab.length === 0 ? `No tenés colectas de ${labelDe(tabDia)}.` : totalPendientes === 0 ? '¡Todo completado! Excelente trabajo. ✅' : `Tenés ${totalPendientes} colecta${totalPendientes !== 1 ? 's' : ''} pendiente${totalPendientes !== 1 ? 's' : ''} de ${labelDe(tabDia)}.`}
         </Text>
       </View>
 
@@ -681,7 +698,7 @@ export default function ColectasScreen() {
             return (
               <TouchableOpacity key={t} onPress={() => setTabDia(t)} activeOpacity={0.8}
                 style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1, backgroundColor: activo ? colors.blue : colors.bgInput, borderColor: activo ? colors.blue : colors.border }}>
-                <Text style={{ fontSize: 12.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{LABEL_TIPO[t]}{t === tipoDeHoy() ? ' · hoy' : ''}</Text>
+                <Text style={{ fontSize: 12.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{labelDe(t)}{t === tipoDeHoy() ? ' · hoy' : ''}</Text>
                 <View style={{ borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1, backgroundColor: activo ? 'rgba(255,255,255,0.22)' : colors.bg }}>
                   <Text style={{ fontSize: 10.5, fontWeight: '800', color: activo ? '#fff' : colors.textMuted }}>{conteos[t]}</Text>
                 </View>
@@ -736,7 +753,7 @@ export default function ColectasScreen() {
       </View>
 
       {filtrados.length === 0 && colectasTab.length === 0
-        ? <View style={ST.emptyState}><Ionicons name="bed-outline" size={52} color={colors.borderSubtle} /><Text style={[ST.emptyTitle, { color: colors.textMuted }]}>{tabEsHoy ? 'Hoy no tenés colectas asignadas.' : `No tenés colectas de ${LABEL_TIPO[tabDia]}.`}</Text><Text style={[ST.emptySubtitle, { color: colors.textMuted }]}>{tabEsHoy ? '¡Buen descanso!' : 'Cuando te asignen, aparecen acá.'}</Text></View>
+        ? <View style={ST.emptyState}><Ionicons name="bed-outline" size={52} color={colors.borderSubtle} /><Text style={[ST.emptyTitle, { color: colors.textMuted }]}>{tabEsHoy ? 'Hoy no tenés colectas asignadas.' : `No tenés colectas de ${labelDe(tabDia)}.`}</Text><Text style={[ST.emptySubtitle, { color: colors.textMuted }]}>{tabEsHoy ? '¡Buen descanso!' : 'Cuando te asignen, aparecen acá.'}</Text></View>
         : filtrados.length === 0
           ? <View style={ST.emptyState}><Ionicons name="search-outline" size={48} color={colors.borderSubtle} /><Text style={[ST.emptyTitle, { color: colors.textMuted }]}>Sin resultados</Text><Text style={[ST.emptySubtitle, { color: colors.textMuted }]}>Probá con otro filtro o búsqueda.</Text></View>
           : filtrados.map((c, i) => <ColectaCard key={c.id} item={c} index={i} onToggle={handleToggle} toggling={toggling.has(c.id)} esDeHoy={tabEsHoy} />)
