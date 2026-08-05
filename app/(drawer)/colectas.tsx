@@ -19,6 +19,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { cargarApartadosVisibles, filtrarVisibles } from '../../lib/apartadosVisibles';
 import { ADMIN_EMAIL, getSaludo } from '../../lib/constants';
 import { startTracking, stopTracking } from '../../lib/locationTracker';
 import { SkeletonColectaCard } from '../../lib/skeleton';
@@ -500,11 +501,14 @@ export default function ColectasScreen() {
       } catch { const fb = user.user_metadata?.full_name || user.email.split('@')[0]; setNombre(fb.split(' ')[0]); }
       let query = supabase.from('Clientes').select('id, cliente, direccion, horario, chofer, completado, foto_url, firma_url, email_chofer, tipo_dia').order('horario', { ascending: true });
       if (!esAdminRef.current) query = query.eq('email_chofer', user.email);
-      const { data, error } = await query;
+      const [{ data, error }, visibles] = await Promise.all([query, cargarApartadosVisibles()]);
       if (error) throw error;
       // Se cargan TODAS (los 3 tipos de día): la vista del chofer y la del
       // admin separan por pestañas Lun a Vie / Sábados / Especiales.
-      setClientes(data || []);
+      // ⚠️ Antes se filtra por apartado VISIBLE, sobre el tipo_dia CRUDO: si no,
+      // un apartado nuevo cae en SEMANA por normTipo y se ve duplicado en
+      // 'Lun a Vie' (paso con PLANIFICACION NUEVA). El admin ve todo.
+      setClientes(esAdminRef.current ? (data || []) : filtrarVisibles(data || [], visibles));
     } catch (err) { console.error('Error cargando clientes:', err); }
     finally { setCargando(false); setRefrescando(false); }
   }, []);

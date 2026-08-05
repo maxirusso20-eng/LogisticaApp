@@ -8,9 +8,25 @@
 
 export const PESO_PUNTO = 0.1;
 
-// SLA: una nota cumple si es >= 90%.
-export const SLA_MINIMO = 90;
-export const cumpleSLA = (pct: number | null) => pct != null && pct >= SLA_MINIMO;
+// La exigencia subió de 90% a 92% a partir de AGOSTO 2026. Los meses anteriores
+// se siguen midiendo con 90: recalcularlos hoy pondría en rojo a un chofer por
+// una regla que en ese momento no existía. Espejo de utils/desempeno.js.
+export const SLA_DESDE = [
+  { desde: '2026-08', minimo: 92 },
+  { desde: '0000-00', minimo: 90 },
+];
+export const SLA_MINIMO = 92;
+
+// Mínimo que aplica a una fecha ('YYYY-MM-DD') o mes ('YYYY-MM'). Sin fecha → el vigente.
+export function slaDe(fecha?: string | null): number {
+  const s = String(fecha ?? '');
+  const ym = /^d{4}-d{2}/.test(s) ? s.slice(0, 7) : null;
+  if (!ym) return SLA_MINIMO;
+  return (SLA_DESDE.find(r => ym >= r.desde) || { minimo: 90 }).minimo;
+}
+
+export const cumpleSLA = (pct: number | null, fecha?: string | null) =>
+  pct != null && pct >= slaDe(fecha);
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 export const fmtPct = (n: number | null) =>
@@ -221,6 +237,12 @@ export function calcularNotaUnificada(k: ChoferKpi) {
   const demorados = demoradosTotal(k);
   const demGrave = k.demEnCamino || 0;                   // "en camino al destinatario" → −0,5%
   const demLeve = Math.max(0, demorados - demGrave);     // nadie/cancelado/reprogramado +21 → −0,2%
+  // PERDONADOS: un demorado justificado SIGUE contado (ocurrió y se muestra en
+  // todos lados); solo deja de pesar en la NOTA. Espejo de utils/desempeno.js.
+  const perdGrave = Math.min(demGrave, (k as any).perdonadosEnCamino || 0);
+  const perdLeve = Math.min(demLeve, (k as any).perdonadosLeves || 0);
+  const graveCobrado = Math.max(0, demGrave - perdGrave);
+  const leveCobrado = Math.max(0, demLeve - perdLeve);
   const neutroConObs = k.neutroConObs || 0;              // PENDIENTES con observación → +0,1%
   const entregasPost21 = k.entregas_post21 || 0;         // solo informativo
   const positivos = POSITIVOS.reduce((s, i) => s + (k[i.key] || 0), 0);
@@ -256,11 +278,11 @@ export function calcularNotaUnificada(k: ChoferKpi) {
 }
 
 // Semáforo de notas (espejo de la web, pedido 2026-07-08):
-//   verde ≥ 97% · naranja 90–96.99% · rojo < 90%
-export function colorDesempeno(score: number | null): string {
+//   verde ≥ 97% · naranja desde el mínimo · rojo < mínimo (92% desde 08/2026, 90% antes)
+export function colorDesempeno(score: number | null, fecha?: string | null): string {
   if (score == null) return '#64748b';
   if (score >= 97) return '#10b981';
-  if (score >= 90) return '#f59e0b';
+  if (score >= slaDe(fecha)) return '#f59e0b';
   return '#ef4444';
 }
 
