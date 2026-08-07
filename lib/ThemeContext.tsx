@@ -11,6 +11,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { Appearance } from 'react-native';
 
 // ─── Paleta ───────────────────────────────────────────────────────────────────
 
@@ -146,6 +147,21 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const toggleTheme = useCallback(() => {
     setTheme(!isDark);
   }, [isDark, setTheme]);
+
+  // ⚠️ Los diálogos NATIVOS (Alert.alert, el permiso de notificaciones, los
+  // pickers) NO leen este contexto: leen la apariencia del proceso. Con
+  // `userInterfaceStyle: "automatic"` en app.json esa apariencia sale del TEMA
+  // DEL TELÉFONO, así que con el celular en oscuro y la app puesta en claro
+  // salían negros — el "Acceso denegado" del login y el pedido de permiso de
+  // notificaciones eran los dos casos que se veían.
+  //
+  // `Appearance.setColorScheme` fuerza la apariencia del proceso a la del
+  // toggle de la app, y con eso los nativos acompañan. Va en un efecto (no en
+  // el render) porque es un side effect del framework.
+  useEffect(() => {
+    if (!hydrated) return;
+    Appearance.setColorScheme(isDark ? 'dark' : 'light');
+  }, [isDark, hydrated]);
 
   // No renderizar hasta hidratar para evitar flash
   if (!hydrated) return null;
