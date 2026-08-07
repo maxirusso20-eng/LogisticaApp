@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import { AVISOS, CAMPOS_MANUALES, NEGATIVOS } from '../../lib/desempeno';
+import { AVISOS, CAMPOS_MANUALES, NEGATIVOS, PESO_PUNTO } from '../../lib/desempeno';
 import { fetchTodo } from '../../lib/fetchTodo';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../lib/ThemeContext';
@@ -85,9 +85,17 @@ export default function DesempenoScreen() {
     return <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: 'center' }}><ActivityIndicator color={colors.blue} /></View>;
   }
 
-  const Fila = ({ k, label, positivo }: { k: string; label: string; positivo: boolean }) => (
+  // `peso` solo cuando NO es el −0,1% de la sección: sin esto "No traer
+  // pendientes" (−1%) se ve igual que "Saltearse paquetes" y quien carga no
+  // tiene forma de saber que uno pesa diez veces más.
+  const Fila = ({ k, label, positivo, peso }: { k: string; label: string; positivo: boolean; peso?: number }) => (
     <View style={[styles.fila, { borderColor: colors.borderSubtle }]}>
-      <Text style={{ flex: 1, fontSize: 12.5, color: colors.textSecondary }}>{label}</Text>
+      <Text style={{ flex: 1, fontSize: 12.5, color: colors.textSecondary }}>
+        {label}
+        {peso != null && peso !== PESO_PUNTO && (
+          <Text style={{ color: colors.red, fontWeight: '800' }}>  −{peso}%</Text>
+        )}
+      </Text>
       <View style={styles.stepper}>
         <TouchableOpacity onPress={() => setVal(k, -1)} style={[styles.stepBtn, { backgroundColor: colors.bgInput }]}>
           <Ionicons name="remove" size={16} color={colors.textMuted} />
@@ -143,7 +151,7 @@ export default function DesempenoScreen() {
             <Ionicons name="trending-down" size={15} color={colors.red} />
             <Text style={{ fontSize: 12.5, fontWeight: '800', color: colors.red }}>Errores ({totalNegativos})</Text>
           </View>
-          {NEGATIVOS.map((i) => <Fila key={i.key} k={i.key} label={i.label} positivo={false} />)}
+          {NEGATIVOS.map((i) => <Fila key={i.key} k={i.key} label={i.label} positivo={false} peso={i.peso} />)}
 
           {/* ── Avisos (faltas: no recorrido / no colecta, por franja horaria) ── */}
           <View style={[styles.secHead, { marginTop: 18 }]}>

@@ -32,14 +32,19 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 export const fmtPct = (n: number | null) =>
   n == null || Number.isNaN(n) ? '—' : `${Number(n).toFixed(2)}%`;
 
-type Indicador = { key: string; label: string };
+// `peso` OPCIONAL: si no está, vale PESO_PUNTO (−0,1%), que es el caso de casi
+// todos. Se agregó al sumar "No traer pendientes", que pesa −1%.
+type Indicador = { key: string; label: string; peso?: number };
 
 // ── Indicadores que SUMAN al desempeño ─────────────────────────────────────
 // Eliminados: hoy NADA suma al desempeño. Lo de "subir observaciones" pasó al
 // KPI (demorado con/sin observación). Export vacío para no romper imports.
 export const POSITIVOS: Indicador[] = [];
 
-// ── Indicadores que RESTAN al desempeño (−0,1% c/u) ────────────────────────
+// ── Indicadores que RESTAN al desempeño ────────────────────────────────────
+// Casi todos pesan −0,1% (PESO_PUNTO); el que declara `peso` usa el suyo.
+// ⚠️ `negativos` es el CONTEO de marcas y `penalNegativos` los puntos: desde que
+// hay pesos distintos ya no se puede sacar uno del otro multiplicando por 0,1.
 export const NEGATIVOS: Indicador[] = [
   { key: 'salteados', label: 'Saltearse paquetes' },
   { key: 'llego_tarde', label: 'Impuntual colecta' },
@@ -53,7 +58,19 @@ export const NEGATIVOS: Indicador[] = [
   { key: 'error_mapeo', label: 'Error mapeo' },
   { key: 'mal_marcado_flex', label: 'Mal marcado flex' },
   { key: 'impuntual_recorrido', label: 'Impuntual recorrido' },
+  // No devolvió a la Logística los paquetes que no entregó. Pesa −1% (no −0,1%)
+  // porque el paquete queda fuera de circulación: no se puede reintentar ni
+  // devolver al comercio.
+  { key: 'no_trae_pendientes', label: 'No traer pendientes', peso: 1.0 },
 ];
+
+// Cuánto pesa cada indicador negativo. Los que no declaran `peso` valen 0,1%.
+export const pesoNegativo = (ind: Indicador) => ind.peso ?? PESO_PUNTO;
+
+// Puntos que resta la carga manual de negativos, en % ya listo para restar.
+// UNA sola fuente: la usan la nota unificada y el desglose de conducta.
+export const penalNegativosDe = (k: Record<string, any>) =>
+  r2(NEGATIVOS.reduce((s, i) => s + (k[i.key] || 0) * pesoNegativo(i), 0));
 
 // ── Avisos (pesos variables: no entran en NEGATIVOS porque no todos son 0,1%) ─
 type Aviso = { key: string; label: string; peso: number };
@@ -214,18 +231,21 @@ export function calcularRendimientoKPI(k: ChoferKpi) {
 }
 
 // ── Card 2: DESEMPEÑO ──────────────────────────────────────────────────────
-// Arranca en 100. Cada positivo +0,1; cada negativo −0,1. Tope 100, piso 0.
+// Arranca en 100. Cada positivo +0,1. Los negativos restan su peso: −0,1% casi
+// todos, −1% "No traer pendientes". Tope 100, piso 0.
 // Los avisos restan según su peso individual (0,1 / 0,5 / 2,0).
 // Las ausencias restan aparte (k.penalAusencias, ya en puntos %).
 export function calcularDesempenoConducta(k: ChoferKpi) {
   const positivos = POSITIVOS.reduce((s, i) => s + (k[i.key] || 0), 0);
+  // `negativos` es el CONTEO de marcas; `penalNegativos` los puntos.
   const negativos = NEGATIVOS.reduce((s, i) => s + (k[i.key] || 0), 0);
+  const penalNegativos = penalNegativosDe(k as any);
   const penalAusencias = k.penalAusencias || 0;
   const penalAvisos = r2(AVISOS.reduce((s, a) => s + (k[a.key] || 0) * a.peso, 0));
   const score = r2(Math.max(0, Math.min(100,
-    100 + (positivos - negativos) * PESO_PUNTO - penalAusencias - penalAvisos
+    100 + positivos * PESO_PUNTO - penalNegativos - penalAusencias - penalAvisos
   )));
-  return { score, positivos, negativos, penalAusencias, penalAvisos, cumpleSLA: cumpleSLA(score) };
+  return { score, positivos, negativos, penalNegativos, penalAusencias, penalAvisos, cumpleSLA: cumpleSLA(score) };
 }
 
 // ── NOTA ÚNICA (modelo v3, 2026-07-16 — espejo de la web) ──────────────────
@@ -246,7 +266,9 @@ export function calcularNotaUnificada(k: ChoferKpi) {
   const neutroConObs = k.neutroConObs || 0;              // PENDIENTES con observación → +0,1%
   const entregasPost21 = k.entregas_post21 || 0;         // solo informativo
   const positivos = POSITIVOS.reduce((s, i) => s + (k[i.key] || 0), 0);
+  // Conteo de marcas vs. puntos que restan: con pesos distintos no coinciden.
   const negativos = NEGATIVOS.reduce((s, i) => s + (k[i.key] || 0), 0);
+  const penalNegativos = penalNegativosDe(k as any);
   const penalAusencias = k.penalAusencias || 0;
   const penalAvisos = r2(AVISOS.reduce((s, a) => s + (k[a.key] || 0) * a.peso, 0));
   const avisosCant = AVISOS.reduce((s, a) => s + (k[a.key] || 0), 0);
@@ -261,7 +283,7 @@ export function calcularNotaUnificada(k: ChoferKpi) {
         - demLeve * 0.2
         + neutroConObs * 0.1
         + positivos * PESO_PUNTO
-        - negativos * PESO_PUNTO
+        - penalNegativos
         - penalAvisos
         - penalAusencias
       )))
@@ -272,7 +294,7 @@ export function calcularNotaUnificada(k: ChoferKpi) {
 
   return {
     pct, demorados, demGrave, demLeve, neutroConObs, entregasPost21, pctObservacion,
-    positivos, negativos, penalAusencias, penalAvisos, avisosCant,
+    positivos, negativos, penalNegativos, penalAusencias, penalAvisos, avisosCant,
     cumpleSLA: cumpleSLA(pct),
   };
 }

@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import {
   acumularPorChofer, calcularNotaUnificada,
-  colorDesempeno, type ChoferKpi, cumpleSLA, filtrarMesActual, fmtPct, AVISOS, NEGATIVOS, penalidadAusencias, penalAusenciasPorChofer, POSITIVOS, SLA_MINIMO,
+  colorDesempeno, type ChoferKpi, cumpleSLA, filtrarMesActual, fmtPct, AVISOS, NEGATIVOS, pesoNegativo, penalidadAusencias, penalAusenciasPorChofer, POSITIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { fetchTodo } from '../../lib/fetchTodo';
 import { supabase } from '../../lib/supabase';
@@ -249,7 +249,9 @@ export default function RendimientoScreen() {
             ))}
             {desempNeg.map((i) => (
               <View key={i.key} style={[styles.tag, { backgroundColor: colors.red + '18', borderColor: colors.red + '44' }]}>
-                <Text style={[styles.tagText, { color: colors.red }]}>✗ {i.label} ({yo[i.key]}) −{((yo[i.key] || 0) * 0.1).toFixed(2)}%</Text>
+                {/* El peso sale del indicador, NO del 0,1 fijo: "No traer
+                    pendientes" resta −1% y acá se mostraba 10× menos. */}
+                <Text style={[styles.tagText, { color: colors.red }]}>✗ {i.label} ({yo[i.key]}) −{((yo[i.key] || 0) * pesoNegativo(i)).toFixed(2)}%</Text>
               </View>
             ))}
             {desempAvisos.map((i) => (

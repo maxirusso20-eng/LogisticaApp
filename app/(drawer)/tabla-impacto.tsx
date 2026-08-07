@@ -8,7 +8,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  AVISOS, NEGATIVOS, PESO_PUNTO, POSITIVOS, SLA_MINIMO,
+  AVISOS, NEGATIVOS, PESO_PUNTO, pesoNegativo, POSITIVOS, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { useTheme } from '../../lib/ThemeContext';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
@@ -87,8 +87,8 @@ export default function TablaImpactoScreen() {
         </Card>
       )}
 
-      <Card icon="trending-down-outline" color={colors.red} titulo="Desempeño · Restan" sub={`Cada error resta −${PESO_PUNTO.toFixed(1)}%.`}>
-        {NEGATIVOS.map((i) => <Fila key={i.key} label={i.label} valor={-PESO_PUNTO} />)}
+      <Card icon="trending-down-outline" color={colors.red} titulo="Desempeño · Restan" sub={`Cada error resta −${PESO_PUNTO.toFixed(1)}%, salvo los que indican otro peso.`}>
+        {NEGATIVOS.map((i) => <Fila key={i.key} label={i.label} valor={-pesoNegativo(i)} />)}
       </Card>
 
       <Card icon="time-outline" color={colors.amber} titulo="Desempeño · Avisos" sub="No colectar / no salir en recorrido. Cuanto más tarde, más resta.">

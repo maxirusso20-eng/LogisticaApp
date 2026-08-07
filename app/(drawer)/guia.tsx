@@ -8,7 +8,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
-  AVISOS, NEGATIVOS, SLA_MINIMO,
+  AVISOS, NEGATIVOS, PESO_PUNTO, SLA_MINIMO,
 } from '../../lib/desempeno';
 import { useTheme } from '../../lib/ThemeContext';
 import { useRoleGuard } from '../_hooks/useRoleGuard';
@@ -74,11 +74,18 @@ export default function GuiaScreen() {
 
       {/* Negativos */}
       <Card color={colors.red}>
-        <Title icon="trending-down-outline" text="Restan (−0,1% c/u)" color={colors.red} />
+        <Title icon="trending-down-outline" text="Restan (−0,1% c/u salvo los marcados)" color={colors.red} />
         {NEGATIVOS.map((i) => (
           <View key={i.key} style={styles.liRow}>
             <Ionicons name="remove-circle" size={15} color={colors.red} />
-            <Text style={[styles.li, { color: colors.textSecondary }]}>{i.label}</Text>
+            <Text style={[styles.li, { color: colors.textSecondary }]}>
+              {i.label}
+              {/* Solo el que pesa distinto al título: así se ve de una cuál
+                  cuesta más, en vez de asumir que todos valen igual. */}
+              {i.peso != null && i.peso !== PESO_PUNTO && (
+                <Text style={{ color: colors.red, fontWeight: '800' }}>  −{i.peso}%</Text>
+              )}
+            </Text>
           </View>
         ))}
       </Card>
